@@ -29,9 +29,13 @@ module Locentra
 
         private
 
+        # Bloqueios temporários de orçamentos ainda não convertidos são internos ao orçamento: o cliente
+        # é avisado pelo e-mail do orçamento, não por e-mails de reserva.
         def reservation_event(tx, event, template)
           reservation = @reservations.find(tx, event["aggregate_id"])
-          customer = reservation && @customers.find(tx, reservation.customer_id)
+          return if reservation.nil? || (reservation.source == "quote" && reservation.quote_id.nil?)
+
+          customer = @customers.find(tx, reservation.customer_id)
           return unless customer&.email
 
           deliver(tx, event, template, customer, "code" => reservation.code, "starts_at" => reservation.period.starts_at.iso8601,

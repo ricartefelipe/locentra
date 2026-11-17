@@ -74,4 +74,15 @@ class QuotesContractsWorkerTest < DatabaseTest
     assert_includes contract_mail[:text], "10/03/2026 05:00"
     assert_includes subjects, "Reserva #{reservation.code} confirmada"
   end
+
+  def test_released_quote_hold_does_not_email_the_customer_as_a_cancelled_reservation
+    sent = uc(:send_quote).call(@actor, quote(hold_policy: "hold_on_send", hold_minutes: 120).id)
+    uc(:revise_quote).call(@actor, sent.id, { branch_id: @org[:branch].id, lines: [line(@camera, 1)], valid_until: t("2026-03-04T18:00:00Z"),
+                                              period: period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z") })
+    drain
+
+    assert_equal "cancelled", uc(:get_reservation).call(@actor, sent.hold_reservation_id)[:reservation].status
+    refute(@mailer.deliveries.any? { |d| d[:subject].start_with?("Reserva") }, "o bloqueio do orçamento não gera e-mail de reserva")
+    assert_equal 1, @mailer.deliveries.count { |d| d[:subject].start_with?("Orçamento") }
+  end
 end
