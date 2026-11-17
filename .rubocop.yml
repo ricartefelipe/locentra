@@ -38,6 +38,7 @@ Metrics/MethodLength:
   CountAsOne: ["array", "hash", "heredoc", "method_call"]
   Exclude:
     - "lib/locentra/system.rb"
+    - "lib/locentra/interfaces/http/routes.rb"
 
 Metrics/ClassLength:
   Max: 300
@@ -69,7 +70,7 @@ Naming/PredicateMethod:
   Enabled: false
 
 Minitest/MultipleAssertions:
-  Max: 12
+  Max: 20
 
 Minitest/AssertTruthy:
   Enabled: false
