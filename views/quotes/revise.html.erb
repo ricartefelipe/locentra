@@ -1,0 +1,13 @@
+<% q = @data[:quote] %>
+<header class="page-header">
+  <h1>Nova versão do orçamento <%= q.code %></h1>
+  <p class="muted">Cliente: <%= @data[:customer].name %> · versão atual <%= q.current_version %> (<%= q.status_label %>). A nova versão volta o orçamento a rascunho e exige novo envio<% if q.hold_reservation_id %>; o bloqueio temporário do envio anterior será liberado<% end %>.</p>
+</header>
+<section class="panel">
+  <%= partial("shared/errors") %>
+  <form method="post" action="/orcamentos/<%= q.id %>/versoes" class="form-grid" data-line-items>
+    <%= csrf_field %>
+    <%= partial("quotes/fields") %>
+    <div class="full actions"><button type="submit" class="primary">Criar versão <%= q.current_version + 1 %></button> <a href="/orcamentos/<%= q.id %>">Cancelar</a></div>
+  </form>
+</section>
