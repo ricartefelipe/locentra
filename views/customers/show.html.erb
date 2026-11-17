@@ -89,6 +89,7 @@
     <% end %>
   </section>
 </div>
+<%= partial("shared/attachments", owner_type: "customer", owner_id: c.id, can_upload: can?("customers.write")) %>
 <section class="panel">
   <h2>Reservas recentes</h2>
   <%= partial("reservations/table", rows: @reservations.items) %>

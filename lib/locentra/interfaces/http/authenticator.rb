@@ -22,6 +22,7 @@ module Locentra
           when :session then staff!(ctx)
           when :portal then portal!(ctx)
           when :api then api!(ctx)
+          when :staff_or_portal then staff_or_portal!(ctx)
           else raise ArgumentError, "modo de autenticação desconhecido: #{mode}"
           end
         end
@@ -69,6 +70,11 @@ module Locentra
           ctx.organization = org
           ctx.actor = Application::Actor.customer(user_id: session["user_id"], organization_id: session["organization_id"],
                                                   customer_id: access["customer_id"], request_id: ctx.request_id, ip: ctx.ip)
+        end
+
+        def staff_or_portal!(ctx)
+          require_login!(ctx)
+          ctx.session["kind"] == "portal" ? portal!(ctx) : staff!(ctx)
         end
 
         def api!(ctx)

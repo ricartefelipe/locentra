@@ -3,6 +3,7 @@
 require_relative "web/auth_controller"
 require_relative "web/main_controllers"
 require_relative "web/operations_controllers"
+require_relative "web/integrations_controller"
 require_relative "api/v1"
 
 module Locentra
@@ -95,6 +96,17 @@ module Locentra
           r.post "/organizacao/filiais", organization, :create_branch
 
           r.get "/auditoria", w::AuditController.new(deps), :index
+
+          integrations = w::IntegrationsController.new(deps)
+          r.get "/integracoes", integrations, :index
+          r.post "/integracoes", integrations, :create
+          r.post "/integracoes/:id/desativar", integrations, :disable
+          r.post "/integracoes/entregas/:id/reenviar", integrations, :redeliver
+
+          attachments = w::AttachmentsController.new(deps)
+          r.post "/anexos", attachments, :create
+          r.get "/anexos/:id", attachments, :show, auth: :staff_or_portal
+          r.post "/anexos/:id/remover", attachments, :remove
         end
 
         def draw_api(router, api)
