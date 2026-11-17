@@ -24,9 +24,10 @@ module Locentra
             destination = Domain::Identifier.parse(to_branch_id, "destino")
             raise Domain::NotFound, "filial" unless @organizations.branch_active?(tx, destination)
 
-            base = { id: @ids.uuid, organization_id: tx.tenant_id!, code: @organizations.next_code(tx, "transfer", "TR"),
-                     to_branch_id: destination, requested_at: @clock.now, notes: notes }
-            transfer = asset_id.to_s.empty? ? for_stock(tx, base, product_id, from_branch_id, quantity) : for_asset(tx, base, asset_id)
+            source = asset_id.to_s.empty? ? for_stock(tx, product_id, from_branch_id, quantity) : for_asset(tx, asset_id)
+            # O código sequencial é obtido por último: o lock do contador dura só até o commit.
+            transfer = T::Transfer.build(**source, id: @ids.uuid, organization_id: tx.tenant_id!, to_branch_id: destination,
+                                                   requested_at: @clock.now, notes: notes, code: @organizations.next_code(tx, "transfer", "TR"))
             @transfers.insert(tx, transfer, current.audit_actor_id)
             @audit.record(tx, current, "transfer.requested", "transfer", transfer.id, "code" => transfer.code, "asset_id" => transfer.asset_id,
                                                                                      "quantity" => transfer.quantity, "to_branch_id" => destination)
@@ -36,20 +37,20 @@ module Locentra
 
         private
 
-        def for_asset(tx, base, asset_id)
+        def for_asset(tx, asset_id)
           asset = @catalog.find_asset(tx, Domain::Identifier.parse(asset_id, "ativo")) || raise(Domain::NotFound, "ativo")
           raise Domain::InvalidTransition.new("ativo", asset.status, "in_transit") unless asset.can_transition_to?("in_transit")
 
-          T::Transfer.build(**base, product_id: asset.product_id, asset_id: asset.id, from_branch_id: asset.branch_id)
+          { product_id: asset.product_id, asset_id: asset.id, from_branch_id: asset.branch_id }
         end
 
-        def for_stock(tx, base, product_id, from_branch_id, quantity)
+        def for_stock(tx, product_id, from_branch_id, quantity)
           qty = integer!(quantity)
           pool = @allocations.find_pool(tx, Domain::Identifier.parse(product_id, "produto"), Domain::Identifier.parse(from_branch_id, "origem"))
           raise Domain::NotFound, "estoque de origem" unless pool
           raise Domain::ValidationError.field("quantidade", "acima do estoque da origem (#{pool.total_quantity})") if qty > pool.total_quantity
 
-          T::Transfer.build(**base, product_id: pool.product_id, from_pool_id: pool.id, from_branch_id: pool.branch_id, quantity: qty)
+          { product_id: pool.product_id, from_pool_id: pool.id, from_branch_id: pool.branch_id, quantity: qty }
         end
 
         def integer!(value)
