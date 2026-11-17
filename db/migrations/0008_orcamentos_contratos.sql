@@ -4,6 +4,8 @@
 -- Garantias:
 -- * Conteúdo das versões de orçamento é imutável: somente o instante de envio (sent_at) é
 --   preenchido, uma única vez (privilégio de coluna e trigger).
+-- * Aprovação registrada (versão, quem aprovou, IP e instante) não muda; orçamento convertido não
+--   muda mais (trigger).
 -- * Uma reserva por orçamento: índice único parcial em reservations (organization_id, quote_id).
 -- * Um contrato por reserva; termos, partes e número do contrato são imutáveis após a emissão
 --   (trigger); contratos encerrados ou cancelados não mudam mais.
@@ -54,6 +56,38 @@ CREATE INDEX quotes_org_status_idx ON quotes (organization_id, status, created_a
 CREATE INDEX quotes_customer_idx ON quotes (organization_id, customer_id, created_at DESC);
 CREATE INDEX quotes_hold_idx ON quotes (organization_id, hold_reservation_id) WHERE hold_reservation_id IS NOT NULL;
 REVOKE DELETE ON quotes FROM locentra_app, locentra_worker;
+
+-- Evidências históricas do orçamento: organização, cliente, criação e número definitivo são fixos; a
+-- versão atual só avança; depois da aprovação, versão aprovada, quem aprovou, usuário, IP e instante
+-- não mudam e o único destino é a conversão; orçamento convertido não muda mais.
+CREATE FUNCTION quotes_protect_history() RETURNS trigger
+  LANGUAGE plpgsql
+  AS $$
+BEGIN
+  IF OLD.status = 'converted' THEN
+    RAISE EXCEPTION 'orçamento convertido não pode ser alterado' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
+     OR NEW.customer_id IS DISTINCT FROM OLD.customer_id
+     OR NEW.created_by IS DISTINCT FROM OLD.created_by
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at
+     OR (NEW.code IS DISTINCT FROM OLD.code AND OLD.code NOT LIKE 'PEND-%')
+     OR NEW.current_version < OLD.current_version THEN
+    RAISE EXCEPTION 'identificação do orçamento é imutável' USING ERRCODE = 'check_violation';
+  END IF;
+  IF OLD.approved_at IS NOT NULL AND (
+       NEW.status NOT IN ('approved', 'converted')
+       OR (NEW.approved_version, NEW.approved_at, NEW.approved_by_type, NEW.approved_by_user_id, NEW.approved_by_name, NEW.approved_ip,
+           NEW.current_version, NEW.branch_id, NEW.hold_reservation_id)
+          IS DISTINCT FROM
+          (OLD.approved_version, OLD.approved_at, OLD.approved_by_type, OLD.approved_by_user_id, OLD.approved_by_name, OLD.approved_ip,
+           OLD.current_version, OLD.branch_id, OLD.hold_reservation_id)) THEN
+    RAISE EXCEPTION 'aprovação registrada do orçamento é imutável' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER quotes_protect_history BEFORE UPDATE ON quotes FOR EACH ROW EXECUTE FUNCTION quotes_protect_history();
 
 -- Cada versão guarda o conteúdo proposto ao cliente e o snapshot de preços calculado no momento.
 -- `sent_at` registra o envio da versão (cada versão é enviada no máximo uma vez): o cliente só

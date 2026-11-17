@@ -327,6 +327,25 @@ class QuotesFlowTest < DatabaseTest
     assert_equal 22_800, uc(:list_quotes).call(owner).items.first[:total].cents
   end
 
+  # Evidências históricas no banco: o envio de cada versão é registrado uma vez; a aprovação (versão,
+  # quem aprovou, IP e instante) não muda; orçamento convertido não muda mais.
+  def test_sends_approval_and_conversion_are_immutable_in_the_database
+    quote = approved_quote
+    tenant = ->(&block) { @system.transactor.call(tenant_id: @org[:organization_id], &block) }
+
+    assert_raises(D::ValidationError) { tenant.call { |tx| tx.execute("UPDATE quote_versions SET sent_at = now()") } }
+    assert_raises(D::AccessDenied) { tenant.call { |tx| tx.execute("UPDATE quote_versions SET total_cents = 1") } }
+    assert_raises(D::ValidationError) { tenant.call { |tx| tx.execute("UPDATE quotes SET approved_by_name = 'Outra Pessoa'") } }
+    assert_raises(D::ValidationError) { tenant.call { |tx| tx.execute("UPDATE quotes SET approved_ip = '203.0.113.99'") } }
+    assert_raises(D::ValidationError) { tenant.call { |tx| tx.execute("UPDATE quotes SET status = 'sent'") } }
+    assert_raises(D::ValidationError) { tenant.call { |tx| tx.execute("UPDATE quotes SET code = 'Q-999999'") } }
+    uc(:convert_quote).call(@actor, quote.id)
+
+    assert_raises(D::ValidationError) { tenant.call { |tx| tx.execute("UPDATE quotes SET converted_at = now()") } }
+    assert_raises(D::AccessDenied) { tenant.call { |tx| tx.execute("DELETE FROM quotes") } }
+    assert_equal ["Maria Compradora", "converted"], owner_query("SELECT approved_by_name, status FROM quotes").first.values_at("approved_by_name", "status")
+  end
+
   def test_quotes_are_isolated_between_organizations
     quote = uc(:create_quote).call(@actor, quote_input)
     beta = create_organization(name: "Locadora Beta", email: "beta@example.test")
