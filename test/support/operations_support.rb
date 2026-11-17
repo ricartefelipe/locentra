@@ -37,8 +37,8 @@ module OperationsSupport
     end
   end
 
-  def return_all(reservation, outcome: "ok", actor: @actor, **options)
-    uc(:register_return).call(actor, reservation.id, entries: return_entries(reservation, outcome: outcome, **options))
+  def return_all(reservation, outcome: "ok", actor: @actor, **)
+    uc(:register_return).call(actor, reservation.id, entries: return_entries(reservation, outcome: outcome, **))
   end
 
   def available(product, window = after_rental, actor: @actor, branch: @branch)

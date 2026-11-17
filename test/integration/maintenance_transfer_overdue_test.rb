@@ -128,7 +128,7 @@ class MaintenanceTransferOverdueTest < DatabaseTest
     received = uc(:receive_transfer).call(@actor, transfer.id)
 
     assert_equal "received", received.status
-    assert_equal [0, 1, 0], [@branch, north, south].map { |b| available(@camera, branch: b) }
+    assert_equal([0, 1, 0], [@branch, north, south].map { |b| available(@camera, branch: b) })
     assert_equal north.id, owner_query("SELECT branch_id FROM assets WHERE id = $1", [asset.id]).first["branch_id"]
     assert_raises(D::InvalidTransition) { uc(:receive_transfer).call(@actor, transfer.id) }
     event = owner_query("SELECT from_branch_id, to_branch_id FROM asset_events WHERE kind = 'transfer_received'").first
@@ -180,7 +180,8 @@ class MaintenanceTransferOverdueTest < DatabaseTest
     assert_equal [%w[transfer_out -4], %w[transfer_in 4]], movements.map(&:values)
   end
 
-  def test_overdue_creates_unique_alerts_identifies_affected_reservations_and_emails_once
+  # Reserva em atraso com um ativo e 6 cadeiras; reservas futuras usam o mesmo ativo e 6 cadeiras.
+  def overdue_scenario
     asset = register_assets(@actor, @camera, @branch, 1).first
     late = confirmed([line(@camera, 1), line(@chairs, 6)])
     other = create_customer(@actor, name: "Cliente Futuro", document: "11144477735")
@@ -188,25 +189,38 @@ class MaintenanceTransferOverdueTest < DatabaseTest
     stock_future = confirmed([line(@chairs, 6)], after_rental, customer: other)
     pick_up(late)
     @clock.travel_to(t("2026-03-04T12:00:00Z"))
+    { asset: asset, late: late, future: future, stock_future: stock_future }
+  end
 
-    assert_equal [late.id], uc(:detect_overdue).call(system_actor)
-    assert_equal [late.id], uc(:detect_overdue).call(system_actor), "execuções repetidas não duplicam alertas"
+  def test_overdue_creates_unique_alerts_identifies_affected_reservations_and_emails_once
+    s = overdue_scenario
+
+    assert_equal [s[:late].id], uc(:detect_overdue).call(system_actor)
+    assert_equal [s[:late].id], uc(:detect_overdue).call(system_actor), "execuções repetidas não duplicam alertas"
     alerts = owner_query("SELECT kind, reservation_id, related_reservation_id, asset_id, stock_pool_id FROM reservation_alerts ORDER BY kind, reservation_id")
 
-    assert_equal %w[affected_by_overdue affected_by_overdue overdue], alerts.map { |a| a["kind"] }
+    assert_equal(%w[affected_by_overdue affected_by_overdue overdue], alerts.map { |a| a["kind"] })
     affected = alerts.select { |a| a["kind"] == "affected_by_overdue" }
 
-    assert_equal [future.id, stock_future.id].sort, affected.map { |a| a["reservation_id"] }.sort
-    assert(affected.all? { |a| a["related_reservation_id"] == late.id })
-    assert_equal asset.id, affected.find { |a| a["reservation_id"] == future.id }["asset_id"]
-    assert_equal rental_period.ends_at, Time.parse(owner_query("SELECT overdue_since FROM reservations WHERE id = $1", [late.id]).first["overdue_since"])
+    assert_equal [s[:future].id, s[:stock_future].id].sort, affected.map { |a| a["reservation_id"] }.sort
+    assert(affected.all? { |a| a["related_reservation_id"] == s[:late].id })
+    assert_equal s[:asset].id, affected.find { |a| a["reservation_id"] == s[:future].id }["asset_id"]
+    since = owner_query("SELECT overdue_since FROM reservations WHERE id = $1", [s[:late].id]).first["overdue_since"]
+
+    assert_equal rental_period.ends_at, Time.parse(since)
     assert_equal 1, count("SELECT count(*) FROM jobs WHERE kind = 'email.send' AND payload->>'template' = 'late_return'")
-    assert_equal %w[confirmed confirmed], [reservation_status(future), reservation_status(stock_future)], "nada é cancelado automaticamente"
+    assert_equal %w[confirmed confirmed], [reservation_status(s[:future]), reservation_status(s[:stock_future])], "nada é cancelado automaticamente"
     board = uc(:operations_board).call(@actor)
 
-    assert_equal [late.id], board[:overdue].map { |r| r["id"] }
+    assert_equal([s[:late].id], board[:overdue].map { |r| r["id"] })
     assert_equal 3, board[:alerts].size
-    overdue_alert = board[:alerts].find { |a| a["kind"] == "overdue" }
+  end
+
+  def test_alert_resolution_is_recorded_and_return_resolves_related_alerts
+    s = overdue_scenario
+    uc(:detect_overdue).call(system_actor)
+    overdue_alert = uc(:operations_board).call(@actor)[:alerts].find { |a| a["kind"] == "overdue" }
+
     assert_raises(D::ValidationError) { uc(:resolve_alert).call(@actor, overdue_alert["id"], resolution: "") }
     resolved = uc(:resolve_alert).call(@actor, overdue_alert["id"], resolution: "Cliente avisado; devolução amanhã às 9h")
 
@@ -215,7 +229,8 @@ class MaintenanceTransferOverdueTest < DatabaseTest
     uc(:detect_overdue).call(system_actor)
 
     assert_equal 1, count("SELECT count(*) FROM reservation_alerts WHERE kind = 'overdue'"), "alerta resolvido não é recriado"
-    return_all(late)
+    assert_equal "Cliente avisado; devolução amanhã às 9h", owner_query("SELECT resolution FROM reservation_alerts WHERE kind = 'overdue'").first["resolution"]
+    return_all(s[:late])
 
     assert_equal 0, count("SELECT count(*) FROM reservation_alerts WHERE status = 'open'"), "devolução resolve os alertas relacionados"
     assert_empty uc(:detect_overdue).call(system_actor)
