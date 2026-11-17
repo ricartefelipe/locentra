@@ -151,8 +151,27 @@ module Locentra
         end
       end
 
+      # Evidências de avaria só mudam enquanto o registro está aberto. Anexar ou remover bloqueia o
+      # registro (o mesmo lock da aprovação): uma remoção concorrente termina antes da contagem de
+      # evidências ou encontra o registro já decidido; depois da decisão as evidências são preservadas.
+      class EvidenceGuard
+        def initialize(damage_reports:)
+          @damage_reports = damage_reports
+        end
+
+        def editable!(tx, report_id)
+          report = @damage_reports.lock(tx, report_id) || raise(Domain::NotFound, "registro de avaria")
+          return report if report.open?
+
+          raise Domain::Conflict.new("#{report.code} já foi decidido: as evidências do registro são preservadas", code: "damage_report_decided")
+        end
+      end
+
       # A cobrança só é gravada (ajuste da reserva) após aprovação por quem tem damage_charges.approve e
       # com ao menos uma evidência anexada. Faltas usam por padrão o custo de reposição do produto.
+      #
+      # `version` é a versão do registro exibida ao aprovador: uma revisão posterior (por quem não
+      # aprova cobranças) invalida a aprovação, para que o valor cobrado seja sempre o que foi visto.
       class ApproveDamageCharge
         def initialize(uow:, damage_reports:, reservations:, audit:, clock:, ids:)
           @uow = uow
@@ -163,13 +182,15 @@ module Locentra
           @ids = ids
         end
 
-        def call(actor, report_id, amount: nil, notes: nil)
+        def call(actor, report_id, version:, amount: nil, notes: nil)
+          expected = version!(version)
           @uow.run(actor, "damage_charges.approve") do |tx, current|
             report = @damage_reports.lock(tx, Domain::Identifier.parse(report_id)) || raise(Domain::NotFound, "registro de avaria")
+            ensure_current!(report, expected)
             now = @clock.now
             charge = amount || report.estimated_cost
             adjustment_id = @ids.uuid
-            approved = report.approve(amount: charge, evidence_count: @damage_reports.evidence_count(tx, report.id), adjustment_id: adjustment_id,
+            approved = report.approve(amount: charge, evidence_count: @damage_reports.lock_evidence_count(tx, report.id), adjustment_id: adjustment_id,
                                       notes: notes)
             @reservations.insert_adjustment(tx, "id" => adjustment_id, "reservation_id" => report.reservation_id,
                                                 "reservation_item_id" => report.reservation_item_id, "kind" => report.kind,
@@ -181,6 +202,23 @@ module Locentra
                                                                                              "kind" => report.kind)
             approved
           end
+        end
+
+        private
+
+        def version!(value)
+          Integer(value.to_s.strip, 10)
+        rescue ArgumentError
+          raise Domain::ValidationError.field("versao", "recarregue o registro antes de aprovar")
+        end
+
+        # Registro decidido segue para a transição do domínio (InvalidTransition); aberto e revisado
+        # depois de exibido é recusado.
+        def ensure_current!(report, expected)
+          return if !report.open? || report.version == expected
+
+          raise Domain::Conflict.new("#{report.code} foi revisado depois de exibido (custo estimado atual: #{report.estimated_cost.format_brl}); " \
+                                     "confira o registro e aprove novamente", code: "stale_damage_report")
         end
       end
 

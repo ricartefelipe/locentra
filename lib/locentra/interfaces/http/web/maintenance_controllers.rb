@@ -61,7 +61,9 @@ module Locentra
           end
 
           def approve(ctx)
-            report = uc(:approve_damage_charge).call(ctx.actor, ctx.param(:id), amount: optional_money(ctx.form["valor"]), notes: ctx.form["observacoes"])
+            f = ctx.form
+            report = uc(:approve_damage_charge).call(ctx.actor, ctx.param(:id), version: f["versao"], amount: optional_money(f["valor"]),
+                                                                                notes: f["observacoes"])
             redirect(ctx, "/operacao/avarias/#{ctx.param(:id)}", notice: "Cobrança de #{report.charged.format_brl} aprovada e lançada na reserva.")
           rescue *FORM_ERRORS => e
             show(ctx, errors: errors_of(e), status: status_of(e))

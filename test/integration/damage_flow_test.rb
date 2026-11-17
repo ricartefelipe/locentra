@@ -29,21 +29,22 @@ class DamageFlowTest < DatabaseTest
                                                                    estimated_cost: D::Money.new(35_000))
 
     assert_equal ["severe", 35_000], [revised.severity, revised.estimated_cost.cents]
-    error = assert_raises(D::ValidationError) { uc(:approve_damage_charge).call(@actor, report["id"]) }
+    error = assert_raises(D::ValidationError) { uc(:approve_damage_charge).call(@actor, report["id"], version: revised.version) }
     assert_includes error.errors.keys, "evidencias"
     attendant = member("atendente@alfa.test", "attendant")
     uc(:upload_attachment).call(@actor, owner_type: "damage_report", owner_id: report["id"], filename: "foto.png",
                                         bytes: "\x89PNG\r\n\x1A\nimagem".b)
 
-    assert_raises(D::AccessDenied) { uc(:approve_damage_charge).call(attendant, report["id"]) }
-    approved = uc(:approve_damage_charge).call(@actor, report["id"], notes: "orçamento da assistência")
+    assert_raises(D::AccessDenied) { uc(:approve_damage_charge).call(attendant, report["id"], version: revised.version) }
+    assert_raises(D::ValidationError) { uc(:approve_damage_charge).call(@actor, report["id"], version: "") }
+    approved = uc(:approve_damage_charge).call(@actor, report["id"], version: revised.version, notes: "orçamento da assistência")
 
     assert_equal "approved", approved.status
     charge = owner_query("SELECT kind, amount_cents, reservation_item_id FROM reservation_adjustments WHERE kind = 'damage'").first
 
     assert_equal 35_000, charge["amount_cents"].to_i
     refute_nil charge["reservation_item_id"]
-    assert_raises(D::InvalidTransition) { uc(:approve_damage_charge).call(@actor, report["id"]) }
+    assert_raises(D::InvalidTransition) { uc(:approve_damage_charge).call(@actor, report["id"], version: approved.version) }
     assert_raises(D::InvalidTransition) do
       uc(:revise_damage_report).call(@actor, report["id"], description: "nova", severity: "minor", estimated_cost: D::Money.zero)
     end
@@ -76,6 +77,68 @@ class DamageFlowTest < DatabaseTest
     assert_equal [48_000, 200_000], reports.map { |r| r["estimated_cost_cents"].to_i }.sort
     assert_equal "completed", reservation_status(reservation)
     assert_equal "confirmed", reservation_status(future), "nenhuma reserva é cancelada automaticamente"
+  end
+
+  def test_missing_charge_defaults_to_replacement_cost_and_requires_evidence
+    reservation = confirmed([line(@chairs, 6)])
+    pick_up(reservation)
+    return_all(reservation, outcome: "missing", notes: "três cadeiras não voltaram")
+    report = uc(:get_damage_report).call(@actor, uc(:list_damage_reports).call(@actor).first["id"])[:report]
+
+    assert_equal ["missing", 6, 48_000], [report.kind, report.quantity, report.estimated_cost.cents]
+    error = assert_raises(D::ValidationError) { uc(:approve_damage_charge).call(@actor, report.id, version: report.version) }
+    assert_includes error.errors.keys, "evidencias"
+    assert_equal 0, count("SELECT count(*) FROM reservation_adjustments WHERE kind = 'missing'")
+    uc(:upload_attachment).call(@actor, owner_type: "damage_report", owner_id: report.id, filename: "boletim.pdf", bytes: "%PDF-1.4\n%falta\n")
+    approved = uc(:approve_damage_charge).call(@actor, report.id, version: report.version)
+
+    assert_equal 48_000, approved.charged.cents, "valor padrão: custo de reposição × quantidade"
+    charge = owner_query("SELECT amount_cents, reservation_item_id, details FROM reservation_adjustments WHERE kind = 'missing'").first
+    item = owner_query("SELECT id FROM reservation_items WHERE reservation_id = $1", [reservation.id]).first["id"]
+
+    assert_equal [48_000, item], [charge["amount_cents"].to_i, charge["reservation_item_id"]]
+    assert_equal [report.code, 6], JSON.parse(charge["details"]).values_at("code", "quantity")
+  end
+
+  def test_estimated_cost_revised_after_display_invalidates_the_approval
+    reservation = confirmed([line(@camera, 1)])
+    pick_up(reservation)
+    return_all(reservation, outcome: "damaged", notes: "tampa trincada")
+    report_id = uc(:list_damage_reports).call(@actor).first["id"]
+    shown = uc(:revise_damage_report).call(@actor, report_id, description: "tampa trincada", severity: "minor", estimated_cost: D::Money.new(35_000))
+    uc(:upload_attachment).call(@actor, owner_type: "damage_report", owner_id: shown.id, filename: "tampa.pdf", bytes: "%PDF-1.4\n%tampa\n")
+    operator = member("estoque@alfa.test", "stock_operator")
+    uc(:revise_damage_report).call(operator, shown.id, description: "tampa trincada", severity: "severe", estimated_cost: D::Money.new(999_999))
+
+    error = assert_raises(D::Conflict) { uc(:approve_damage_charge).call(@actor, shown.id, version: shown.version) }
+    assert_equal "stale_damage_report", error.code
+    assert_includes error.message, "9.999,99"
+    assert_equal 0, count("SELECT count(*) FROM reservation_adjustments WHERE kind = 'damage'")
+  end
+
+  def test_evidence_of_a_decided_report_cannot_be_removed_or_added
+    reservation = confirmed([line(@camera, 1)])
+    pick_up(reservation)
+    return_all(reservation, outcome: "damaged", notes: "lente riscada")
+    report = uc(:get_damage_report).call(@actor, uc(:list_damage_reports).call(@actor).first["id"])[:report]
+    pdf = "%PDF-1.4\n%lente\n"
+    draft = uc(:upload_attachment).call(@actor, owner_type: "damage_report", owner_id: report.id, filename: "rascunho.pdf", bytes: pdf)
+    evidence = uc(:upload_attachment).call(@actor, owner_type: "damage_report", owner_id: report.id, filename: "lente.pdf", bytes: pdf)
+    operator = member("estoque@alfa.test", "stock_operator")
+
+    assert uc(:remove_attachment).call(operator, draft["id"]), "enquanto aberto, o registro aceita correções nas evidências"
+    uc(:approve_damage_charge).call(@actor, report.id, version: report.version, amount: D::Money.new(12_000))
+
+    error = assert_raises(D::Conflict) { uc(:remove_attachment).call(operator, evidence["id"]) }
+    assert_equal "damage_report_decided", error.code
+    assert_raises(D::Conflict) { uc(:remove_attachment).call(@actor, evidence["id"]) }
+    assert_raises(D::Conflict) do
+      uc(:upload_attachment).call(operator, owner_type: "damage_report", owner_id: report.id, filename: "nova.pdf", bytes: pdf)
+    end
+    assert_equal 1, count("SELECT count(*) FROM attachments WHERE owner_id = $1 AND deleted_at IS NULL", [report.id])
+    assert_raises(D::NotFound) do
+      uc(:upload_attachment).call(@actor, owner_type: "damage_report", owner_id: SecureRandom.uuid, filename: "x.pdf", bytes: pdf)
+    end
   end
 
   def test_missing_asset_relocates_future_reservation_to_free_unit

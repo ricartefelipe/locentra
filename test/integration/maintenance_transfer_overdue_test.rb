@@ -305,7 +305,7 @@ class MaintenanceTransferOverdueTest < DatabaseTest
 
     assert_raises(D::NotFound) { uc(:approve_inspection).call(stranger, inspection["id"]) }
     assert_raises(D::NotFound) { uc(:get_damage_report).call(stranger, report["id"]) }
-    assert_raises(D::NotFound) { uc(:approve_damage_charge).call(stranger, report["id"]) }
+    assert_raises(D::NotFound) { uc(:approve_damage_charge).call(stranger, report["id"], version: 1) }
     assert_empty uc(:list_inspections).call(stranger)
     assert_empty uc(:operations_board).call(stranger)[:alerts]
     tables = %w[pickups pickup_lines returns return_lines maintenance_orders inspections damage_reports transfers reservation_alerts]

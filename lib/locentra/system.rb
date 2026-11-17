@@ -199,11 +199,13 @@ module Locentra
       uc[:disable_webhook] = A::Webhooks::DisableEndpoint.new(**common, webhooks: r[:webhooks], audit: audit)
       uc[:list_webhooks] = A::Webhooks::ListEndpoints.new(uow: uow, webhooks: r[:webhooks])
       uc[:redeliver_webhook] = A::Webhooks::Redeliver.new(uow: uow, webhooks: r[:webhooks], queue: queue, audit: audit)
+      # Evidências de avaria decidida não podem ser anexadas nem removidas.
+      guards = { "damage_report" => A::Inspections::EvidenceGuard.new(damage_reports: r[:damage_reports]) }
       uc[:upload_attachment] = A::Attachments::Upload.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit, ids: ids,
-                                                                    max_bytes: config.max_upload_bytes)
+                                                                    max_bytes: config.max_upload_bytes, guards: guards)
       uc[:download_attachment] = A::Attachments::Download.new(uow: uow, attachments: r[:attachments], storage: s[:storage],
                                                               portal_scope: s.fetch(:portal_scope) { NoPortalScope.new })
-      uc[:remove_attachment] = A::Attachments::Remove.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit)
+      uc[:remove_attachment] = A::Attachments::Remove.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit, guards: guards)
     end
 
     # Retirada, devolução, inspeção, avarias, manutenção, transferências e atrasos.

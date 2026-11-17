@@ -266,6 +266,57 @@ class FulfillmentRaceTest < DatabaseTest
     assert_equal 0, active_allocations_of(asset)
   end
 
+  # Avaria aberta com uma única evidência anexada.
+  def damage_with_single_evidence
+    reservation = confirmed([line(@camera, 1)])
+    pick_up(reservation)
+    return_all(reservation, outcome: "damaged", notes: "tampa trincada")
+    report = uc(:get_damage_report).call(@actor, uc(:list_damage_reports).call(@actor).first["id"])[:report]
+    evidence = uc(:upload_attachment).call(@actor, owner_type: "damage_report", owner_id: report.id, filename: "tampa.pdf", bytes: "%PDF-1.4\n%t\n")
+    [report, evidence]
+  end
+
+  def approve_use_case(damage_reports)
+    A::Inspections::ApproveDamageCharge.new(uow: @system.uow, damage_reports: damage_reports, reservations: repo(:reservations),
+                                            audit: @system.services[:audit], clock: @clock, ids: @system.ids)
+  end
+
+  def remove_use_case(attachments: repo(:attachments), damage_reports: repo(:damage_reports))
+    A::Attachments::Remove.new(uow: @system.uow, attachments: attachments, storage: @system.services[:storage], audit: @system.services[:audit],
+                               clock: @clock, guards: { "damage_report" => A::Inspections::EvidenceGuard.new(damage_reports: damage_reports) })
+  end
+
+  def live_evidence(report) = count("SELECT count(*) FROM attachments WHERE owner_id = $1 AND deleted_at IS NULL", [report.id])
+
+  def test_evidence_removal_racing_an_approval_after_the_count_is_refused
+    report, evidence = damage_with_single_evidence
+    barrier = Barrier.new(2)
+    approve = approve_use_case(PausingProxy.new(repo(:damage_reports), :lock_evidence_count, barrier, after: true))
+    remove = remove_use_case(damage_reports: PausingProxy.new(repo(:damage_reports), :lock, barrier))
+
+    results = race(-> { approve.call(@actor, report.id, version: report.version, amount: D::Money.new(9_000)).status },
+                   -> { remove.call(@actor, evidence["id"]) })
+
+    assert_equal [:ok, "approved"], results.first
+    assert_equal "damage_report_decided", results.last.last.code
+    assert_equal 1, live_evidence(report), "a cobrança aprovada mantém a evidência"
+  end
+
+  def test_evidence_removed_before_the_count_blocks_the_approval
+    report, evidence = damage_with_single_evidence
+    barrier = Barrier.new(2)
+    approve = approve_use_case(PausingProxy.new(repo(:damage_reports), :lock, barrier))
+    remove = remove_use_case(attachments: PausingProxy.new(repo(:attachments), :soft_delete, barrier, after: true))
+
+    results = race(-> { approve.call(@actor, report.id, version: report.version, amount: D::Money.new(9_000)) },
+                   -> { remove.call(@actor, evidence["id"]) })
+
+    assert_kind_of D::ValidationError, results.first.last
+    assert_includes results.first.last.errors.keys, "evidencias"
+    assert_equal [:ok, true], results.last
+    assert_equal 0, count("SELECT count(*) FROM reservation_adjustments WHERE kind = 'damage'")
+  end
+
   def test_concurrent_charge_approvals_record_a_single_adjustment
     reservation = confirmed([line(@camera, 1)])
     pick_up(reservation)
@@ -278,7 +329,7 @@ class FulfillmentRaceTest < DatabaseTest
                                                        reservations: repo(:reservations), audit: @system.services[:audit], clock: @clock,
                                                        ids: @system.ids)
 
-    results = race(-> { use_case.call(@actor, report["id"]) }, -> { use_case.call(@actor, report["id"]) })
+    results = race(-> { use_case.call(@actor, report["id"], version: 2) }, -> { use_case.call(@actor, report["id"], version: 2) })
 
     assert_equal %i[error ok], outcomes(results)
     assert_kind_of D::InvalidTransition, results.find { |r| r.first == :error }.last

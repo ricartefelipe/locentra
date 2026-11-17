@@ -166,9 +166,12 @@ module Locentra
           raise Domain::Conflict.new("registro de avaria alterado por outra operação", code: "stale_damage_report") unless count == 1
         end
 
-        def evidence_count(tx, id)
-          tx.query_value(<<~SQL, [tx.tenant_id!, id]).to_i
-            SELECT count(*) FROM attachments WHERE organization_id = $1 AND owner_type = 'damage_report' AND owner_id = $2 AND deleted_at IS NULL
+        # Evidências vivas contadas sob FOR SHARE: uma remoção que ainda não terminou é aguardada e
+        # deixa de ser contada; nenhuma remoção é gravada até o fim da decisão.
+        def lock_evidence_count(tx, id)
+          tx.query(<<~SQL, [tx.tenant_id!, id]).size
+            SELECT id FROM attachments WHERE organization_id = $1 AND owner_type = 'damage_report' AND owner_id = $2 AND deleted_at IS NULL
+               FOR SHARE
           SQL
         end
 

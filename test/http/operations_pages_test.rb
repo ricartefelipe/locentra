@@ -126,7 +126,9 @@ class OperationsPagesTest < HttpTest
     damaged_return
     report = uc(:list_damage_reports).call(@actor).first
     get "/operacao/avarias/#{report["id"]}"
-    post_form "/operacao/avarias/#{report["id"]}/aprovar", { "valor" => "150,00" }
+
+    assert_includes last_response.body, 'name="versao" value="1"'
+    post_form "/operacao/avarias/#{report["id"]}/aprovar", { "valor" => "150,00", "versao" => "1" }
 
     assert_equal 422, last_response.status
     assert_includes last_response.body, "anexe ao menos uma evidência"
@@ -139,10 +141,21 @@ class OperationsPagesTest < HttpTest
     follow_redirect!
 
     assert_includes last_response.body, "Registro atualizado"
-    post_form "/operacao/avarias/#{report["id"]}/aprovar", { "valor" => "150,00" }
+    post_form "/operacao/avarias/#{report["id"]}/aprovar", { "versao" => "1" }
+
+    assert_equal 409, last_response.status, "a revisão posterior à exibição invalida a aprovação"
+    assert_includes last_response.body, "revisado depois de exibido"
+    assert_includes last_response.body, 'name="versao" value="2"'
+    post_form "/operacao/avarias/#{report["id"]}/aprovar", { "valor" => "150,00", "versao" => "2" }
     follow_redirect!
 
     assert_includes last_response.body, "Cobrança de R$ 150,00 aprovada"
+    late = Rack::Test::UploadedFile.new(StringIO.new("%PDF-1.4\n%tarde\n"), "application/pdf", original_filename: "tarde.pdf")
+    post "/anexos", { "_csrf" => csrf, "dono_tipo" => "damage_report", "dono_id" => report["id"], "arquivo" => late }
+    follow_redirect!
+
+    assert_includes last_response.body, "Anexo recusado"
+    assert_equal 1, count("SELECT count(*) FROM attachments WHERE owner_id = $1 AND deleted_at IS NULL", [report["id"]])
   end
 
   def test_inspection_rejection_and_maintenance_through_forms

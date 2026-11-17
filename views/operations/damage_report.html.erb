@@ -45,9 +45,10 @@
       <% end %>
       <form method="post" action="/operacao/avarias/<%= d.id %>/aprovar" class="stack">
         <%= csrf_field %>
+        <input type="hidden" name="versao" value="<%= d.version %>">
         <label for="valor">Valor da cobrança (R$)</label>
-        <input id="valor" name="valor" inputmode="decimal" placeholder="<%= d.estimated_cost.to_decimal_string.tr(".", ",") %>"<%= invalid(@errors, "valor") %>><%= field_errors(@errors, "valor") %>
-        <p class="muted">Em branco, usa o custo estimado. A cobrança é lançada como ajuste da reserva.</p>
+        <input id="valor" name="valor" inputmode="decimal" aria-describedby="valor-ajuda" placeholder="<%= d.estimated_cost.to_decimal_string.tr(".", ",") %>"<%= invalid(@errors, "valor") %>><%= field_errors(@errors, "valor") %>
+        <p id="valor-ajuda" class="muted">Em branco, usa o custo estimado exibido (<%= money(d.estimated_cost) %>). Se o registro for revisado antes do envio, a aprovação é recusada para nova conferência. A cobrança é lançada como ajuste da reserva.</p>
         <label for="obs-aprovacao">Observações</label><input id="obs-aprovacao" name="observacoes" maxlength="1000">
         <button type="submit" class="primary">Aprovar cobrança</button>
       </form>
