@@ -228,6 +228,8 @@ module Locentra
             show(ctx, errors: { "base" => ["Confirmação recusada: #{e.message}"] }, status: 409, shortages: e.shortages)
           rescue Domain::HoldExpired
             redirect(ctx, "/reservas/#{ctx.param(:id)}", alert: "O bloqueio temporário expirou; a reserva não pode ser confirmada.")
+          rescue Domain::InvalidTransition, Domain::Conflict => e
+            show(ctx, errors: { "base" => [e.message] }, status: 422)
           end
 
           def cancel(ctx)

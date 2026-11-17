@@ -47,6 +47,64 @@ module Locentra
         end
       end
 
+      # Reservas ligadas a outros documentos são alteradas pelo próprio documento:
+      #
+      # - o bloqueio temporário de um orçamento ainda não convertido é confirmado somente pela
+      #   conversão do orçamento aprovado e não é reagendado nem estendido (exige nova versão do
+      #   orçamento); o cancelamento direto é permitido e equivale ao vencimento do bloqueio;
+      # - reservas com contrato em aberto são estendidas por aditivo e canceladas pelo contrato, que
+      #   aplica a política de cancelamento; o reagendamento não é permitido.
+      #
+      # `via:` identifica o caso de uso que compõe a operação (`:quote` ou `:contract`) e dispensa
+      # somente a verificação do próprio vínculo. A composição com `tx:` não dispensa nada: outras
+      # composições (por exemplo, a API com idempotência) passam pelas mesmas verificações.
+      class ChangeGuard
+        VIAS = [nil, :quote, :contract].freeze
+        QUOTE_MESSAGES = {
+          "confirm" => "a confirmação é feita pela conversão do orçamento aprovado",
+          "reschedule" => "alterações de período exigem uma nova versão do orçamento",
+          "extend" => "alterações de período exigem uma nova versão do orçamento"
+        }.freeze
+        CONTRACT_MESSAGES = {
+          "reschedule" => "o reagendamento não é permitido; alterações de prazo são formalizadas por aditivo no contrato",
+          "extend" => "a extensão deve ser registrada como aditivo no contrato",
+          "cancel" => "cancele pelo contrato, que aplica a política de cancelamento"
+        }.freeze
+
+        def initialize(contracts:, quotes:)
+          @contracts = contracts
+          @quotes = quotes
+        end
+
+        def ensure_changeable!(tx, reservation, operation, via: nil)
+          raise ArgumentError, "composição desconhecida: #{via.inspect}" unless VIAS.include?(via)
+
+          ensure_not_quote_hold!(tx, reservation, operation) unless via == :quote
+          ensure_without_contract!(tx, reservation, operation) unless via == :contract
+          true
+        end
+
+        private
+
+        def ensure_not_quote_hold!(tx, reservation, operation)
+          message = QUOTE_MESSAGES[operation]
+          quote = message && @quotes.holding(tx, reservation.id)
+          return unless quote
+
+          raise Domain::Conflict.new("A reserva #{reservation.code} é o bloqueio temporário do orçamento #{quote.code}: #{message}.",
+                                     code: "quote_hold")
+        end
+
+        def ensure_without_contract!(tx, reservation, operation)
+          message = CONTRACT_MESSAGES[operation]
+          contract = message && @contracts.open_for_reservation(tx, reservation.id)
+          return unless contract
+
+          raise Domain::Conflict.new("A reserva #{reservation.code} possui o contrato #{contract.code}: #{message}.",
+                                     code: "contract_amendment_required")
+        end
+      end
+
       class CreateReservation
         MODES = %w[request hold confirm].freeze
 
@@ -181,22 +239,24 @@ module Locentra
         end
       end
 
-      # Confirmação com revalidação atômica sob lock da reserva e dos estoques envolvidos.
+      # Confirmação com revalidação atômica sob lock da reserva e dos estoques envolvidos. O bloqueio
+      # temporário de um orçamento é confirmado somente pela conversão (`via: :quote`).
       class ConfirmReservation
-        def initialize(uow:, reservations:, allocator:, audit:, events:, clock:)
+        def initialize(uow:, reservations:, allocator:, audit:, events:, clock:, guard:)
           @uow = uow
           @reservations = reservations
           @allocator = allocator
           @audit = audit
           @events = events
           @clock = clock
+          @guard = guard
         end
 
-        def call(actor, reservation_id, tx: nil)
-          return execute(tx, actor, reservation_id) if tx
+        def call(actor, reservation_id, tx: nil, via: nil)
+          return execute(tx, actor, reservation_id, via) if tx
 
           result = @uow.run(actor, "reservations.write") do |t, current|
-            execute(t, current, reservation_id)
+            execute(t, current, reservation_id, via)
           rescue Domain::HoldExpired
             :expired
           end
@@ -207,10 +267,12 @@ module Locentra
 
         private
 
-        def execute(tx, current, reservation_id)
+        def execute(tx, current, reservation_id, via)
           now = @clock.now
           reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
           return reservation if reservation.status == "confirmed"
+
+          @guard.ensure_changeable!(tx, reservation, "confirm", via: via)
 
           if reservation.hold_expired?(now)
             expire(tx, current, reservation, now)
@@ -243,30 +305,31 @@ module Locentra
         end
       end
 
-      # Cancelamento. Reservas com contrato em aberto são canceladas pelo contrato (que aplica a
-      # política de cancelamento); a composição com `tx:` é usada por esse caso de uso.
+      # Cancelamento. Reservas com contrato em aberto são canceladas pelo contrato, que aplica a
+      # política de cancelamento e compõe este caso de uso com `via: :contract`. Qualquer outra
+      # chamada, com ou sem `tx:`, passa pela verificação.
       class CancelReservation
-        def initialize(uow:, reservations:, audit:, events:, clock:, contract_guard:)
+        def initialize(uow:, reservations:, audit:, events:, clock:, guard:)
           @uow = uow
           @reservations = reservations
           @audit = audit
           @events = events
           @clock = clock
-          @contract_guard = contract_guard
+          @guard = guard
         end
 
-        def call(actor, reservation_id, reason:, tx: nil)
-          return execute(tx, actor, reservation_id, reason, guarded: false) if tx
+        def call(actor, reservation_id, reason:, tx: nil, via: nil)
+          return execute(tx, actor, reservation_id, reason, via) if tx
 
-          @uow.run(actor, "reservations.cancel") { |t, current| execute(t, current, reservation_id, reason, guarded: true) }
+          @uow.run(actor, "reservations.cancel") { |t, current| execute(t, current, reservation_id, reason, via) }
         end
 
         private
 
-        def execute(tx, current, reservation_id, reason, guarded:)
+        def execute(tx, current, reservation_id, reason, via)
           now = @clock.now
           reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
-          @contract_guard.ensure_without_contract!(tx, reservation, "cancel") if guarded
+          @guard.ensure_changeable!(tx, reservation, "cancel", via: via)
           cancelled = reservation.cancel
           text = Domain::Organizations::Text.required(reason, "motivo", max: 500)
           @reservations.update_status(tx, cancelled, now, "cancelled_at" => now, "cancellation_reason" => text)
@@ -279,23 +342,24 @@ module Locentra
 
       # Reagendamento: libera as alocações atuais e aloca o novo período na mesma transação. Em
       # conflito, a transação é desfeita e a reserva permanece no período original. Reservas com
-      # contrato em aberto não são reagendadas: a alteração de prazo é feita por aditivo.
+      # contrato em aberto não são reagendadas (a alteração de prazo é feita por aditivo), nem o
+      # bloqueio temporário de um orçamento (exige nova versão do orçamento).
       class RescheduleReservation
-        def initialize(uow:, reservations:, organizations:, allocator:, audit:, clock:, contract_guard:)
+        def initialize(uow:, reservations:, organizations:, allocator:, audit:, clock:, guard:)
           @uow = uow
           @reservations = reservations
           @organizations = organizations
           @allocator = allocator
           @audit = audit
           @clock = clock
-          @contract_guard = contract_guard
+          @guard = guard
         end
 
         def call(actor, reservation_id, period:)
           @uow.run(actor, "reservations.write") do |tx, current|
             now = @clock.now
             reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
-            @contract_guard.ensure_without_contract!(tx, reservation, "reschedule")
+            @guard.ensure_changeable!(tx, reservation, "reschedule")
             moved = reservation.reschedule(period, now)
             if reservation.occupying?
               previous = @reservations.allocated_asset_ids(tx, reservation.id)
@@ -318,9 +382,10 @@ module Locentra
       # estar com o cliente). Se o novo período invadir outra reserva, a operação é recusada.
       #
       # Reservas com contrato em aberto são estendidas somente por aditivo (`AmendContract`), que
-      # compõe este caso de uso na mesma transação (`tx:`).
+      # compõe este caso de uso na mesma transação (`tx:`, `via: :contract`). O bloqueio temporário de
+      # um orçamento não é estendido diretamente.
       class ExtendReservation
-        def initialize(uow:, reservations:, organizations:, allocator:, availability:, audit:, events:, clock:, ids:, contract_guard:)
+        def initialize(uow:, reservations:, organizations:, allocator:, availability:, audit:, events:, clock:, ids:, guard:)
           @uow = uow
           @reservations = reservations
           @organizations = organizations
@@ -330,21 +395,21 @@ module Locentra
           @events = events
           @clock = clock
           @ids = ids
-          @contract_guard = contract_guard
+          @guard = guard
         end
 
-        def call(actor, reservation_id, ends_at:, tx: nil)
-          return execute(tx, actor, reservation_id, ends_at, guarded: false) if tx
+        def call(actor, reservation_id, ends_at:, tx: nil, via: nil)
+          return execute(tx, actor, reservation_id, ends_at, via) if tx
 
-          @uow.run(actor, "reservations.write") { |t, current| execute(t, current, reservation_id, ends_at, guarded: true) }
+          @uow.run(actor, "reservations.write") { |t, current| execute(t, current, reservation_id, ends_at, via) }
         end
 
         private
 
-        def execute(tx, current, reservation_id, ends_at, guarded:)
+        def execute(tx, current, reservation_id, ends_at, via)
           now = @clock.now
           reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
-          @contract_guard.ensure_without_contract!(tx, reservation, "extend") if guarded
+          @guard.ensure_changeable!(tx, reservation, "extend", via: via)
           extended = reservation.extend_to(ends_at, now)
           products = @allocator.products_for(tx, @reservations.allocated_product_ids(tx, reservation.id))
           extend_allocations(tx, reservation, extended, products, now)

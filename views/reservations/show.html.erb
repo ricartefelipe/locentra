@@ -2,6 +2,7 @@
 <% pricing = @data[:pricing][:summary] %>
 <% contract = @links[:contract] %>
 <% contract_open = contract&.open? %>
+<% quote_hold = @links[:quote]&.holds_reservation?(r.id) %>
 <header class="page-header">
   <h1>Reserva <%= r.code %> <%= status_badge(r.status, r.status_label) %></h1>
   <p class="muted">Cliente: <a href="/clientes/<%= @customer.id %>"><%= @customer.name %></a></p>
@@ -18,6 +19,9 @@
   </div>
 <% elsif r.requested? %>
   <div class="notice" role="status">Solicitação sem garantia de disponibilidade. A alocação ocorre somente na confirmação.</div>
+<% end %>
+<% if quote_hold %>
+  <div class="notice" role="status">Esta reserva é o bloqueio temporário do orçamento <a href="/orcamentos/<%= @links[:quote].id %>"><%= @links[:quote].code %></a>: a confirmação é feita pela conversão do orçamento aprovado e alterações de período ou itens exigem uma nova versão do orçamento. O cancelamento libera a disponibilidade, como o vencimento do bloqueio.</div>
 <% end %>
 <% if contract_open %>
   <div class="notice" role="status">Esta reserva possui o contrato <a href="/contratos/<%= contract.id %>"><%= contract.code %></a>: alterações de prazo são feitas por aditivo e o cancelamento pelo contrato, que aplica a política de cancelamento.</div>
@@ -52,7 +56,7 @@
       <dt>Origem</dt><dd><%= r.source %></dd>
       <dt>Observações</dt><dd class="pre"><%= r.notes || "—" %></dd>
     </dl>
-    <% if can?("reservations.write") && %w[requested held confirmed].include?(r.status) %>
+    <% if can?("reservations.write") && %w[requested held confirmed].include?(r.status) && !quote_hold %>
       <div class="action-row">
         <% if %w[requested held].include?(r.status) %>
           <form method="post" action="/reservas/<%= r.id %>/confirmar"><%= csrf_field %><button type="submit" class="primary">Confirmar reserva</button></form>
@@ -70,7 +74,7 @@
       </details>
       <% end %>
     <% end %>
-    <% if can?("reservations.write") && %w[held confirmed in_progress].include?(r.status) && !contract_open %>
+    <% if can?("reservations.write") && %w[held confirmed in_progress].include?(r.status) && !contract_open && !quote_hold %>
       <details>
         <summary>Estender devolução</summary>
         <form method="post" action="/reservas/<%= r.id %>/estender" class="stack">

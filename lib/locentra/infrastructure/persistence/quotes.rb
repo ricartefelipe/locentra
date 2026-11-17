@@ -43,6 +43,15 @@ module Locentra
           row && self.class.map(row)
         end
 
+        # Orçamento enviado ou aprovado, ainda não convertido, cujo bloqueio temporário é a reserva.
+        def holding(tx, reservation_id)
+          row = tx.query_one(<<~SQL, [tx.tenant_id!, reservation_id])
+            SELECT #{COLUMNS} FROM quotes
+             WHERE organization_id = $1 AND hold_reservation_id = $2 AND status IN ('sent', 'approved') LIMIT 1
+          SQL
+          row && self.class.map(row)
+        end
+
         # Orçamento ligado à reserva, seja pela conversão ou pelo bloqueio temporário do envio.
         def find_by_reservation(tx, reservation_id)
           row = tx.query_one(<<~SQL, [tx.tenant_id!, reservation_id])

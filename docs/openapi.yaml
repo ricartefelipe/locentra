@@ -196,6 +196,9 @@ paths:
   /reservations/{id}/confirm:
     post:
       summary: Confirma reserva revalidando a disponibilidade atomicamente
+      description: >-
+        O bloqueio temporário criado no envio de um orçamento é confirmado somente pela conversão do
+        orçamento aprovado; a confirmação direta responde 409 com o código `quote_hold`.
       operationId: confirmReservation
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
@@ -208,6 +211,9 @@ paths:
   /reservations/{id}/cancel:
     post:
       summary: Cancela reserva e libera as alocações
+      description: >-
+        Reserva com contrato em aberto é cancelada somente pelo contrato, que aplica a política de
+        cancelamento; o cancelamento direto responde 409 com o código `contract_amendment_required`.
       operationId: cancelReservation
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:

@@ -150,6 +150,60 @@ class QuotesFlowTest < DatabaseTest
     assert_equal "confirmed", reserve(@actor, @customer, @branch, rental, [line(@camera, 1)], mode: "confirm").status
   end
 
+  # O bloqueio do envio pertence ao orçamento: só a conversão do orçamento aprovado o confirma e o
+  # período só muda por nova versão. Depois da conversão, a reserva segue as regras normais.
+  def test_quote_hold_is_confirmed_only_by_the_conversion
+    quote = uc(:create_quote).call(@actor, quote_input(hold_policy: "hold_on_send", hold_minutes: 1440))
+    hold_id = uc(:send_quote).call(@actor, quote.id).hold_reservation_id
+
+    confirm = assert_raises(D::Conflict) { uc(:confirm_reservation).call(@actor, hold_id) }
+    assert_equal "quote_hold", confirm.code
+    assert_includes confirm.message, "conversão do orçamento aprovado"
+    reschedule = assert_raises(D::Conflict) do
+      uc(:reschedule_reservation).call(@actor, hold_id, period: period("2026-03-20T08:00:00Z", "2026-03-25T08:00:00Z"))
+    end
+    assert_includes reschedule.message, "nova versão do orçamento"
+    extension = assert_raises(D::Conflict) { uc(:extend_reservation).call(@actor, hold_id, ends_at: t("2026-03-13T08:00:00Z")) }
+
+    assert_equal "quote_hold", extension.code
+    hold = uc(:get_reservation).call(@actor, hold_id)[:reservation]
+
+    assert_equal ["held", rental], [hold.status, hold.period]
+    uc(:approve_quote).call(@actor, quote.id, version: 1, approver_name: "Maria")
+
+    assert_raises(D::Conflict, "aprovado e ainda não convertido") { uc(:confirm_reservation).call(@actor, hold_id) }
+    converted = uc(:convert_quote).call(@actor, quote.id).reservation
+
+    assert_equal [hold_id, "confirmed", quote.id, rental], [converted.id, converted.status, converted.quote_id, converted.period]
+    assert_equal "confirmed", uc(:confirm_reservation).call(@actor, hold_id).status
+    assert_equal t("2026-03-13T08:00:00Z"), uc(:extend_reservation).call(@actor, hold_id, ends_at: t("2026-03-13T08:00:00Z"))[:reservation].period.ends_at
+  end
+
+  # Rejeitar libera o bloqueio; nenhuma reserva confirmada sobrevive ao orçamento rejeitado.
+  def test_rejection_releases_the_hold_and_frees_the_slot
+    quote = uc(:create_quote).call(@actor, quote_input(hold_policy: "hold_on_send", hold_minutes: 1440))
+    hold_id = uc(:send_quote).call(@actor, quote.id).hold_reservation_id
+    uc(:reject_quote).call(@actor, quote.id, reason: "Cliente desistiu")
+
+    assert_equal "cancelled", uc(:get_reservation).call(@actor, hold_id)[:reservation].status
+    assert_equal 0, owner_query("SELECT count(*) AS n FROM reservations WHERE status IN ('held', 'confirmed')").first["n"].to_i
+    assert_equal "confirmed", reserve(@actor, @customer, @branch, rental, [line(@camera, 1)], mode: "confirm").status
+  end
+
+  # O cancelamento direto do bloqueio equivale ao vencimento: a conversão cria uma reserva nova com o
+  # snapshot da versão aprovada.
+  def test_direct_cancellation_of_the_hold_works_like_its_expiry
+    quote = uc(:create_quote).call(@actor, quote_input(hold_policy: "hold_on_send", hold_minutes: 1440))
+    hold_id = uc(:send_quote).call(@actor, quote.id).hold_reservation_id
+    uc(:cancel_reservation).call(@actor, hold_id, reason: "Cliente pediu para liberar a data")
+    uc(:approve_quote).call(@actor, quote.id, version: 1, approver_name: "Maria")
+    result = uc(:convert_quote).call(@actor, quote.id)
+
+    assert result.created
+    refute_equal hold_id, result.reservation.id
+    assert_equal ["confirmed", 24_000, quote.id], [result.reservation.status, result.reservation.total.cents, result.reservation.quote_id]
+  end
+
   def test_hold_on_send_without_availability_keeps_the_quote_in_draft
     reserve(@actor, @customer, @branch, rental, [line(@camera, 1)], mode: "confirm")
     quote = uc(:create_quote).call(@actor, quote_input(hold_policy: "hold_on_send", hold_minutes: 60))

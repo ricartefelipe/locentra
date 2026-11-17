@@ -168,6 +168,27 @@ class QuotesContractsPagesTest < HttpTest
     assert_includes last_response.body, "reserva confirmada"
   end
 
+  # A tela da reserva de bloqueio aponta o orçamento e não oferece confirmação, reagendamento nem
+  # extensão diretos; a tentativa direta é recusada com a mensagem na própria tela.
+  def test_quote_hold_reservation_screen_points_to_the_quote
+    post_form "/orcamentos", form_quote("politica_bloqueio" => "hold_on_send", "validade_bloqueio" => "600")
+    quote_id = last_id("quotes")
+    post_form "/orcamentos/#{quote_id}/enviar", {}
+    hold_id = owner_query("SELECT hold_reservation_id FROM quotes WHERE id = $1", [quote_id]).first["hold_reservation_id"]
+    body = get_ok("/reservas/#{hold_id}")
+
+    assert_includes body, "bloqueio temporário do orçamento"
+    assert_includes body, %(href="/orcamentos/#{quote_id}")
+    refute_includes body, "Confirmar reserva"
+    refute_includes body, "Reagendar"
+    refute_includes body, "Estender devolução"
+    assert_includes body, "Cancelar reserva"
+    post_form "/reservas/#{hold_id}/confirmar", {}
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "conversão do orçamento aprovado"
+  end
+
   def test_attendant_sees_quotes_and_contracts_without_cancellation
     reservation = reserve(@actor, @customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
     contract = uc(:issue_contract).call(@actor, reservation.id)

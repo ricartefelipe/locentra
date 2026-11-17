@@ -57,6 +57,23 @@ class QuotesDomainTest < UnitTest
     refute_equal v.fingerprint, version(total: 30_000).fingerprint
   end
 
+  # O bloqueio do envio fica ligado ao orçamento enquanto ele está enviado ou aprovado (ainda não
+  # convertido); nesse período a reserva de bloqueio não é alterada diretamente.
+  def test_hold_link_is_active_only_while_sent_or_approved
+    with_hold = sent.with_hold("r1")
+
+    assert with_hold.holds_reservation?("r1")
+    refute with_hold.holds_reservation?("r2")
+    refute with_hold.holds_reservation?(nil)
+    approved = with_hold.approve(1, version: version, approver: approver, now: now)
+
+    assert approved.holds_reservation?("r1")
+    refute approved.convert("r1", now).holds_reservation?("r1")
+    refute with_hold.reject("Preço alto", now).holds_reservation?("r1")
+    refute with_hold.expire(now).holds_reservation?("r1")
+    refute draft.holds_reservation?(nil)
+  end
+
   def test_send_requires_draft_current_version_valid_validity_and_future_start
     quote = sent
 

@@ -78,7 +78,8 @@ class ReservationRaceTest < DatabaseTest
 
   def confirm_use_case(reservations_repository)
     R::ConfirmReservation.new(uow: @system.uow, reservations: reservations_repository, allocator: @system.services[:allocator],
-                              audit: @system.services[:audit], events: @system.services[:events], clock: @clock)
+                              audit: @system.services[:audit], events: @system.services[:events], clock: @clock,
+                              guard: @system.services[:reservation_guard])
   end
 
   def concurrent_confirm_and_sweep(hold)

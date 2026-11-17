@@ -38,28 +38,6 @@ module Locentra
         end
       end
 
-      # Impede que reservas com contrato em aberto sejam reagendadas, estendidas ou canceladas fora
-      # do contrato. Usado pelos casos de uso de reserva quando chamados diretamente.
-      class ReservationGuard
-        MESSAGES = {
-          "reschedule" => "o reagendamento não é permitido; alterações de prazo são formalizadas por aditivo no contrato",
-          "extend" => "a extensão deve ser registrada como aditivo no contrato",
-          "cancel" => "cancele pelo contrato, que aplica a política de cancelamento"
-        }.freeze
-
-        def initialize(contracts:)
-          @contracts = contracts
-        end
-
-        def ensure_without_contract!(tx, reservation, operation)
-          contract = @contracts.open_for_reservation(tx, reservation.id)
-          return true unless contract
-
-          raise Domain::Conflict.new("A reserva #{reservation.code} possui o contrato #{contract.code}: #{MESSAGES.fetch(operation)}.",
-                                     code: "contract_amendment_required")
-        end
-      end
-
       # Gera uma versão do documento do contrato (PDF) a partir de dados reais e grava como anexo
       # (owner_type 'contract', retenção de cerca de cinco anos), registrando versão e SHA-256.
       class DocumentGenerator
@@ -211,7 +189,7 @@ module Locentra
             raise Domain::InvalidTransition.new("contrato", contract.status, "aditivo") unless contract.amendable?
 
             before = @reservations.find(tx, contract.reservation_id)
-            result = @extend_reservation.call(current, contract.reservation_id, ends_at: ends_at, tx: tx)
+            result = @extend_reservation.call(current, contract.reservation_id, ends_at: ends_at, tx: tx, via: :contract)
             amend(tx, current, contract, before, result, description, now)
           end
         end
@@ -279,7 +257,8 @@ module Locentra
             cancelled = contract.cancel(now: now, reason: reason, fee: preview.fee)
             record_fee(tx, current, contract, preview, now) if preview.fee.positive?
             @cancel_reservation.call(current, contract.reservation_id,
-                                     reason: "Contrato #{contract.code} cancelado: #{cancelled.cancellation_reason}"[0, 500], tx: tx)
+                                     reason: "Contrato #{contract.code} cancelado: #{cancelled.cancellation_reason}"[0, 500], tx: tx,
+                                     via: :contract)
             @contracts.update(tx, cancelled, now)
             @audit.record(tx, current, "contract.cancelled", "contract", contract.id,
                           preview.to_h.merge("code" => contract.code, "reason" => cancelled.cancellation_reason))

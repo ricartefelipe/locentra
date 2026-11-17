@@ -27,6 +27,10 @@ module Locentra
 
       REVISABLE = %w[draft sent rejected expired].freeze
 
+      # Situações em que o bloqueio temporário do envio continua ligado ao orçamento ainda não
+      # convertido: a reserva de bloqueio só é confirmada pela conversão e não é alterada diretamente.
+      HOLDING = %w[sent approved].freeze
+
       HOLD_POLICIES = {
         "none" => "Sem bloqueio: o orçamento enviado não garante disponibilidade",
         "hold_on_send" => "Bloqueio temporário ao enviar: reserva a disponibilidade por tempo limitado"
@@ -113,6 +117,9 @@ module Locentra
         def hold_on_send? = hold_policy == "hold_on_send"
         def revisable? = REVISABLE.include?(status)
         def approver_label = approved_by_type && APPROVER_TYPES.fetch(approved_by_type)
+
+        # A reserva informada é o bloqueio temporário vigente deste orçamento, ainda não convertido.
+        def holds_reservation?(other_id) = !other_id.nil? && hold_reservation_id == other_id && HOLDING.include?(status)
 
         def transition(target)
           raise InvalidTransition.new("orçamento", status, target) unless TRANSITIONS.fetch(status).include?(target)

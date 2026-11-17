@@ -95,7 +95,7 @@ module Locentra
           hold = @reservations.find(tx, quote.hold_reservation_id)
           return nil unless hold&.held?
 
-          @cancel.call(actor, hold.id, reason: "#{reason} (orçamento #{quote.code})", tx: tx)
+          @cancel.call(actor, hold.id, reason: "#{reason} (orçamento #{quote.code})", tx: tx, via: :quote)
         end
       end
 
@@ -420,7 +420,7 @@ module Locentra
           return hold if hold&.status == "confirmed"
           return nil unless hold&.hold_valid?(now)
 
-          tx.savepoint { @confirm_reservation.call(current, hold.id, tx: tx) }
+          tx.savepoint { @confirm_reservation.call(current, hold.id, tx: tx, via: :quote) }
         rescue Domain::HoldExpired
           nil
         rescue Domain::Unavailable => e

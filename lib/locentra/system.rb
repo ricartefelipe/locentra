@@ -75,7 +75,7 @@ module Locentra
         storage: I::Storage::Local.new(root: config.storage_root),
         mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__)),
         contract_renderer: I::Documents::ContractPdf.new,
-        contract_guard: A::Contracts::ReservationGuard.new(contracts: repos[:contracts])
+        reservation_guard: A::Reservations::ChangeGuard.new(contracts: repos[:contracts], quotes: repos[:quotes])
       }
       @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
                                                                            quotes: repos[:quotes], contracts: repos[:contracts])
@@ -177,16 +177,16 @@ module Locentra
       uc[:create_reservation] = A::Reservations::CreateReservation.new(uow: uow, customers: r[:customers], organizations: r[:organizations],
                                                                        allocator: s[:allocator], pricer: s[:pricer], events: s[:events], ids: ids,
                                                                        **reservation_deps)
-      uc[:confirm_reservation] =
-        A::Reservations::ConfirmReservation.new(uow: uow, allocator: s[:allocator], events: s[:events], **reservation_deps)
-      uc[:cancel_reservation] = A::Reservations::CancelReservation.new(uow: uow, events: s[:events], contract_guard: s[:contract_guard],
+      uc[:confirm_reservation] = A::Reservations::ConfirmReservation.new(uow: uow, allocator: s[:allocator], events: s[:events],
+                                                                         guard: s[:reservation_guard], **reservation_deps)
+      uc[:cancel_reservation] = A::Reservations::CancelReservation.new(uow: uow, events: s[:events], guard: s[:reservation_guard],
                                                                        **reservation_deps)
       uc[:reschedule_reservation] = A::Reservations::RescheduleReservation.new(uow: uow, organizations: r[:organizations],
-                                                                               allocator: s[:allocator], contract_guard: s[:contract_guard],
+                                                                               allocator: s[:allocator], guard: s[:reservation_guard],
                                                                                **reservation_deps)
       uc[:extend_reservation] = A::Reservations::ExtendReservation.new(uow: uow, organizations: r[:organizations], allocator: s[:allocator],
                                                                        availability: r[:availability], events: s[:events], ids: ids,
-                                                                       contract_guard: s[:contract_guard], **reservation_deps)
+                                                                       guard: s[:reservation_guard], **reservation_deps)
       uc[:expire_holds] = A::Reservations::ExpireHolds.new(uow: uow, events: s[:events], **reservation_deps)
       uc[:list_reservations] = A::Reservations::ListReservations.new(uow: uow, reservations: r[:reservations])
       uc[:get_reservation] = A::Reservations::GetReservation.new(uow: uow, reservations: r[:reservations])
