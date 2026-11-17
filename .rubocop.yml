@@ -1,0 +1,78 @@
+plugins:
+  - rubocop-minitest
+  - rubocop-performance
+
+AllCops:
+  TargetRubyVersion: 4.0
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "vendor/**/*"
+    - "tmp/**/*"
+    - "coverage/**/*"
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+# Documentação de classes fica nos comentários de cabeçalho e em docs/; não exigimos em cada classe.
+Style/Documentation:
+  Enabled: false
+
+# Textos de interface e mensagens estão em português, incluindo acentuação.
+Style/AsciiComments:
+  Enabled: false
+
+Layout/LineLength:
+  Max: 140
+
+Metrics/MethodLength:
+  Max: 30
+  CountAsOne: ["array", "hash", "heredoc", "method_call"]
+
+Metrics/ClassLength:
+  Max: 300
+  CountAsOne: ["array", "hash", "heredoc", "method_call"]
+
+Metrics/ModuleLength:
+  Max: 300
+  CountAsOne: ["array", "hash", "heredoc", "method_call"]
+
+Metrics/CyclomaticComplexity:
+  Max: 12
+
+Metrics/PerceivedComplexity:
+  Max: 12
+
+Metrics/ParameterLists:
+  Max: 8
+  CountKeywordArgs: false
+
+Metrics/BlockLength:
+  Exclude:
+    - "test/**/*"
+    - "Rakefile"
+
+Naming/MethodParameterName:
+  AllowedNames: ["id", "to", "at", "a", "b", "io", "tx", "db", "ip"]
+
+Naming/PredicateMethod:
+  Enabled: false
+
+Minitest/MultipleAssertions:
+  Max: 12
+
+Minitest/AssertTruthy:
+  Enabled: false
+
+Metrics/AbcSize:
+  Max: 40
+  Exclude:
+    - "test/**/*"
+
+Minitest/TestFileName:
+  Exclude:
+    - "test/**/*_helper.rb"
+    - "test/support/**/*"

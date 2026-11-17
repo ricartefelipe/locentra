@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.vscode
+.env
+.env.*
+!.env.example
+coverage
+tmp
+log
+storage
+vendor/bundle
+test/reports
