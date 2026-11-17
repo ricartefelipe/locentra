@@ -14,6 +14,13 @@ concurrency:
 
 env:
   COVERAGE: "1"
+  # Credenciais descartáveis do PostgreSQL efêmero da CI.
+  POSTGRES_USER: postgres
+  PGPASSWORD: ci-superuser
+  PGHOST: localhost
+  LOCENTRA_OWNER_PASSWORD: ci-owner
+  LOCENTRA_APP_PASSWORD: ci-app
+  LOCENTRA_WORKER_PASSWORD: ci-worker
 
 jobs:
   analise:
@@ -52,6 +59,73 @@ jobs:
       - name: Suíte unitária (sem banco, rede ou servidor)
         run: bundle exec rake test:unit TESTOPTS="--verbose"
 
+  integracao:
+    name: Testes com PostgreSQL
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.7-alpine
+        env:
+          POSTGRES_PASSWORD: ci-superuser
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      APP_ENV: test
+      TEST_MIGRATION_DATABASE_URL: postgres://locentra_owner:ci-owner@localhost:5432/locentra_test
+      TEST_DATABASE_URL: postgres://locentra_app:ci-app@localhost:5432/locentra_test
+      TEST_WORKER_DATABASE_URL: postgres://locentra_worker:ci-worker@localhost:5432/locentra_test
+      COVERAGE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          bundler-cache: true
+      - name: Criar papéis e bancos (mesmo script do ambiente local)
+        run: sh docker/postgres/init/01-roles.sh
+      - name: Suítes unitária, repositórios, integração, Rack, CLI e concorrência com metas de cobertura
+        run: bundle exec rake test:all TESTOPTS="--verbose"
+      - name: Relatório de cobertura
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cobertura
+          path: coverage/
+          retention-days: 7
+
+  banco:
+    name: Reconstrução do banco e seed
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.7-alpine
+        env:
+          POSTGRES_PASSWORD: ci-superuser
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      APP_ENV: development
+      MIGRATION_DATABASE_URL: postgres://locentra_owner:ci-owner@localhost:5432/locentra
+      DATABASE_URL: postgres://locentra_app:ci-app@localhost:5432/locentra
+      WORKER_DATABASE_URL: postgres://locentra_worker:ci-worker@localhost:5432/locentra
+      APP_SECRET_KEY_BASE: ci-secret-key-base-0123456789abcdef0123456789abcdef
+      APP_ENCRYPTION_KEY: ci-encryption-key-0123456789abcdef
+      BCRYPT_COST: "4"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          bundler-cache: true
+      - name: Criar papéis e bancos
+        run: sh docker/postgres/init/01-roles.sh
+      - name: Migrations a partir do banco vazio
+        run: ruby bin/locentra-admin db:migrate
+      - name: Status sem divergências e reexecução sem pendências
+        run: ruby bin/locentra-admin db:status && ruby bin/locentra-admin db:migrate | grep -q "Nenhuma migration pendente"
+      - name: Seed idempotente (duas execuções)
+        run: ruby bin/locentra-admin db:seed --json && ruby bin/locentra-admin db:seed --json | grep -c '"skipped": true' | grep -q 2
+
   imagem:
     name: Build e análise da imagem
     runs-on: ubuntu-24.04
@@ -70,3 +144,11 @@ jobs:
         run: >
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0
           image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln locentra:ci
+      - name: Imagem inicia sem conexões e responde liveness
+        run: |
+          docker run -d --name web -p 9292:9292 -e APP_ENV=production -e APP_BASE_URL=https://locentra.example \
+            -e DATABASE_URL=postgres://ninguem@127.0.0.1:1/nada -e APP_SECRET_KEY_BASE=ci-secret-key-base-0123456789abcdef0123456789 \
+            -e APP_ENCRYPTION_KEY=ci-encryption-key-0123456789 locentra:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:9292/health/live && break; sleep 1; done
+          curl -fsS http://127.0.0.1:9292/health/live
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9292/health/ready)" = "503"
