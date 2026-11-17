@@ -34,7 +34,11 @@ module Locentra
           def show(ctx, errors: {}, status: 200)
             data = uc(:get_customer).call(ctx.actor, ctx.param(:id))
             reservations = uc(:list_reservations).call(ctx.actor, customer_id: data[:customer].id, limit: 10)
-            render(ctx, "customers/show", title: data[:customer].name, status: status, data: data, reservations: reservations, errors: errors)
+            attachments = @system.uow.run(ctx.actor, "customers.read") do |tx, _|
+              @system.repos[:attachments].for_owner(tx, "customer", data[:customer].id)
+            end
+            render(ctx, "customers/show", title: data[:customer].name, status: status, data: data, reservations: reservations, errors: errors,
+                                          attachments: attachments)
           end
 
           def update(ctx)

@@ -193,6 +193,7 @@ module Locentra
           ["Produtos e kits", "/produtos", "catalog.read"],
           ["Ativos", "/ativos", "catalog.read"],
           ["Usuários e permissões", "/usuarios", "members.read"],
+          ["Integrações", "/integracoes", "integrations.manage"],
           ["Organização", "/organizacao", "organization.manage"],
           ["Auditoria", "/auditoria", "audit.read"]
         ].freeze

@@ -37,6 +37,8 @@ jobs:
         run: bundle exec rubocop
       - name: Bundler Audit
         run: bundle exec bundle-audit check --update
+      - name: Actionlint (workflows)
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 
   segredos:
     name: Verificação de segredos
@@ -153,6 +155,6 @@ jobs:
           docker run -d --name web -p 9292:9292 -e APP_ENV=production -e APP_BASE_URL=https://locentra.example \
             -e DATABASE_URL=postgres://ninguem@127.0.0.1:1/nada -e APP_SECRET_KEY_BASE=ci-secret-key-base-0123456789abcdef0123456789 \
             -e APP_ENCRYPTION_KEY=ci-encryption-key-0123456789 locentra:ci
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:9292/health/live && break; sleep 1; done
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:9292/health/live && break; sleep 1; done
           curl -fsS http://127.0.0.1:9292/health/live
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9292/health/ready)" = "503"

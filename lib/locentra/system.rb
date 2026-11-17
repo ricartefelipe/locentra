@@ -21,14 +21,16 @@ module Locentra
     end
 
     def initialize(config, clock: Domain::SystemClock.new, ids: Domain::IdGenerator.new, logger: nil, metrics: nil, database_url: nil,
-                   pool_name: "web")
+                   pool_name: "web", pool_size: nil, mailer: nil, http: nil)
       @config = config
       @clock = clock
       @ids = ids
       @logger = logger || I::Observability::StructuredLogger.new(level: config.log_level, base: { "service" => "locentra" })
       @metrics = metrics || I::Observability::Metrics.new
-      @pool = I::Database::ConnectionPool.new(url: database_url || config.database_url, size: config.pool_size, timeout: config.pool_timeout,
-                                              name: pool_name, metrics: @metrics, logger: @logger)
+      @pool = I::Database::ConnectionPool.new(url: database_url || config.database_url, size: pool_size || config.pool_size,
+                                              timeout: config.pool_timeout, name: pool_name, metrics: @metrics, logger: @logger)
+      @mailer = mailer || I::SmtpMailer.new(host: config.smtp_host, port: config.smtp_port, from: config.mail_from)
+      @http = http || I::Integrations::SafeHttp.new(allow_http: !config.production?, allow_private: config.test?)
       @transactor = I::Database::Transactor.new(pool: @pool, logger: @logger, metrics: @metrics)
       build_repositories
       @uow = A::UnitOfWork.new(transactor: @transactor, access: @repos[:access], clock: clock)
@@ -49,7 +51,8 @@ module Locentra
         access: P::AccessRepository.new, organizations: P::OrganizationRepository.new, subscriptions: P::SubscriptionRepository.new,
         customers: P::CustomerRepository.new, catalog: P::CatalogRepository.new, availability: P::AvailabilityRepository.new,
         reservations: P::ReservationRepository.new, audit: P::AuditRepository.new, pricing: P::PricingRepository.new,
-        credentials: P::CredentialRepository.new, idempotency: P::IdempotencyRepository.new, reports: P::ReportsRepository.new
+        credentials: P::CredentialRepository.new, idempotency: P::IdempotencyRepository.new, reports: P::ReportsRepository.new,
+        webhooks: P::WebhookRepository.new, attachments: P::AttachmentRepository.new
       }
     end
 
@@ -65,8 +68,17 @@ module Locentra
         limits: A::Organizations::PlanLimits.new(subscriptions: repos[:subscriptions]),
         allocator: A::Availability::Allocator.new(repository: repos[:availability], ids: ids),
         pricer: A::Reservations::Pricer.new(pricing: repos[:pricing]),
-        pricing_rules: Domain::Pricing::Rules.new
+        pricing_rules: Domain::Pricing::Rules.new,
+        mailer: @mailer, http: @http,
+        box: I::SecretBox.new(config.encryption_key),
+        storage: I::Storage::Local.new(root: config.storage_root),
+        mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__))
       }
+      @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers])
+      @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
+                                                                  clock: clock, ids: ids)
+      @services[:deliver_webhook] = A::Webhooks::Deliver.new(transactor: transactor, webhooks: repos[:webhooks], http: @http, box: @services[:box],
+                                                             clock: clock, logger: logger)
     end
 
     def common = { uow: uow, clock: clock }
@@ -76,6 +88,7 @@ module Locentra
       build_identity_use_cases(uc)
       build_catalog_use_cases(uc)
       build_reservation_use_cases(uc)
+      build_integration_use_cases(uc)
       @use_cases = UseCases.new(uc)
     end
 
@@ -169,6 +182,28 @@ module Locentra
       uc[:expire_holds] = A::Reservations::ExpireHolds.new(uow: uow, events: s[:events], **reservation_deps)
       uc[:list_reservations] = A::Reservations::ListReservations.new(uow: uow, reservations: r[:reservations])
       uc[:get_reservation] = A::Reservations::GetReservation.new(uow: uow, reservations: r[:reservations])
+    end
+
+    def build_integration_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      uc[:create_webhook] = A::Webhooks::CreateEndpoint.new(**common, webhooks: r[:webhooks], limits: s[:limits], http: s[:http], box: s[:box],
+                                                                      audit: audit, ids: ids)
+      uc[:disable_webhook] = A::Webhooks::DisableEndpoint.new(**common, webhooks: r[:webhooks], audit: audit)
+      uc[:list_webhooks] = A::Webhooks::ListEndpoints.new(uow: uow, webhooks: r[:webhooks])
+      uc[:redeliver_webhook] = A::Webhooks::Redeliver.new(uow: uow, webhooks: r[:webhooks], queue: queue, audit: audit)
+      uc[:upload_attachment] = A::Attachments::Upload.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit, ids: ids,
+                                                                    max_bytes: config.max_upload_bytes)
+      uc[:download_attachment] = A::Attachments::Download.new(uow: uow, attachments: r[:attachments], storage: s[:storage],
+                                                              portal_scope: s.fetch(:portal_scope) { NoPortalScope.new })
+      uc[:remove_attachment] = A::Attachments::Remove.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit)
+    end
+
+    # Escopo de portal antes do portal do cliente existir: nenhum anexo é acessível por clientes.
+    class NoPortalScope
+      def customer_owns?(*) = false
     end
 
     # Acesso explícito aos casos de uso por nome, com erro claro para nomes inexistentes.

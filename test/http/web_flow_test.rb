@@ -104,7 +104,7 @@ class WebFlowTest < HttpTest
     post_form "/reservas", { "cliente_id" => customer_id, "filial_id" => @org[:branch].id, "inicio" => "2026-03-10T09:00",
                              "fim" => "2026-03-11T09:00", "produto" => [product_id], "quantidade" => ["1"], "modo" => "hold" }
 
-    assert_equal 303, last_response.status, last_response.body[0, 400]
+    assert_equal 303, last_response.status
     reservation_path = last_response.location
     follow_redirect!
 
@@ -143,6 +143,44 @@ class WebFlowTest < HttpTest
     delete "/clientes"
 
     assert_equal 405, last_response.status
+  end
+
+  def test_attachments_upload_download_and_tenant_isolation
+    login("dona@alfa.test")
+    customer = create_customer(@org[:actor])
+    get "/clientes/#{customer.id}"
+    pdf = Rack::Test::UploadedFile.new(StringIO.new("%PDF-1.4\n%teste\n"), "application/pdf", original_filename: "../../contrato.pdf")
+    post "/anexos", { "_csrf" => csrf, "dono_tipo" => "customer", "dono_id" => customer.id, "arquivo" => pdf }
+
+    assert_equal 303, last_response.status
+    attachment = owner_query("SELECT id, filename, storage_key FROM attachments").first
+
+    assert_equal "contrato.pdf", attachment["filename"]
+    refute_includes attachment["storage_key"], "contrato"
+    get "/anexos/#{attachment["id"]}"
+
+    assert_equal 200, last_response.status
+    assert_equal "application/pdf", last_response.headers["content-type"]
+    assert_includes last_response.headers["content-security-policy"], "sandbox"
+    assert last_response.body.start_with?("%PDF-")
+    get "/clientes/#{customer.id}"
+    html = Rack::Test::UploadedFile.new(StringIO.new("<script>alert(1)</script>"), "application/pdf", original_filename: "falso.pdf")
+    post "/anexos", { "_csrf" => csrf, "dono_tipo" => "customer", "dono_id" => customer.id, "arquivo" => html }
+
+    assert_equal 1, owner_query("SELECT count(*) AS n FROM attachments").first["n"].to_i, "conteúdo não PDF recusado"
+    post_form "/sair", {}
+    get "/anexos/#{attachment["id"]}"
+
+    assert_equal 303, last_response.status, "download exige autenticação"
+    other = create_organization(name: "Locadora Ômega", email: "omega@example.test")
+    login("omega@example.test")
+    get "/anexos/#{attachment["id"]}"
+
+    assert_equal 404, last_response.status
+    assert other
+    get "/storage/#{attachment["storage_key"]}"
+
+    assert_equal 404, last_response.status, "diretório de anexos não é servido estaticamente"
   end
 
   def test_health_endpoints

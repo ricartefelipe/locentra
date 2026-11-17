@@ -1,0 +1,15 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Worker de tarefas: usa WORKER_DATABASE_URL (papel locentra_worker) e encerra graciosamente em TERM/INT.
+require "bundler/setup"
+require_relative "../lib/locentra/system"
+require_relative "../lib/locentra/interfaces/worker/runner"
+
+config = Locentra::Config.from_env(ENV)
+abort "WORKER_DATABASE_URL não definido" if config.worker_database_url.to_s.empty?
+
+system = Locentra::System.new(config, database_url: config.worker_database_url, pool_name: "worker", pool_size: config.worker_concurrency + 2)
+handlers = Locentra::Interfaces::Worker::Handlers.new(system, mailer: system.services[:mailer], templates: system.services[:mail_templates])
+Locentra::Interfaces::Worker::Runner.new(system: system, handlers: handlers, concurrency: config.worker_concurrency,
+                                         logger: system.logger.with("process" => "worker")).run
