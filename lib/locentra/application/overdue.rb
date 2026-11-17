@@ -27,7 +27,7 @@ module Locentra
           @uow.run(actor, "fulfillment.write") do |tx, current|
             now = @clock.now
             refresh_extended(tx, now)
-            overdue = @operations.lock_overdue(tx, now, limit)
+            overdue = @operations.lock_overdue(tx, now, limit).select { |reservation, _| Domain::Alerts::Overdue.overdue?(reservation, now) }
             overdue.each { |reservation, since| flag(tx, current, reservation, since) }
             reservations = overdue.map(&:first)
             identify_affected(tx, reservations, now) unless reservations.empty?

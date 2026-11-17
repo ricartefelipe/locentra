@@ -182,13 +182,14 @@ module Locentra
         end
 
         # Alocações de reservas ainda não retiradas que podem ser realocadas para outra unidade.
+        # Bloqueios temporários vencidos não ocupam disponibilidade e são ignorados.
         def future_reservation_allocations(tx, asset_id, now)
           tx.query(<<~SQL, [tx.tenant_id!, asset_id, now])
             SELECT a.id, a.asset_id, a.product_id, lower(a.period) AS starts_at, upper(a.period) AS ends_at, r.id AS reservation_id,
                    r.code AS reservation_code, r.starts_at AS rental_starts_at, r.ends_at AS rental_ends_at
               FROM asset_allocations a JOIN reservations r ON r.organization_id = a.organization_id AND r.id = a.reservation_id
              WHERE a.organization_id = $1 AND a.asset_id = $2 AND a.active AND upper(a.period) > $3
-               AND r.status IN ('held', 'confirmed')
+               AND (r.status = 'confirmed' OR (r.status = 'held' AND r.hold_expires_at > $3))
              ORDER BY lower(a.period)
           SQL
         end
