@@ -52,7 +52,8 @@ module Locentra
         customers: P::CustomerRepository.new, catalog: P::CatalogRepository.new, availability: P::AvailabilityRepository.new,
         reservations: P::ReservationRepository.new, audit: P::AuditRepository.new, pricing: P::PricingRepository.new,
         credentials: P::CredentialRepository.new, idempotency: P::IdempotencyRepository.new, reports: P::ReportsRepository.new,
-        webhooks: P::WebhookRepository.new, attachments: P::AttachmentRepository.new
+        webhooks: P::WebhookRepository.new, attachments: P::AttachmentRepository.new,
+        quotes: P::QuoteRepository.new, contracts: P::ContractRepository.new
       }
     end
 
@@ -72,7 +73,9 @@ module Locentra
         mailer: @mailer, http: @http,
         box: I::SecretBox.new(config.encryption_key),
         storage: I::Storage::Local.new(root: config.storage_root),
-        mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__))
+        mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__)),
+        contract_renderer: I::Documents::ContractPdf.new,
+        contract_guard: A::Contracts::ReservationGuard.new(contracts: repos[:contracts])
       }
       @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers])
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
@@ -89,6 +92,8 @@ module Locentra
       build_catalog_use_cases(uc)
       build_reservation_use_cases(uc)
       build_integration_use_cases(uc)
+      build_quote_use_cases(uc)
+      build_contract_use_cases(uc)
       @use_cases = UseCases.new(uc)
     end
 
@@ -173,12 +178,14 @@ module Locentra
                                                                        **reservation_deps)
       uc[:confirm_reservation] =
         A::Reservations::ConfirmReservation.new(uow: uow, allocator: s[:allocator], events: s[:events], **reservation_deps)
-      uc[:cancel_reservation] = A::Reservations::CancelReservation.new(uow: uow, events: s[:events], **reservation_deps)
+      uc[:cancel_reservation] = A::Reservations::CancelReservation.new(uow: uow, events: s[:events], contract_guard: s[:contract_guard],
+                                                                       **reservation_deps)
       uc[:reschedule_reservation] = A::Reservations::RescheduleReservation.new(uow: uow, organizations: r[:organizations],
-                                                                               allocator: s[:allocator], **reservation_deps)
+                                                                               allocator: s[:allocator], contract_guard: s[:contract_guard],
+                                                                               **reservation_deps)
       uc[:extend_reservation] = A::Reservations::ExtendReservation.new(uow: uow, organizations: r[:organizations], allocator: s[:allocator],
                                                                        availability: r[:availability], events: s[:events], ids: ids,
-                                                                       **reservation_deps)
+                                                                       contract_guard: s[:contract_guard], **reservation_deps)
       uc[:expire_holds] = A::Reservations::ExpireHolds.new(uow: uow, events: s[:events], **reservation_deps)
       uc[:list_reservations] = A::Reservations::ListReservations.new(uow: uow, reservations: r[:reservations])
       uc[:get_reservation] = A::Reservations::GetReservation.new(uow: uow, reservations: r[:reservations])
@@ -199,6 +206,55 @@ module Locentra
       uc[:download_attachment] = A::Attachments::Download.new(uow: uow, attachments: r[:attachments], storage: s[:storage],
                                                               portal_scope: s.fetch(:portal_scope) { NoPortalScope.new })
       uc[:remove_attachment] = A::Attachments::Remove.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit)
+    end
+
+    # Orçamentos: compõem criação, confirmação e cancelamento de reservas na mesma transação.
+    def build_quote_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      builder = A::Quotes::VersionBuilder.new(organizations: r[:organizations], allocator: s[:allocator], pricer: s[:pricer], ids: ids)
+      hold_release = A::Quotes::HoldRelease.new(reservations: r[:reservations], cancel: uc[:cancel_reservation])
+      expirer = A::Quotes::Expirer.new(quotes: r[:quotes], hold_release: hold_release, audit: audit, events: s[:events])
+      quote_deps = { quotes: r[:quotes], audit: audit, clock: clock }
+      uc[:create_quote] = A::Quotes::CreateQuote.new(uow: uow, customers: r[:customers], organizations: r[:organizations], builder: builder, ids: ids,
+                                                     **quote_deps)
+      uc[:revise_quote] = A::Quotes::ReviseQuote.new(uow: uow, customers: r[:customers], organizations: r[:organizations], builder: builder,
+                                                     hold_release: hold_release, **quote_deps)
+      uc[:send_quote] = A::Quotes::SendQuote.new(uow: uow, create_reservation: uc[:create_reservation], events: s[:events], **quote_deps)
+      uc[:approve_quote] = A::Quotes::ApproveQuote.new(uow: uow, expirer: expirer, events: s[:events], **quote_deps)
+      uc[:reject_quote] = A::Quotes::RejectQuote.new(uow: uow, hold_release: hold_release, events: s[:events], **quote_deps)
+      uc[:expire_quotes] = A::Quotes::ExpireQuotes.new(uow: uow, quotes: r[:quotes], expirer: expirer, clock: clock)
+      uc[:convert_quote] = A::Quotes::ConvertQuote.new(uow: uow, reservations: r[:reservations], create_reservation: uc[:create_reservation],
+                                                       confirm_reservation: uc[:confirm_reservation], events: s[:events], **quote_deps)
+      uc[:list_quotes] = A::Quotes::ListQuotes.new(uow: uow, quotes: r[:quotes])
+      uc[:get_quote] = A::Quotes::GetQuote.new(uow: uow, quotes: r[:quotes], customers: r[:customers], reservations: r[:reservations])
+    end
+
+    # Contratos: documentos via Upload de anexos; aditivo e cancelamento compõem casos de uso de reserva.
+    def build_contract_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      documents = A::Contracts::DocumentGenerator.new(contracts: r[:contracts], organizations: r[:organizations], renderer: s[:contract_renderer],
+                                                      upload: uc[:upload_attachment], ids: ids)
+      contract_deps = { contracts: r[:contracts], audit: audit, clock: clock }
+      uc[:issue_contract] = A::Contracts::IssueContract.new(uow: uow, reservations: r[:reservations], customers: r[:customers],
+                                                            organizations: r[:organizations], quotes: r[:quotes], documents: documents,
+                                                            events: s[:events], ids: ids, **contract_deps)
+      uc[:accept_contract] = A::Contracts::AcceptContract.new(uow: uow, events: s[:events], **contract_deps)
+      uc[:amend_contract] = A::Contracts::AmendContract.new(uow: uow, reservations: r[:reservations], extend_reservation: uc[:extend_reservation],
+                                                            documents: documents, organizations: r[:organizations], events: s[:events], ids: ids,
+                                                            **contract_deps)
+      uc[:cancel_contract] = A::Contracts::CancelContract.new(uow: uow, reservations: r[:reservations], cancel_reservation: uc[:cancel_reservation],
+                                                              events: s[:events], ids: ids, **contract_deps)
+      uc[:close_contract] = A::Contracts::CloseContract.new(uow: uow, reservations: r[:reservations], **contract_deps)
+      uc[:preview_contract_cancellation] = A::Contracts::PreviewCancellation.new(uow: uow, contracts: r[:contracts], clock: clock)
+      uc[:list_contracts] = A::Contracts::ListContracts.new(uow: uow, contracts: r[:contracts])
+      uc[:get_contract] = A::Contracts::GetContract.new(uow: uow, contracts: r[:contracts], reservations: r[:reservations], clock: clock)
+      uc[:reservation_links] = A::Contracts::ReservationLinks.new(uow: uow, contracts: r[:contracts], quotes: r[:quotes])
     end
 
     # Escopo de portal antes do portal do cliente existir: nenhum anexo é acessível por clientes.

@@ -64,7 +64,11 @@ module Locentra
         end
 
         # input: customer_id, branch_id, period (Period), lines ([Line]), mode, hold_minutes, notes,
-        # coupon_code, manual_discount_bps, fees, source, quote_id.
+        # coupon_code, manual_discount_bps, fees, source, quote_id, pricing_snapshot.
+        #
+        # `pricing_snapshot` ({ items:, summary: }) é um snapshot de preços pré-calculado (por exemplo,
+        # o da versão aprovada de um orçamento): substitui a precificação pelo catálogo atual e precisa
+        # corresponder exatamente aos itens e ao período informados.
         def call(actor, input, tx: nil)
           mode = input.fetch(:mode, "hold").to_s
           raise Domain::ValidationError.field("modo", "use request, hold ou confirm") unless MODES.include?(mode)
@@ -88,7 +92,11 @@ module Locentra
           branch_id = active_branch!(tx, input.fetch(:branch_id))
           org = @organizations.find(tx, tx.tenant_id!)
           products = active_products!(tx, lines)
-          priced, summary = price(tx, current, input, products: products, lines: lines, period: period, org: org, customer: customer, now: now)
+          priced, summary = if input[:pricing_snapshot]
+                              snapshot_pricing!(input[:pricing_snapshot], lines, period)
+                            else
+                              price(tx, current, input, products: products, lines: lines, period: period, org: org, customer: customer, now: now)
+                            end
           reservation = build(tx, input, mode, org: org, customer: customer, branch_id: branch_id, period: period, summary: summary, now: now)
           @reservations.insert(tx, reservation, summary, current.audit_actor_id, now)
           items = insert_items(tx, reservation, priced, now)
@@ -124,6 +132,18 @@ module Locentra
           @pricer.price(tx, products: products, lines: lines, period: period, zone: org.time_zone, customer_id: customer.id,
                             coupon_code: input[:coupon_code], manual_discount_bps: input.fetch(:manual_discount_bps, 0).to_i,
                             fees: input.fetch(:fees, []), now: now, discount_limit_bps: limit, redeem: true)
+        end
+
+        # O snapshot é usado como está: itens e período precisam coincidir com a reserva solicitada.
+        def snapshot_pricing!(snapshot, lines, period)
+          items = snapshot.fetch(:items)
+          summary = snapshot.fetch(:summary)
+          expected = lines.map { |l| [l.product_id, l.quantity] }.sort
+          given = items.map { |i| [i.fetch("product_id"), i.fetch("quantity")] }.sort
+          raise Domain::ValidationError.field("precos", "o snapshot de preços não corresponde aos itens") unless expected == given
+          raise Domain::ValidationError.field("precos", "o snapshot de preços não corresponde ao período") unless summary["period"] == period.to_h
+
+          [items, summary]
         end
 
         # O código sequencial definitivo é atribuído em `finalize`: o lock da linha do contador fica
@@ -223,26 +243,30 @@ module Locentra
         end
       end
 
+      # Cancelamento. Reservas com contrato em aberto são canceladas pelo contrato (que aplica a
+      # política de cancelamento); a composição com `tx:` é usada por esse caso de uso.
       class CancelReservation
-        def initialize(uow:, reservations:, audit:, events:, clock:)
+        def initialize(uow:, reservations:, audit:, events:, clock:, contract_guard:)
           @uow = uow
           @reservations = reservations
           @audit = audit
           @events = events
           @clock = clock
+          @contract_guard = contract_guard
         end
 
         def call(actor, reservation_id, reason:, tx: nil)
-          return execute(tx, actor, reservation_id, reason) if tx
+          return execute(tx, actor, reservation_id, reason, guarded: false) if tx
 
-          @uow.run(actor, "reservations.cancel") { |t, current| execute(t, current, reservation_id, reason) }
+          @uow.run(actor, "reservations.cancel") { |t, current| execute(t, current, reservation_id, reason, guarded: true) }
         end
 
         private
 
-        def execute(tx, current, reservation_id, reason)
+        def execute(tx, current, reservation_id, reason, guarded:)
           now = @clock.now
           reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
+          @contract_guard.ensure_without_contract!(tx, reservation, "cancel") if guarded
           cancelled = reservation.cancel
           text = Domain::Organizations::Text.required(reason, "motivo", max: 500)
           @reservations.update_status(tx, cancelled, now, "cancelled_at" => now, "cancellation_reason" => text)
@@ -254,21 +278,24 @@ module Locentra
       end
 
       # Reagendamento: libera as alocações atuais e aloca o novo período na mesma transação. Em
-      # conflito, a transação é desfeita e a reserva permanece no período original.
+      # conflito, a transação é desfeita e a reserva permanece no período original. Reservas com
+      # contrato em aberto não são reagendadas: a alteração de prazo é feita por aditivo.
       class RescheduleReservation
-        def initialize(uow:, reservations:, organizations:, allocator:, audit:, clock:)
+        def initialize(uow:, reservations:, organizations:, allocator:, audit:, clock:, contract_guard:)
           @uow = uow
           @reservations = reservations
           @organizations = organizations
           @allocator = allocator
           @audit = audit
           @clock = clock
+          @contract_guard = contract_guard
         end
 
         def call(actor, reservation_id, period:)
           @uow.run(actor, "reservations.write") do |tx, current|
             now = @clock.now
             reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
+            @contract_guard.ensure_without_contract!(tx, reservation, "reschedule")
             moved = reservation.reschedule(period, now)
             if reservation.occupying?
               previous = @reservations.allocated_asset_ids(tx, reservation.id)
@@ -289,8 +316,11 @@ module Locentra
 
       # Extensão do fim: as alocações existentes são estendidas no lugar (mesmos ativos, que podem
       # estar com o cliente). Se o novo período invadir outra reserva, a operação é recusada.
+      #
+      # Reservas com contrato em aberto são estendidas somente por aditivo (`AmendContract`), que
+      # compõe este caso de uso na mesma transação (`tx:`).
       class ExtendReservation
-        def initialize(uow:, reservations:, organizations:, allocator:, availability:, audit:, events:, clock:, ids:)
+        def initialize(uow:, reservations:, organizations:, allocator:, availability:, audit:, events:, clock:, ids:, contract_guard:)
           @uow = uow
           @reservations = reservations
           @organizations = organizations
@@ -300,36 +330,46 @@ module Locentra
           @events = events
           @clock = clock
           @ids = ids
+          @contract_guard = contract_guard
         end
 
-        def call(actor, reservation_id, ends_at:)
-          @uow.run(actor, "reservations.write") do |tx, current|
-            now = @clock.now
-            reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
-            extended = reservation.extend_to(ends_at, now)
-            products = @allocator.products_for(tx, @reservations.allocated_product_ids(tx, reservation.id))
-            extend_allocations(tx, reservation, extended, products, now)
-            zone = @organizations.find(tx, tx.tenant_id!).time_zone
-            adjustment = @reservations.items(tx, reservation.id).sum do |item|
-              next 0 if item["pricing"].fetch("table", {}).empty?
+        def call(actor, reservation_id, ends_at:, tx: nil)
+          return execute(tx, actor, reservation_id, ends_at, guarded: false) if tx
 
-              delta, repriced = Domain::Pricing::Extension.adjustment(line_snapshot: item["pricing"], new_period: extended.period,
-                                                                      zone: zone)
-              @reservations.insert_adjustment(tx, "id" => @ids.uuid, "reservation_id" => reservation.id, "reservation_item_id" => item["id"],
-                                                  "kind" => "extension", "amount_cents" => delta.cents, "created_by" => current.audit_actor_id,
-                                                  "details" => { "from_end" => reservation.period.ends_at.iso8601, "to_end" => ends_at.iso8601,
-                                                                 "repriced_total_cents" => repriced["total_cents"] }, "created_at" => now)
-              delta.cents
-            end
-            @reservations.update_period(tx, extended, now, extension_cents: adjustment)
-            @audit.record(tx, current, "reservation.extended", "reservation", reservation.id,
-                          "from_end" => reservation.period.ends_at.iso8601, "to_end" => ends_at.iso8601, "adjustment_cents" => adjustment)
-            @events.publish(tx, "reservation.extended", "reservation", reservation.id, "adjustment_cents" => adjustment)
-            { reservation: extended, adjustment: Domain::Money.new(adjustment) }
-          end
+          @uow.run(actor, "reservations.write") { |t, current| execute(t, current, reservation_id, ends_at, guarded: true) }
         end
 
         private
+
+        def execute(tx, current, reservation_id, ends_at, guarded:)
+          now = @clock.now
+          reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
+          @contract_guard.ensure_without_contract!(tx, reservation, "extend") if guarded
+          extended = reservation.extend_to(ends_at, now)
+          products = @allocator.products_for(tx, @reservations.allocated_product_ids(tx, reservation.id))
+          extend_allocations(tx, reservation, extended, products, now)
+          adjustment = record_adjustments(tx, current, reservation, extended, ends_at, now)
+          @reservations.update_period(tx, extended, now, extension_cents: adjustment)
+          @audit.record(tx, current, "reservation.extended", "reservation", reservation.id,
+                        "from_end" => reservation.period.ends_at.iso8601, "to_end" => ends_at.iso8601, "adjustment_cents" => adjustment)
+          @events.publish(tx, "reservation.extended", "reservation", reservation.id, "adjustment_cents" => adjustment)
+          { reservation: extended, adjustment: Domain::Money.new(adjustment) }
+        end
+
+        # Diferença por item calculada com o snapshot da tabela contratada; o preço original é mantido.
+        def record_adjustments(tx, current, reservation, extended, ends_at, now)
+          zone = @organizations.find(tx, tx.tenant_id!).time_zone
+          @reservations.items(tx, reservation.id).sum do |item|
+            next 0 if item["pricing"].fetch("table", {}).empty?
+
+            delta, repriced = Domain::Pricing::Extension.adjustment(line_snapshot: item["pricing"], new_period: extended.period, zone: zone)
+            @reservations.insert_adjustment(tx, "id" => @ids.uuid, "reservation_id" => reservation.id, "reservation_item_id" => item["id"],
+                                                "kind" => "extension", "amount_cents" => delta.cents, "created_by" => current.audit_actor_id,
+                                                "details" => { "from_end" => reservation.period.ends_at.iso8601, "to_end" => ends_at.iso8601,
+                                                               "repriced_total_cents" => repriced["total_cents"] }, "created_at" => now)
+            delta.cents
+          end
+        end
 
         def extend_allocations(tx, reservation, extended, products, now)
           shortages = []
