@@ -15,6 +15,8 @@
   </div>
 <% elsif p.status == "cancelled" %>
   <div class="notice notice-danger" role="status">Separação cancelada em <%= datetime(p.cancelled_at) %>: <%= p.notes %></div>
+<% elsif r.status != "confirmed" %>
+  <div class="notice notice-danger" role="status">A reserva está <%= r.status_label.downcase %>; esta separação não pode ser entregue.</div>
 <% end %>
 <section class="panel" aria-labelledby="h-conferencia">
   <h2 id="h-conferencia">Separação e conferência</h2>

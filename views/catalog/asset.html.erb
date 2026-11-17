@@ -42,7 +42,10 @@
   </section>
   <section class="panel">
     <h2>Situação operacional</h2>
-    <% if can?("assets.write") %>
+    <% managed = Locentra::Application::Catalog::ChangeAssetStatus::MANAGED[a.status] %>
+    <% if can?("assets.write") && managed %>
+      <p class="notice" role="status">Situação controlada pela operação: <%= managed %>.</p>
+    <% elsif can?("assets.write") %>
       <form method="post" action="/ativos/<%= a.id %>/situacao" class="stack">
         <%= csrf_field %>
         <label for="situacao">Nova situação</label>

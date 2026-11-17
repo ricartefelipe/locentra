@@ -132,6 +132,17 @@ module Locentra
           SQL
         end
 
+        # Inspeção pendente ou ordem de manutenção ativa que controla a situação do ativo.
+        def operational_hold(tx, asset_id)
+          tx.query_value(<<~SQL, [tx.tenant_id!, asset_id])
+            SELECT CASE
+                     WHEN EXISTS (SELECT 1 FROM inspections WHERE organization_id = $1 AND asset_id = $2 AND status = 'pending') THEN 'inspection'
+                     WHEN EXISTS (SELECT 1 FROM maintenance_orders WHERE organization_id = $1 AND asset_id = $2 AND status IN ('open', 'in_progress'))
+                       THEN 'maintenance'
+                   END
+          SQL
+        end
+
         def asset_events(tx, asset_id, limit: 100)
           tx.query(<<~SQL, [tx.tenant_id!, asset_id, limit])
             SELECT kind, from_status, to_status, from_branch_id, to_branch_id, actor_id, reference_type, reference_id, notes, occurred_at

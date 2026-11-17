@@ -178,6 +178,9 @@ module Locentra
       # reservas afetadas são informadas para decisão.
       class ChangeAssetStatus
         TARGETS = %w[available in_maintenance in_inspection lost retired].freeze
+        # Situações controladas pelos fluxos de operação: a mudança manual não pode contorná-los.
+        MANAGED = { "checked_out" => "registre a devolução da reserva", "in_transit" => "registre o recebimento da transferência" }.freeze
+        HOLDS = { "inspection" => "decida a inspeção pendente", "maintenance" => "conclua ou cancele a ordem de manutenção" }.freeze
 
         def initialize(uow:, catalog:, availability:, allocator:, audit:, clock:, ids:)
           @uow = uow
@@ -194,6 +197,7 @@ module Locentra
 
           @uow.run(actor, "assets.write") do |tx, current|
             asset = @catalog.lock_asset(tx, Domain::Identifier.parse(asset_id)) || raise(Domain::NotFound, "ativo")
+            guard_operational!(tx, asset)
             now = @clock.now
             updated = asset.transition_to(status, unavailable_until: unavailable_until)
             @catalog.update_asset_status(tx, updated, now)
@@ -207,6 +211,11 @@ module Locentra
         end
 
         private
+
+        def guard_operational!(tx, asset)
+          flow = MANAGED[asset.status] || HOLDS[@catalog.operational_hold(tx, asset.id)]
+          raise Domain::Conflict.new("situação controlada pela operação: #{flow}", code: "asset_in_operation") if flow
+        end
 
         def relocate_future!(tx, asset, now)
           pending = @availability.future_reservation_allocations(tx, asset.id, now)

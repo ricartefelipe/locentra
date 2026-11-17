@@ -111,6 +111,35 @@ class DamageFlowTest < DatabaseTest
     assert_raises(D::ValidationError) { uc(:list_damage_reports).call(@actor, filter: "x") }
   end
 
+  def test_manual_status_change_cannot_bypass_operational_flows
+    reservation = confirmed([line(@camera, 1)])
+    pick_up(reservation)
+    out = pending_lines(reservation).first["asset_id"]
+
+    error = assert_raises(D::Conflict) { uc(:change_asset_status).call(@actor, out, status: "available") }
+    assert_equal "asset_in_operation", error.code
+    assert_includes error.message, "devolução"
+    return_all(reservation, requires_inspection: true)
+
+    assert_raises(D::Conflict) { uc(:change_asset_status).call(@actor, out, status: "available") }
+    uc(:reject_inspection).call(@actor, uc(:list_inspections).call(@actor).first["id"], notes: "foco desregulado")
+    error = assert_raises(D::Conflict) { uc(:change_asset_status).call(@actor, out, status: "available") }
+    assert_includes error.message, "ordem de manutenção"
+    assert_equal "in_maintenance", asset_status(out)
+  end
+
+  def test_delivery_is_refused_when_allocations_change_after_check
+    reservation = confirmed([line(@chairs, 4)])
+    pickup = uc(:start_pickup).call(@actor, reservation.id)
+    uc(:check_pickup).call(@actor, pickup.id, check_entries(@actor, pickup, "CAD-OP" => 2))
+    uc(:reschedule_reservation).call(@actor, reservation.id, period: after_rental)
+
+    error = assert_raises(D::Conflict) { uc(:deliver_pickup).call(@actor, pickup.id, picker: { kind: "customer" }) }
+    assert_equal "allocation_changed", error.code
+    assert_equal "confirmed", reservation_status(reservation)
+    assert_equal 4, count("SELECT quantity FROM stock_allocations WHERE reservation_id = $1 AND active", [reservation.id])
+  end
+
   private
 
   def member(email, role)

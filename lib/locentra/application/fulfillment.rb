@@ -216,11 +216,22 @@ module Locentra
             end
           elsif done.delivered_quantity.zero?
             @allocations.release_stock_allocation(tx, line.stock_allocation_id, now)
-          elsif done.undelivered_quantity.positive?
-            @allocations.set_stock_quantity(tx, line.stock_allocation_id, done.delivered_quantity)
+          else
+            hand_over_stock(tx, done)
           end
           @fulfillment.update_pickup_line(tx, done, release_reason: done.undelivered_quantity.positive? ? "não conferido na retirada" : nil)
           done
+        end
+
+        # A alocação de estoque precisa continuar ativa (reagendamento ou cancelamento a substituem);
+        # a quantidade não conferida deixa de ocupar o estoque.
+        def hand_over_stock(tx, line)
+          allocation = @allocations.lock_stock_allocation(tx, line.stock_allocation_id)
+          unless allocation&.fetch("active")
+            raise Domain::Conflict.new("a alocação do item foi alterada após a conferência; reinicie a separação", code: "allocation_changed")
+          end
+
+          @allocations.set_stock_quantity(tx, allocation["id"], line.delivered_quantity) if line.undelivered_quantity.positive?
         end
 
         def hand_over(tx, current, pickup, line, now)
