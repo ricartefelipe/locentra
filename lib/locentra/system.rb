@@ -52,7 +52,11 @@ module Locentra
         customers: P::CustomerRepository.new, catalog: P::CatalogRepository.new, availability: P::AvailabilityRepository.new,
         reservations: P::ReservationRepository.new, audit: P::AuditRepository.new, pricing: P::PricingRepository.new,
         credentials: P::CredentialRepository.new, idempotency: P::IdempotencyRepository.new, reports: P::ReportsRepository.new,
-        webhooks: P::WebhookRepository.new, attachments: P::AttachmentRepository.new
+        webhooks: P::WebhookRepository.new, attachments: P::AttachmentRepository.new,
+        fulfillment: P::FulfillmentRepository.new, operational_allocations: P::OperationalAllocationRepository.new,
+        inspections: P::InspectionRepository.new, maintenance_orders: P::MaintenanceOrderRepository.new,
+        damage_reports: P::DamageReportRepository.new, transfers: P::TransferRepository.new, alerts: P::AlertRepository.new,
+        operations: P::OperationsRepository.new
       }
     end
 
@@ -89,6 +93,7 @@ module Locentra
       build_catalog_use_cases(uc)
       build_reservation_use_cases(uc)
       build_integration_use_cases(uc)
+      build_operations_use_cases(uc)
       @use_cases = UseCases.new(uc)
     end
 
@@ -199,6 +204,88 @@ module Locentra
       uc[:download_attachment] = A::Attachments::Download.new(uow: uow, attachments: r[:attachments], storage: s[:storage],
                                                               portal_scope: s.fetch(:portal_scope) { NoPortalScope.new })
       uc[:remove_attachment] = A::Attachments::Remove.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit)
+    end
+
+    # Retirada, devolução, inspeção, avarias, manutenção, transferências e atrasos.
+    def build_operations_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      ops = A::Operations
+      allocations = r[:operational_allocations]
+      ledger = ops::AssetLedger.new(catalog: r[:catalog], ids: ids)
+      alert_book = ops::AlertBook.new(alerts: r[:alerts], clock: clock, ids: ids)
+      relocation = ops::AssetRelocation.new(availability: r[:availability], allocator: s[:allocator])
+      coverage = ops::StockCoverage.new(allocations: allocations)
+      desk = ops::MaintenanceDesk.new(orders: r[:maintenance_orders], inspections: r[:inspections], allocations: allocations,
+                                      organizations: r[:organizations], ids: ids)
+      pickup = { reservations: r[:reservations], fulfillment: r[:fulfillment] }
+
+      uc[:start_pickup] = A::Fulfillment::StartPickup.new(**common, **pickup, audit: audit, ids: ids)
+      uc[:check_pickup] = A::Fulfillment::CheckPickup.new(**common, **pickup, allocations: allocations, availability: r[:availability],
+                                                                              catalog: r[:catalog], audit: audit)
+      uc[:deliver_pickup] = A::Fulfillment::DeliverPickup.new(**common, **pickup, allocations: allocations, customers: r[:customers],
+                                                                                  catalog: r[:catalog], ledger: ledger, audit: audit, events: s[:events])
+      uc[:cancel_pickup] = A::Fulfillment::CancelPickup.new(**common, **pickup, audit: audit)
+      uc[:get_pickup] = A::Fulfillment::GetPickup.new(uow: uow, **pickup, customers: r[:customers])
+
+      uc[:register_return] = A::Returns::RegisterReturn.new(
+        **common, **pickup, allocations: allocations, availability: r[:availability], catalog: r[:catalog], organizations: r[:organizations],
+                            desk: desk, damage_reports: r[:damage_reports], ledger: ledger, relocation: relocation, coverage: coverage,
+                            alert_book: alert_book, alerts: r[:alerts], audit: audit, events: s[:events], ids: ids
+      )
+      uc[:return_form] = A::Returns::ReturnForm.new(uow: uow, **pickup, customers: r[:customers])
+      uc[:get_return] = A::Returns::GetReturn.new(uow: uow, **pickup)
+
+      inspections = A::Inspections
+      uc[:approve_inspection] = inspections::ApproveInspection.new(**common, inspections: r[:inspections], catalog: r[:catalog],
+                                                                             allocations: allocations, ledger: ledger, audit: audit)
+      uc[:reject_inspection] = inspections::RejectInspection.new(**common, inspections: r[:inspections], catalog: r[:catalog], desk: desk,
+                                                                           ledger: ledger, relocation: relocation, alert_book: alert_book, audit: audit)
+      uc[:list_inspections] = inspections::ListInspections.new(uow: uow, inspections: r[:inspections])
+      uc[:create_damage_report] = inspections::CreateDamageReport.new(**common, fulfillment: r[:fulfillment], damage_reports: r[:damage_reports],
+                                                                                organizations: r[:organizations], audit: audit, ids: ids)
+      uc[:revise_damage_report] = inspections::ReviseDamageReport.new(**common, damage_reports: r[:damage_reports], audit: audit)
+      uc[:approve_damage_charge] = inspections::ApproveDamageCharge.new(**common, damage_reports: r[:damage_reports],
+                                                                                  reservations: r[:reservations], audit: audit, ids: ids)
+      uc[:dismiss_damage_report] = inspections::DismissDamageReport.new(**common, damage_reports: r[:damage_reports], audit: audit)
+      uc[:get_damage_report] = inspections::GetDamageReport.new(uow: uow, damage_reports: r[:damage_reports], attachments: r[:attachments])
+      uc[:list_damage_reports] = inspections::ListDamageReports.new(uow: uow, damage_reports: r[:damage_reports])
+
+      maintenance = A::Maintenance
+      orders = { orders: r[:maintenance_orders], catalog: r[:catalog] }
+      uc[:open_maintenance_order] = maintenance::OpenMaintenanceOrder.new(**common, catalog: r[:catalog], allocations: allocations,
+                                                                                    availability: r[:availability], desk: desk, ledger: ledger,
+                                                                                    relocation: relocation, audit: audit)
+      uc[:start_maintenance] = maintenance::StartMaintenance.new(**common, **orders, ledger: ledger, audit: audit)
+      uc[:complete_maintenance] = maintenance::CompleteMaintenance.new(**common, **orders, allocations: allocations, desk: desk, ledger: ledger,
+                                                                                           audit: audit)
+      uc[:cancel_maintenance] = maintenance::CancelMaintenance.new(**common, **orders, allocations: allocations, desk: desk, ledger: ledger,
+                                                                                       audit: audit)
+      uc[:list_maintenance_orders] = maintenance::ListMaintenanceOrders.new(uow: uow, orders: r[:maintenance_orders])
+      uc[:get_maintenance_order] = maintenance::GetMaintenanceOrder.new(uow: uow, **orders, attachments: r[:attachments])
+
+      transfers = A::Transfers
+      uc[:request_transfer] = transfers::RequestTransfer.new(**common, transfers: r[:transfers], catalog: r[:catalog], allocations: allocations,
+                                                                       organizations: r[:organizations], audit: audit, ids: ids)
+      uc[:dispatch_transfer] = transfers::DispatchTransfer.new(**common, transfers: r[:transfers], catalog: r[:catalog], allocations: allocations,
+                                                                         availability: r[:availability], ledger: ledger, audit: audit, ids: ids)
+      uc[:receive_transfer] = transfers::ReceiveTransfer.new(**common, transfers: r[:transfers], catalog: r[:catalog], ledger: ledger, audit: audit,
+                                                                       ids: ids)
+      uc[:cancel_transfer] = transfers::CancelTransfer.new(**common, transfers: r[:transfers], audit: audit)
+      uc[:list_transfers] = transfers::ListTransfers.new(uow: uow, transfers: r[:transfers])
+
+      overdue = A::Overdue
+      uc[:detect_overdue] = overdue::DetectOverdue.new(**common, operations: r[:operations], alerts: r[:alerts], alert_book: alert_book,
+                                                                 allocations: allocations, availability: r[:availability], coverage: coverage,
+                                                                 queue: queue, audit: audit)
+      uc[:resolve_alert] = overdue::ResolveAlert.new(**common, alerts: r[:alerts], audit: audit)
+      uc[:operations_board] = overdue::OperationsBoard.new(**common, operations: r[:operations], alerts: r[:alerts], inspections: r[:inspections],
+                                                                     damage_reports: r[:damage_reports], transfers: r[:transfers],
+                                                                     organizations: r[:organizations])
+      uc[:reservation_operations] = overdue::ReservationOperations.new(uow: uow, fulfillment: r[:fulfillment], alerts: r[:alerts],
+                                                                       damage_reports: r[:damage_reports])
     end
 
     # Escopo de portal antes do portal do cliente existir: nenhum anexo é acessível por clientes.
