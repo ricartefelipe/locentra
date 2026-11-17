@@ -122,9 +122,13 @@ jobs:
       - name: Migrations a partir do banco vazio
         run: ruby bin/locentra-admin db:migrate
       - name: Status sem divergências e reexecução sem pendências
-        run: ruby bin/locentra-admin db:status && ruby bin/locentra-admin db:migrate | grep -q "Nenhuma migration pendente"
+        run: |
+          ruby bin/locentra-admin db:status
+          ruby bin/locentra-admin db:migrate | grep -q "Nenhuma migration pendente"
       - name: Seed idempotente (duas execuções)
-        run: ruby bin/locentra-admin db:seed --json && ruby bin/locentra-admin db:seed --json | grep -c '"skipped": true' | grep -q 2
+        run: |
+          ruby bin/locentra-admin db:seed --json
+          test "$(ruby bin/locentra-admin db:seed --json | grep -c '"skipped": true')" = "2"
 
   imagem:
     name: Build e análise da imagem
