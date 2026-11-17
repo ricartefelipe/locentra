@@ -1,0 +1,115 @@
+<% r = @data[:reservation] %>
+<% pricing = @data[:pricing][:summary] %>
+<header class="page-header">
+  <h1>Reserva <%= r.code %> <%= status_badge(r.status, r.status_label) %></h1>
+  <p class="muted">Cliente: <a href="/clientes/<%= @customer.id %>"><%= @customer.name %></a></p>
+</header>
+<%= partial("shared/errors") %>
+<%= partial("shared/shortages") %>
+<% if r.held? %>
+  <div class="notice <%= r.hold_valid?(@now) ? "" : "notice-danger" %>" role="status">
+    <% if r.hold_valid?(@now) %>
+      Bloqueio temporário válido até <strong><%= datetime(r.hold_expires_at) %></strong>. A confirmação revalida a disponibilidade.
+    <% else %>
+      O bloqueio temporário expirou em <%= datetime(r.hold_expires_at) %>; a disponibilidade foi liberada.
+    <% end %>
+  </div>
+<% elsif r.requested? %>
+  <div class="notice" role="status">Solicitação sem garantia de disponibilidade. A alocação ocorre somente na confirmação.</div>
+<% end %>
+<div class="grid-2">
+  <section class="panel">
+    <h2>Período</h2>
+    <dl class="details">
+      <dt>Retirada</dt><dd><%= datetime(r.period.starts_at) %></dd>
+      <dt>Devolução</dt><dd><%= datetime(r.period.ends_at) %></dd>
+      <dt>Origem</dt><dd><%= r.source %></dd>
+      <dt>Observações</dt><dd class="pre"><%= r.notes || "—" %></dd>
+    </dl>
+    <% if can?("reservations.write") && %w[requested held confirmed].include?(r.status) %>
+      <div class="action-row">
+        <% if %w[requested held].include?(r.status) %>
+          <form method="post" action="/reservas/<%= r.id %>/confirmar"><%= csrf_field %><button type="submit" class="primary">Confirmar reserva</button></form>
+        <% end %>
+      </div>
+      <details>
+        <summary>Reagendar</summary>
+        <form method="post" action="/reservas/<%= r.id %>/reagendar" class="stack">
+          <%= csrf_field %>
+          <label for="re-inicio">Nova retirada</label><input id="re-inicio" name="inicio" type="datetime-local" required value="<%= local_input(r.period.starts_at) %>">
+          <label for="re-fim">Nova devolução</label><input id="re-fim" name="fim" type="datetime-local" required value="<%= local_input(r.period.ends_at) %>">
+          <button type="submit">Reagendar</button>
+        </form>
+      </details>
+    <% end %>
+    <% if can?("reservations.write") && %w[held confirmed in_progress].include?(r.status) %>
+      <details>
+        <summary>Estender devolução</summary>
+        <form method="post" action="/reservas/<%= r.id %>/estender" class="stack">
+          <%= csrf_field %>
+          <label for="ex-fim">Nova devolução</label><input id="ex-fim" name="fim" type="datetime-local" required value="<%= local_input(r.period.ends_at) %>">
+          <p class="muted">A cobrança original é mantida; a diferença é registrada como ajuste.</p>
+          <button type="submit">Estender</button>
+        </form>
+      </details>
+    <% end %>
+    <% if can?("reservations.cancel") && %w[requested held confirmed].include?(r.status) %>
+      <details>
+        <summary>Cancelar reserva</summary>
+        <form method="post" action="/reservas/<%= r.id %>/cancelar" class="stack" data-confirm="Cancelar esta reserva e liberar a disponibilidade?">
+          <%= csrf_field %>
+          <label for="motivo">Motivo</label><input id="motivo" name="motivo" required maxlength="500">
+          <button type="submit" class="danger">Cancelar reserva</button>
+        </form>
+      </details>
+    <% end %>
+  </section>
+  <section class="panel">
+    <h2>Valores</h2>
+    <dl class="details">
+      <dt>Subtotal</dt><dd><%= money(pricing["subtotal_cents"].to_i) %></dd>
+      <% if pricing["coupon_code"] %><dt>Cupom <%= pricing["coupon_code"] %></dt><dd>−<%= money(pricing["coupon_discount_cents"]) %></dd><% end %>
+      <% if pricing["manual_discount_cents"].to_i.positive? %><dt>Desconto manual</dt><dd>−<%= money(pricing["manual_discount_cents"]) %></dd><% end %>
+      <% Array(pricing["fees"]).each do |fee| %><dt><%= fee["description"] %></dt><dd><%= money(fee["amount_cents"]) %></dd><% end %>
+      <dt>Total contratado</dt><dd><strong><%= money(r.total) %></strong></dd>
+      <dt>Caução prevista</dt><dd><%= money(r.deposit) %></dd>
+      <% @data[:pricing][:adjustments].each do |adj| %>
+        <dt>Ajuste (<%= adj["kind"] %>)</dt><dd><%= money(adj["amount_cents"]) %> em <%= datetime(adj["created_at"]) %></dd>
+      <% end %>
+    </dl>
+    <p class="muted">Preços congelados em <%= pricing["priced_at"] ? datetime(Time.iso8601(pricing["priced_at"])) : "—" %>; alterações de catálogo não afetam esta reserva.</p>
+  </section>
+</div>
+<section class="panel">
+  <h2>Itens e alocações</h2>
+  <table class="table">
+    <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col" class="num">Total</th><th scope="col">Alocação</th></tr></thead>
+    <tbody>
+      <% @data[:items].each do |item| %>
+        <tr>
+          <td><%= item["name"] %> <span class="muted"><%= item["sku"] %></span></td>
+          <td><%= item["quantity"] %></td>
+          <td><%= item["pricing"]["description"] %></td>
+          <td class="num"><%= money(item["total_cents"]) %></td>
+          <td>
+            <% assets = @data[:allocations][:assets].select { |a| a["reservation_item_id"] == item["id"] && a["active"] } %>
+            <% stock = @data[:allocations][:stock].select { |s| s["reservation_item_id"] == item["id"] && s["active"] } %>
+            <% if assets.empty? && stock.empty? %><span class="muted">sem alocação ativa</span><% end %>
+            <% assets.each do |a| %><a href="/ativos/<%= a["asset_id"] %>"><%= a["tag"] %></a> <% end %>
+            <% stock.each do |s| %><%= s["quantity"] %> un. <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</section>
+<section class="panel">
+  <h2>Histórico</h2>
+  <% if @history.empty? %><p class="empty">Sem eventos.</p><% else %>
+    <ol class="timeline">
+      <% @history.each do |event| %>
+        <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= event["action"] %></strong> <span class="muted"><%= event["actor_name"] || event["actor_type"] %></span></li>
+      <% end %>
+    </ol>
+  <% end %>
+</section>

@@ -1,0 +1,11 @@
+<% if @page.total > @page.limit %>
+  <nav class="pagination" aria-label="Paginação">
+    <% if @page.previous_offset %>
+      <a href="<%= url(@base_path, @query.merge("inicio" => @page.previous_offset)) %>">Anterior</a>
+    <% end %>
+    <span><%= @page.offset + 1 %>–<%= [@page.offset + @page.limit, @page.total].min %> de <%= @page.total %></span>
+    <% if @page.next_offset %>
+      <a href="<%= url(@base_path, @query.merge("inicio" => @page.next_offset)) %>">Próxima</a>
+    <% end %>
+  </nav>
+<% end %>

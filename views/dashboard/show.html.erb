@@ -1,0 +1,50 @@
+<% labels = Locentra::Domain::Reservations::STATUSES %>
+<header class="page-header">
+  <h1>Painel</h1>
+  <div class="actions">
+    <% if can?("reservations.write") %><a class="button primary" href="/reservas/nova">Nova reserva</a><% end %>
+    <a class="button" href="/disponibilidade">Ver disponibilidade</a>
+  </div>
+</header>
+<section class="cards" aria-label="Reservas por situação">
+  <% %w[held confirmed in_progress requested].each do |status| %>
+    <a class="card" href="/reservas?situacao=<%= status %>">
+      <span class="card-value"><%= @data[:reservations].fetch(status, 0) %></span>
+      <span class="card-label"><%= labels[status] %></span>
+    </a>
+  <% end %>
+  <div class="card card-alert">
+    <span class="card-value"><%= @data[:overdue].size %></span>
+    <span class="card-label">Devoluções em atraso</span>
+  </div>
+</section>
+<div class="grid-2">
+  <section class="panel">
+    <h2>Retiradas nas próximas 48 horas</h2>
+    <%= partial("dashboard/list", rows: @data[:upcoming], column: :starts_at, empty: "Nenhuma retirada prevista.") %>
+  </section>
+  <section class="panel">
+    <h2>Devoluções previstas (24 horas)</h2>
+    <%= partial("dashboard/list", rows: @data[:returns_due], column: :ends_at, empty: "Nenhuma devolução prevista.") %>
+  </section>
+  <section class="panel">
+    <h2>Bloqueios temporários expirando em 1 hora</h2>
+    <%= partial("dashboard/list", rows: @data[:expiring_holds], column: :hold_expires_at, empty: "Nenhum bloqueio próximo de expirar.") %>
+  </section>
+  <section class="panel">
+    <h2>Em atraso</h2>
+    <%= partial("dashboard/list", rows: @data[:overdue], column: :ends_at, empty: "Nenhuma locação em atraso.") %>
+  </section>
+</div>
+<section class="panel">
+  <h2>Ativos por situação</h2>
+  <% if @data[:assets].empty? %>
+    <p class="empty">Nenhum ativo individual cadastrado. <a href="/produtos">Cadastre produtos e ativos</a>.</p>
+  <% else %>
+    <ul class="inline-stats">
+      <% @data[:assets].each do |status, total| %>
+        <li><a href="/ativos?situacao=<%= status %>"><%= status_badge(status, Locentra::Domain::Catalog::ASSET_STATUSES.fetch(status, status)) %> <%= total %></a></li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>

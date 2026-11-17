@@ -25,12 +25,20 @@ Style/Documentation:
 Style/AsciiComments:
   Enabled: false
 
+# Linhas que abrem heredocs SQL carregam a lista de parâmetros posicionais ($1, $2, ...) na mesma
+# linha para manter a correspondência visível com o SQL.
 Layout/LineLength:
-  Max: 140
+  Max: 160
+  AllowedPatterns:
+    - '<<~SQL'
+
 
 Metrics/MethodLength:
   Max: 30
   CountAsOne: ["array", "hash", "heredoc", "method_call"]
+  Exclude:
+    - "lib/locentra/system.rb"
+    - "lib/locentra/interfaces/http/routes.rb"
 
 Metrics/ClassLength:
   Max: 300
@@ -56,21 +64,24 @@ Metrics/BlockLength:
     - "Rakefile"
 
 Naming/MethodParameterName:
-  AllowedNames: ["id", "to", "at", "a", "b", "io", "tx", "db", "ip"]
+  AllowedNames: ["id", "to", "at", "a", "b", "io", "tx", "db", "ip", "by"]
 
 Naming/PredicateMethod:
   Enabled: false
 
 Minitest/MultipleAssertions:
-  Max: 12
+  Max: 20
 
 Minitest/AssertTruthy:
   Enabled: false
 
+# O composition root é uma sequência de construtores explícitos; métricas de complexidade não se
+# aplicam a ele de forma útil.
 Metrics/AbcSize:
-  Max: 40
+  Max: 50
   Exclude:
     - "test/**/*"
+    - "lib/locentra/system.rb"
 
 Minitest/TestFileName:
   Exclude:

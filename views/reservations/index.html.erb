@@ -1,0 +1,16 @@
+<header class="page-header">
+  <h1>Reservas</h1>
+  <% if can?("reservations.write") %><a class="button primary" href="/reservas/nova">Nova reserva</a><% end %>
+</header>
+<form method="get" action="/reservas" class="filters" role="search">
+  <label for="busca">Código ou cliente</label>
+  <input id="busca" name="busca" value="<%= @search %>">
+  <label for="situacao">Situação</label>
+  <select id="situacao" name="situacao">
+    <option value="">Todas</option>
+    <% Locentra::Domain::Reservations::STATUSES.each do |key, label| %><option value="<%= key %>"<%= selected(@filter_status, key) %>><%= label %></option><% end %>
+  </select>
+  <button type="submit">Filtrar</button>
+</form>
+<%= partial("reservations/table", rows: @page.items) %>
+<%= partial("shared/pagination", page: @page, base_path: "/reservas", query: { "busca" => @search, "situacao" => @filter_status }) %>

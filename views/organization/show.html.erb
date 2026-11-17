@@ -1,0 +1,30 @@
+<% org = @data[:organization] %>
+<% sub = @data[:subscription] %>
+<header class="page-header"><h1><%= org.name %></h1><p class="muted">Identificador: <code><%= org.slug %></code> · Fuso: <%= org.timezone %></p></header>
+<%= partial("shared/errors") %>
+<div class="grid-2">
+  <section class="panel">
+    <h2>Assinatura Locentra</h2>
+    <% if sub %>
+      <dl class="details">
+        <dt>Plano</dt><dd><%= sub["plan_name"] %> — <%= money(sub["monthly_price_cents"]) %>/mês</dd>
+        <dt>Situação</dt><dd><%= sub["status"] %><%= sub["trial_ends_at"] ? " (avaliação até #{date(sub["trial_ends_at"])})" : "" %></dd>
+        <dt>Período</dt><dd><%= date(sub["current_period_start"]) %> a <%= date(sub["current_period_end"]) %></dd>
+        <dt>Limites</dt><dd><%= sub["max_assets"] || "∞" %> ativos · <%= sub["max_branches"] || "∞" %> filiais · <%= sub["max_users"] || "∞" %> usuários</dd>
+        <dt>Funcionalidades</dt><dd><%= Array(sub["features"]).empty? ? "básicas" : Array(sub["features"]).join(", ") %></dd>
+      </dl>
+      <p class="muted">A assinatura da organização na plataforma é independente dos contratos de locação com clientes.</p>
+    <% end %>
+  </section>
+  <section class="panel">
+    <h2>Filiais</h2>
+    <ul class="row-list"><% @data[:branches].each do |b| %><li><strong><%= b.code %></strong> — <%= b.name %> <%= b.address ? "· #{b.address}" : "" %></li><% end %></ul>
+    <form method="post" action="/organizacao/filiais" class="stack">
+      <%= csrf_field %>
+      <label for="nome">Nome</label><input id="nome" name="nome" required>
+      <label for="codigo">Código</label><input id="codigo" name="codigo" required maxlength="12">
+      <label for="endereco">Endereço</label><input id="endereco" name="endereco">
+      <button type="submit">Criar filial</button>
+    </form>
+  </section>
+</div>

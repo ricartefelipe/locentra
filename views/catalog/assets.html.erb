@@ -1,0 +1,20 @@
+<header class="page-header"><h1>Ativos</h1></header>
+<form method="get" action="/ativos" class="filters">
+  <label for="situacao">Situação</label>
+  <select id="situacao" name="situacao"><option value="">Todas</option>
+    <% Locentra::Domain::Catalog::ASSET_STATUSES.each do |k, l| %><option value="<%= k %>"<%= selected(@filter_status, k) %>><%= l %></option><% end %>
+  </select>
+  <button type="submit">Filtrar</button>
+</form>
+<% if @assets.empty? %><p class="empty">Nenhum ativo encontrado.</p><% else %>
+  <table class="table">
+    <thead><tr><th scope="col">Patrimônio</th><th scope="col">Produto</th><th scope="col">Filial</th><th scope="col">Condição</th><th scope="col">Situação</th></tr></thead>
+    <tbody>
+      <% @assets.each do |a| %>
+        <tr><td><a href="/ativos/<%= a["id"] %>"><%= a["tag"] %></a></td><td><%= a["product_name"] %></td><td><%= a["branch_code"] %></td>
+          <td><%= Locentra::Domain::Catalog::CONDITIONS[a["condition"]] %></td>
+          <td><%= status_badge(a["status"], Locentra::Domain::Catalog::ASSET_STATUSES[a["status"]]) %></td></tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

@@ -1,0 +1,95 @@
+<% c = @data[:customer] %>
+<header class="page-header">
+  <h1><%= c.name %> <%= status_badge(c.status, Locentra::Domain::Customers::STATUSES[c.status]) %></h1>
+  <% if can?("reservations.write") && c.status == "active" %><a class="button primary" href="/reservas/nova?cliente_id=<%= c.id %>">Nova reserva</a><% end %>
+</header>
+<%= partial("shared/errors") %>
+<div class="grid-2">
+  <section class="panel">
+    <h2>Dados cadastrais</h2>
+    <dl class="details">
+      <dt>Tipo</dt><dd><%= c.kind_label %></dd>
+      <dt>Documento</dt><dd><%= c.formatted_document %></dd>
+      <dt>E-mail</dt><dd><%= c.email || "—" %></dd>
+      <dt>Telefone</dt><dd><%= c.phone || "—" %></dd>
+      <dt>Observações</dt><dd class="pre"><%= c.notes || "—" %></dd>
+    </dl>
+    <% if can?("customers.write") %>
+      <details>
+        <summary>Editar cadastro</summary>
+        <form method="post" action="/clientes/<%= c.id %>" class="stack">
+          <%= csrf_field %>
+          <label for="e-nome">Nome</label><input id="e-nome" name="nome" value="<%= c.name %>" required>
+          <label for="e-fantasia">Nome fantasia</label><input id="e-fantasia" name="nome_fantasia" value="<%= c.trade_name %>">
+          <label for="e-email">E-mail</label><input id="e-email" name="email" type="email" value="<%= c.email %>">
+          <label for="e-telefone">Telefone</label><input id="e-telefone" name="telefone" value="<%= c.phone %>">
+          <label for="e-situacao">Situação</label>
+          <select id="e-situacao" name="situacao">
+            <% Locentra::Domain::Customers::STATUSES.each do |key, label| %><option value="<%= key %>"<%= selected(c.status, key) %>><%= label %></option><% end %>
+          </select>
+          <label for="e-obs">Observações</label><textarea id="e-obs" name="observacoes" rows="3"><%= c.notes %></textarea>
+          <button type="submit">Salvar</button>
+        </form>
+      </details>
+    <% end %>
+  </section>
+  <section class="panel">
+    <h2>Contatos e pessoas autorizadas</h2>
+    <% if @data[:contacts].empty? %>
+      <p class="empty">Nenhum contato cadastrado.</p>
+    <% else %>
+      <ul class="row-list">
+        <% @data[:contacts].each do |contact| %>
+          <li><strong><%= contact.name %></strong> <%= contact.role ? "· #{contact.role}" : "" %> <%= contact.email ? "· #{contact.email}" : "" %>
+            <% if contact.authorized_pickup %><%= badge("Autorizado a retirar", "info") %><% end %></li>
+        <% end %>
+      </ul>
+    <% end %>
+    <% if can?("customers.write") %>
+      <details>
+        <summary>Adicionar contato</summary>
+        <form method="post" action="/clientes/<%= c.id %>/contatos" class="stack">
+          <%= csrf_field %>
+          <label for="ct-nome">Nome</label><input id="ct-nome" name="nome" required>
+          <label for="ct-funcao">Função</label><input id="ct-funcao" name="funcao">
+          <label for="ct-email">E-mail</label><input id="ct-email" name="email" type="email">
+          <label for="ct-telefone">Telefone</label><input id="ct-telefone" name="telefone">
+          <label for="ct-doc">CPF (obrigatório para retirada)</label><input id="ct-doc" name="documento" inputmode="numeric">
+          <label class="checkbox"><input type="checkbox" name="autorizado" value="1"> Autorizado a retirar equipamentos</label>
+          <button type="submit">Adicionar</button>
+        </form>
+      </details>
+    <% end %>
+    <h2>Endereços</h2>
+    <% if @data[:addresses].empty? %>
+      <p class="empty">Nenhum endereço cadastrado.</p>
+    <% else %>
+      <ul class="row-list">
+        <% @data[:addresses].each do |a| %>
+          <li><strong><%= a.label %>:</strong> <%= a.street %>, <%= a.number %> <%= a.complement %> — <%= a.district %>, <%= a.city %>/<%= a.state %> <%= a.postal_code %></li>
+        <% end %>
+      </ul>
+    <% end %>
+    <% if can?("customers.write") %>
+      <details>
+        <summary>Adicionar endereço</summary>
+        <form method="post" action="/clientes/<%= c.id %>/enderecos" class="stack">
+          <%= csrf_field %>
+          <label for="en-rotulo">Rótulo</label><input id="en-rotulo" name="rotulo" value="principal" required>
+          <label for="en-logradouro">Logradouro</label><input id="en-logradouro" name="logradouro" required>
+          <label for="en-numero">Número</label><input id="en-numero" name="numero">
+          <label for="en-complemento">Complemento</label><input id="en-complemento" name="complemento">
+          <label for="en-bairro">Bairro</label><input id="en-bairro" name="bairro">
+          <label for="en-cidade">Cidade</label><input id="en-cidade" name="cidade" required>
+          <label for="en-uf">UF</label><input id="en-uf" name="uf" maxlength="2" required>
+          <label for="en-cep">CEP</label><input id="en-cep" name="cep" inputmode="numeric">
+          <button type="submit">Adicionar</button>
+        </form>
+      </details>
+    <% end %>
+  </section>
+</div>
+<section class="panel">
+  <h2>Reservas recentes</h2>
+  <%= partial("reservations/table", rows: @reservations.items) %>
+</section>

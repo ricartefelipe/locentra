@@ -1,0 +1,138 @@
+# frozen_string_literal: true
+
+require "rack"
+require_relative "router"
+require_relative "views"
+require_relative "request_context"
+require_relative "middleware"
+require_relative "controller"
+require_relative "authenticator"
+require_relative "routes"
+
+module Locentra
+  module Interfaces
+    module HTTP
+      # Aplicação Rack: roteamento, autenticação, CSRF, chamada do controlador e erros centralizados.
+      class App
+        ROOT = File.expand_path("../../../..", __dir__)
+
+        ERRORS = [
+          [Domain::Unavailable, 409, "unavailable"],
+          [Domain::HoldExpired, 409, "hold_expired"],
+          [Domain::Conflict, 409, nil],
+          [Domain::InvalidTransition, 409, "invalid_transition"],
+          [Domain::ValidationError, 422, "validation_error"],
+          [Domain::NotFound, 404, "not_found"],
+          [Domain::PlanLimitExceeded, 403, "plan_limit"],
+          [Domain::AccessDenied, 403, "forbidden"],
+          [Application::Identity::TooManyRequests, 429, "too_many_requests"],
+          [Application::Identity::AuthenticationFailed, 401, "authentication_failed"],
+          [Unauthenticated, 401, "unauthenticated"],
+          [CsrfFailure, 403, "csrf"],
+          [BadRequest, 400, "bad_request"],
+          [PayloadTooLarge, 413, "payload_too_large"],
+          [Infrastructure::Database::PoolTimeout, 503, "unavailable_capacity"]
+        ].freeze
+
+        # Monta a pilha de middlewares de forma explícita.
+        def self.build(system, reload_templates: false)
+          app = new(system, reload_templates: reload_templates)
+          stack = SecurityHeaders.new(app, hsts: system.config.production?)
+          stack = BodyLimit.new(stack, default: 1_048_576, uploads: system.config.max_upload_bytes + 65_536, upload_prefixes: ["/anexos"])
+          stack = Rack::Static.new(stack, urls: ["/css", "/js", "/img"], root: File.join(ROOT, "public"),
+                                          header_rules: [[:all, { "cache-control" => "public, max-age=300" }]])
+          RequestLogger.new(stack, logger: system.logger, metrics: system.metrics)
+        end
+
+        attr_reader :system, :router, :templates
+
+        def initialize(system, reload_templates: false)
+          @system = system
+          @templates = Templates.new(root: File.join(ROOT, "views"), reload: reload_templates)
+          @authenticator = Authenticator.new(system)
+          @flash = Flash.new(system.config.secret_key_base)
+          @router = Router.new
+          Routes.draw(@router, Controller::Dependencies.new(system: system, templates: @templates, flash: @flash))
+        end
+
+        def call(env)
+          route, params = @router.recognize(env["REQUEST_METHOD"], env["PATH_INFO"].to_s)
+          return not_found(env, params) unless route
+
+          env["locentra.route"] = route.pattern
+          ctx = RequestContext.new(env, params, env["locentra.request_id"] || SecureRandom.uuid)
+          dispatch(route, ctx)
+        rescue StandardError => e
+          handle_error(ctx || RequestContext.new(env, {}, env["locentra.request_id"].to_s), e)
+        end
+
+        private
+
+        def dispatch(route, ctx)
+          @authenticator.authenticate!(ctx, route.auth)
+          ctx.env["locentra.organization_id"] = ctx.actor&.organization_id
+          ctx.env["locentra.actor_id"] = ctx.actor&.audit_actor_id
+          ctx.verify_csrf! if csrf_required?(route, ctx)
+          route.controller.public_send(route.action, ctx)
+        end
+
+        def csrf_required?(route, ctx)
+          return false if route.options[:csrf] == false
+          return false if ctx.env["locentra.auth_method"] == "bearer"
+
+          !ctx.get?
+        end
+
+        def not_found(env, allowed)
+          ctx = RequestContext.new(env, {}, env["locentra.request_id"].to_s)
+          return error_response(ctx, 405, "method_not_allowed", "Método não permitido", {}) if allowed.any?
+
+          error_response(ctx, 404, "not_found", "Página não encontrada", {})
+        end
+
+        def handle_error(ctx, error)
+          return login_redirect(ctx) if error.is_a?(Unauthenticated) && !ctx.wants_json?
+
+          _, status, code = ERRORS.find { |klass, _, _| error.is_a?(klass) }
+          unless status
+            @system.logger.error(event: "http.error", request_id: ctx.request_id, error: error.class.name, message: error.message,
+                                 backtrace: error.backtrace&.first(8))
+            return error_response(ctx, 500, "internal_error", "Erro interno. Informe a referência #{ctx.request_id}.", {})
+          end
+
+          @system.metrics.increment("domain_conflicts_total", code: code || error.code) if status == 409
+          details = details_for(error)
+          response = error_response(ctx, status, code || error.code, error.message, details)
+          response[1]["retry-after"] = error.retry_after.to_s if error.respond_to?(:retry_after)
+          response
+        end
+
+        def details_for(error)
+          case error
+          when Domain::ValidationError then { "fields" => error.errors }
+          when Domain::Unavailable then { "shortages" => error.shortages }
+          else {}
+          end
+        end
+
+        def error_response(ctx, status, code, message, details)
+          if ctx.wants_json?
+            body = { "error" => { "code" => code, "message" => message, "details" => details, "request_id" => ctx.request_id } }
+            [status, { "content-type" => "application/json; charset=utf-8" }, [JSON.generate(body)]]
+          else
+            html = ViewContext.new(@templates, ctx, status: status, message: message, details: details, flash: nil, content: nil)
+            page = html.render("errors/show")
+            layout = ViewContext.new(@templates, ctx, content: Html.safe(page), title: "Erro #{status}", flash: nil).render("layouts/application")
+            [status, { "content-type" => "text/html; charset=utf-8" }, [layout]]
+          end
+        end
+
+        def login_redirect(ctx)
+          target = ctx.get? && ctx.path.start_with?("/") && !ctx.path.start_with?("//") ? ctx.path : "/"
+          location = target == "/" ? "/entrar" : "/entrar?#{URI.encode_www_form(voltar: target)}"
+          [303, { "location" => location, "content-type" => "text/html; charset=utf-8" }, [""]]
+        end
+      end
+    end
+  end
+end

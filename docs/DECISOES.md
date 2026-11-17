@@ -74,3 +74,63 @@ atualizado.
   `bundler/setup`, portanto usam sempre a versão do lockfile.
 - **Consequências:** `ruby -rjson` sem Bundler não funciona na imagem de execução; o healthcheck usa
   somente `net/http`. A análise continua falhando para vulnerabilidades HIGH/CRITICAL corrigíveis.
+
+## ADR-012 — Contexto de tenant local à transação e papéis de banco separados
+
+- **Decisão:** toda operação de negócio abre transação com `set_config('app.tenant_id', ..., true)`
+  (escopo local) a partir do ator autenticado. Políticas RLS (`ENABLE` e `FORCE`) comparam
+  `organization_id` com `app_tenant_id()`; ausência de contexto resulta em nenhuma linha. Três papéis:
+  `locentra_owner` (migrations, proprietário), `locentra_app` (web/CLI) e `locentra_worker` (fila),
+  todos sem superuser e sem `BYPASSRLS`. Chaves estrangeiras compostas `(organization_id, id)`
+  impedem relações entre tenants mesmo com SQL incorreto.
+- **Exceções globais documentadas:** `users`, `sessions`, `user_tokens`, `rate_limits`, `plans` e
+  `queue_stats`. `organizations` tem RLS com leitura pelo próprio tenant, por membros ativos e pelo
+  worker. Tarefas de e-mail de identidade sem organização podem ser inseridas, mas não lidas, pela
+  aplicação.
+
+## ADR-013 — Unidade de trabalho revalida o vínculo em cada operação
+
+- **Decisão:** `Application::UnitOfWork#run` abre a transação e recarrega o vínculo do ator
+  (membro ativo, credencial válida ou acesso de portal) antes de autorizar. Revogação e mudança de
+  papel valem na operação seguinte, mesmo com sessão aberta.
+
+## ADR-014 — Repositórios recebem a transação explicitamente
+
+- **Decisão:** repositórios não acessam o pool; recebem `tx` como primeiro argumento. Abrir
+  transação aninhada na mesma thread gera erro; composição de casos de uso passa `tx:`;
+  rollback parcial usa `savepoint`. Conexões voltam ao pool sem transação aberta.
+
+## ADR-015 — Garantias de disponibilidade no PostgreSQL
+
+- **Decisão:** ativos individuais usam exclusion constraint `EXCLUDE USING gist (asset_id WITH =,
+  period WITH &&) WHERE (active)`; estoque quantitativo bloqueia a linha do estoque
+  (`FOR UPDATE`, em ordem de id) antes de calcular o pico com o domínio. Bloqueios temporários
+  vencidos não ocupam disponibilidade e são expirados na transação que precisa do recurso.
+- **Consequência:** a confirmação de bloqueio e a expiração concorrentes têm resultado definido pelo
+  instante comparado a `hold_expires_at` sob o lock da reserva; a varredura usa `SKIP LOCKED`.
+
+## ADR-016 — Código sequencial da reserva atribuído no fechamento
+
+- **Contexto:** o contador por organização serializava todas as criações de reserva enquanto a
+  transação estivesse aberta (detectado pelos testes de concorrência).
+- **Decisão:** a reserva é inserida com identificador provisório e recebe o código definitivo no fim
+  da transação; o lock do contador dura apenas até o commit. Códigos permanecem sem lacunas.
+
+## ADR-017 — Idempotência na mesma transação da operação
+
+- **Decisão:** a chave é reservada com `INSERT ... ON CONFLICT DO NOTHING` no início da transação da
+  operação e o resultado 2xx é gravado antes do commit. Requisições concorrentes equivalentes aguardam
+  no índice único e recebem o resultado gravado; conteúdo diferente gera `409`. Falhas não gravam a
+  chave.
+
+## ADR-018 — Sessões opacas e templates com escape automático
+
+- **Decisão:** cookie com token aleatório de 256 bits; o banco guarda SHA-256. HttpOnly, SameSite=Lax,
+  Secure e prefixo `__Host-` com HTTPS. Rotação em login e troca de organização. CSRF por token
+  sincronizado por sessão. ERB com `<%= %>` escapando sempre (subclasse de `ERB` que altera o comando de
+  inserção); HTML confiável só por `raw`/helpers. CSP sem `unsafe-inline`.
+
+## ADR-019 — Tokens de uso único emitidos no envio
+
+- **Decisão:** convites, confirmação de e-mail e recuperação de senha enfileiram apenas identificadores;
+  o worker emite o token no momento do envio. Tokens nunca ficam gravados em texto claro na fila.
