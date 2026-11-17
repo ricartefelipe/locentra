@@ -64,6 +64,8 @@ module Locentra
         # O campo `id` identifica o evento e é a chave de deduplicação.
         def parse_event(text)
           data = text.is_a?(Hash) ? text : parse_json(text)
+          raise Domain::ValidationError.field("evento", "o evento deve ser um objeto JSON") unless data.is_a?(Hash)
+
           payment = data["payment"]
           unless data["id"].is_a?(String) && !data["id"].empty? && data["event"].is_a?(String) && payment.is_a?(Hash) && payment["id"]
             raise Domain::ValidationError.field("evento", "evento do provedor sem id, tipo ou cobrança")
