@@ -99,14 +99,17 @@ module Locentra
       end
 
       # Despacho de um evento da outbox (executado pelo worker no contexto do tenant do evento):
-      # cria uma entrega por endpoint inscrito e enfileira notificações por e-mail.
+      # cria uma entrega por endpoint inscrito, enfileira notificações por e-mail e chama os
+      # assinantes internos (objetos com `call(tx, event)`, ex.: sincronização financeira), na mesma
+      # transação que marca o evento como despachado.
       class DispatchEvent
-        def initialize(webhooks:, queue:, notifications:, clock:, ids:)
+        def initialize(webhooks:, queue:, notifications:, clock:, ids:, subscribers: [])
           @webhooks = webhooks
           @queue = queue
           @notifications = notifications
           @clock = clock
           @ids = ids
+          @subscribers = subscribers.freeze
         end
 
         def call(tx, event_id)
@@ -122,6 +125,7 @@ module Locentra
             @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => delivery_id }, priority: 40, correlation_id: event["correlation_id"])
           end
           @notifications.for_event(tx, event)
+          @subscribers.each { |subscriber| subscriber.call(tx, event) }
           @webhooks.mark_dispatched(tx, event["id"], @clock.now)
           :dispatched
         end

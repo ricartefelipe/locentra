@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "finance_handlers"
+
 module Locentra
   module Interfaces
     module Worker
@@ -24,6 +26,8 @@ module Locentra
             "platform.housekeeping" => method(:platform_housekeeping),
             "organization.tick" => method(:organization_tick)
           }
+          @finance = FinanceHandlers.new(system)
+          @map.merge!(@finance.map)
         end
 
         def register(kind, callable)
@@ -131,7 +135,8 @@ module Locentra
           expired = uc(:expire_holds).call(actor)
           overdue = @system.use_cases.names.include?(:detect_overdue) ? uc(:detect_overdue).call(actor) : []
           tenant(job) { |tx| @system.repos[:idempotency].purge(tx, @system.clock.now) }
-          { "expired" => expired.size, "overdue" => Array(overdue).size }
+          reconciliation = @finance.schedule_reconciliation(job)
+          { "expired" => expired.size, "overdue" => Array(overdue).size, "reconciliation_scheduled" => !reconciliation.nil? }
         end
 
         def send_template(template, to, vars)
