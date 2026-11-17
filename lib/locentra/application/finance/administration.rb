@@ -78,7 +78,7 @@ module Locentra
 
       # Decisão registrada para um alerta financeiro (o alerta não altera reservas nem pagamentos).
       class ResolveAlert
-        RESOLUTIONS = { "refund" => "Reembolso", "new_reservation" => "Nova reserva", "no_action" => "Sem ação" }.freeze
+        RESOLUTIONS = F::ALERT_RESOLUTIONS
 
         def initialize(uow:, alerts:, audit:, clock:)
           @uow = uow

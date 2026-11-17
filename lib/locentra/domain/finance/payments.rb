@@ -108,6 +108,13 @@ module Locentra
         end
       end
 
+      ALERT_KINDS = {
+        "payment_after_expiration" => "Pagamento após expiração", "payment_after_cancellation" => "Pagamento após cancelamento",
+        "payment_amount_mismatch" => "Valor divergente", "reservation_closed_with_charges" => "Reserva encerrada com cobranças",
+        "duplicate_provider_charge" => "Cobrança duplicada no provedor"
+      }.freeze
+      ALERT_RESOLUTIONS = { "refund" => "Reembolso", "new_reservation" => "Nova reserva", "no_action" => "Sem ação" }.freeze
+
       # Situações que pedem decisão humana. A confirmação do dinheiro nunca altera a reserva.
       module Review
         RESERVATION_REASONS = {
@@ -174,7 +181,7 @@ module Locentra
           raise Conflict.new("Reembolso acima do saldo elegível do pagamento (#{eligible.format_brl})", code: "refund_exceeds_eligible")
         end
 
-        def eligible(payment, committed) = payment.confirmed? ? payment.amount - committed : Money.zero
+        def eligible(payment, committed) = payment.refundable? ? payment.amount - committed : Money.zero
       end
     end
   end
