@@ -54,6 +54,7 @@ module Locentra
           pickup = @fulfillment.delivered_pickup_for(tx, reservation.id) || raise(Domain::NotFound, "retirada")
           before = @fulfillment.pickup_lines(tx, pickup.id, lock: true).select(&:delivered?).to_h { |line| [line.id, line] }
           after = F::ReturnPlan.apply(before, entries)
+          lock_stock_pools(tx, before, entries)
           now = @clock.now
           completes = F::ReturnPlan.complete?(after)
           fees = late_fees(tx, reservation, entries, before, after, now)
@@ -69,6 +70,12 @@ module Locentra
           complete!(ctx) if completes
           record(ctx, entries, row)
           row
+        end
+
+        # Estoques envolvidos bloqueados de uma vez, em ordem de id (a mesma da criação e da extensão de
+        # reservas), antes das alocações: a ordem das linhas não forma ciclo de locks.
+        def lock_stock_pools(tx, before, entries)
+          @allocations.lock_pools_in_order(tx, entries.filter_map { |entry| before.fetch(entry.pickup_line_id).stock_pool_id })
         end
 
         def late_fees(tx, reservation, entries, before, after, now)

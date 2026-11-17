@@ -20,6 +20,25 @@ class FulfillmentRaceTest < DatabaseTest
     def respond_to_missing?(name, include_private = false) = @target.respond_to?(name, include_private)
   end
 
+  # Registra, em ordem, as chamadas de lock feitas ao repositório real.
+  class LockRecorder
+    LOCKS = %i[lock_pools_in_order lock_pool lock_stock_allocation].freeze
+
+    attr_reader :calls
+
+    def initialize(target)
+      @target = target
+      @calls = Queue.new
+    end
+
+    def method_missing(name, *args, &)
+      @calls << [name, args[1]] if LOCKS.include?(name)
+      @target.public_send(name, *args, &)
+    end
+
+    def respond_to_missing?(name, include_private = false) = @target.respond_to?(name, include_private)
+  end
+
   def setup
     super
     @org = create_organization
@@ -46,8 +65,7 @@ class FulfillmentRaceTest < DatabaseTest
                                       ledger: ledger, audit: @system.services[:audit], events: @system.services[:events], clock: @clock)
   end
 
-  def return_use_case(reservations)
-    allocations = repo(:operational_allocations)
+  def return_use_case(reservations, allocations: repo(:operational_allocations))
     A::Returns::RegisterReturn.new(
       uow: @system.uow, reservations: reservations, fulfillment: repo(:fulfillment), allocations: allocations, availability: repo(:availability),
       catalog: repo(:catalog), organizations: repo(:organizations),
@@ -161,6 +179,35 @@ class FulfillmentRaceTest < DatabaseTest
     assert_equal 3, line["returned_quantity"].to_i + line["missing_quantity"].to_i
     assert_operator line["returned_quantity"].to_i + line["missing_quantity"].to_i, :<=, line["delivered_quantity"].to_i
     assert_equal 1, count("SELECT count(*) FROM returns")
+  end
+
+  # Devolução de dois estoques disputando os mesmos estoques com a criação de uma reserva: a
+  # devolução bloqueia todos os estoques de uma vez, em ordem de id, antes de qualquer alocação.
+  def test_return_locks_stock_pools_in_id_order_while_a_reservation_competes
+    tables = create_product(@actor, sku: "MES-RACE", tracking: "bulk")
+    stock(@actor, tables, @branch, 6)
+    reservation = confirmed([line(tables, 2), line(@chairs, 4)])
+    pick_up(reservation)
+    pools = owner_query("SELECT id FROM stock_pools ORDER BY id").map { |row| row["id"] }
+    barrier = Barrier.new(2)
+    recorder = LockRecorder.new(repo(:operational_allocations))
+    returning = return_use_case(repo(:reservations), allocations: PausingProxy.new(recorder, :lock_pools_in_order, barrier, after: true))
+    creating = create_reservation_use_case(PausingProxy.new(repo(:availability), :lock_pools, barrier))
+    retries = -> { @system.metrics.counter_value("db_transaction_retries_total", reason: "TRDeadlockDetected") }
+    before = retries.call
+
+    request = { customer_id: @customer.id, branch_id: @branch.id, period: rental_period, mode: "confirm", lines: [line(@chairs, 6), line(tables, 4)] }
+
+    results = race(-> { returning.call(@actor, reservation.id, entries: return_entries(reservation)).fetch("completes_reservation") },
+                   -> { creating.call(@actor, request).status })
+
+    assert_equal [[:ok, true], [:ok, "confirmed"]], results
+    assert_equal before, retries.call, "sem deadlock entre a devolução e a criação da reserva"
+    calls = Array.new(recorder.calls.size) { recorder.calls.pop }
+    first_name, first_ids = calls.first
+
+    assert_equal [:lock_pools_in_order, pools], [first_name, first_ids.sort]
+    assert(calls.drop(1).none? { |name, _| name == :lock_pools_in_order })
   end
 
   def test_concurrent_transfer_requests_for_the_same_asset_keep_a_single_destination
