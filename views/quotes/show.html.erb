@@ -78,7 +78,7 @@
       </div>
       <% if q.status == "approved" && !q.hold_on_send? %><p class="muted">A conversão verifica a disponibilidade agora: o orçamento enviado sem bloqueio não a garantia.</p><% end %>
       <% if q.status == "sent" %>
-        <details>
+        <details<%= open_if(@errors, "aprovado_por", "versao") %>>
           <summary>Registrar aprovação do cliente</summary>
           <form method="post" action="/orcamentos/<%= q.id %>/aprovar" class="stack">
             <%= csrf_field %>
@@ -91,7 +91,7 @@
             <button type="submit" class="primary">Registrar aprovação</button>
           </form>
         </details>
-        <details>
+        <details<%= open_if(@errors, "motivo") %>>
           <summary>Registrar rejeição</summary>
           <form method="post" action="/orcamentos/<%= q.id %>/rejeitar" class="stack">
             <%= csrf_field %>

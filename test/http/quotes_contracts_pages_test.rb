@@ -152,6 +152,7 @@ class QuotesContractsPagesTest < HttpTest
 
     assert_equal 422, last_response.status
     assert_includes last_response.body, "confirme a declaração de aceite"
+    assert_includes last_response.body, "<details open>", "o formulário com erro permanece aberto"
     post_form "/reservas/#{reservation.id}/reagendar", { "inicio" => "2026-03-15T05:00", "fim" => "2026-03-16T05:00" }
 
     assert_equal 422, last_response.status

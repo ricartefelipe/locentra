@@ -61,7 +61,7 @@
       </tbody>
     </table>
     <% if c.open? && can?("contracts.write") && current_doc && current_doc["accepted_at"].nil? %>
-      <details<%= @errors.key?("documento") || @errors.key?("declaracao") || @errors.key?("nome") ? raw(" open") : raw("") %>>
+      <details<%= open_if(@errors, "nome", "documento", "declaracao") %>>
         <summary>Registrar aceite da versão <%= c.current_document_version %></summary>
         <form method="post" action="/contratos/<%= c.id %>/aceite" class="stack">
           <%= csrf_field %>
@@ -97,7 +97,7 @@
     </table>
   <% end %>
   <% if c.amendable? && can?("contracts.write") && can?("reservations.write") %>
-    <details>
+    <details<%= open_if(@errors, "fim") %>>
       <summary>Aditivo de extensão de prazo</summary>
       <form method="post" action="/contratos/<%= c.id %>/aditivos" class="stack">
         <%= csrf_field %>
@@ -119,7 +119,7 @@
     <p>Prévia para cancelamento agora (<%= datetime(@now) %>): antecedência de <strong><%= preview.hours_before %> h</strong> em relação ao início.
       Multa de <strong><%= Locentra::Domain::Contracts::Cancellation.percent_label(preview.fee_bps) %></strong> sobre <%= money(preview.base) %> = <strong><%= money(preview.fee) %></strong>.</p>
     <% if can?("contracts.write") && can?("reservations.cancel") %>
-      <details>
+      <details<%= open_if(@errors, "motivo") %>>
         <summary>Cancelar contrato</summary>
         <form method="post" action="/contratos/<%= c.id %>/cancelar" class="stack" data-confirm="Cancelar o contrato, aplicar a multa calculada e liberar a reserva?">
           <%= csrf_field %>

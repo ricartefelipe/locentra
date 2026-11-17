@@ -176,6 +176,9 @@ module Locentra
           raw(%( aria-invalid="true" aria-describedby="erro-#{h(field)}"))
         end
 
+        # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.
+        def open_if(errors, *fields) = raw(fields.any? { |field| errors&.key?(field.to_s) } ? " open" : "")
+
         def selected(current, value) = raw(current.to_s == value.to_s ? " selected" : "")
         def checked(flag) = raw(flag ? " checked" : "")
 
