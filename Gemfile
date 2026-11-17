@@ -30,6 +30,9 @@ gem "csv", "~> 3.3.7"
 gem "logger", "~> 1.7.0"
 gem "net-smtp", "~> 0.5.2"
 
+# A default gem json do Ruby 4.0.9 (2.18.0) é afetada pela CVE-2026-33210; fixamos a versão corrigida.
+gem "json", "~> 2.21.2"
+
 group :development, :test do
   gem "rake", "~> 13.4.2"
 end

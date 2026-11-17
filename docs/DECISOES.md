@@ -64,3 +64,13 @@ atualizado.
 
 - **Decisão:** cada action é referenciada por SHA de commit com a tag como comentário; imagens de
   ferramentas usam tags de versão explícitas (sem `latest`).
+
+## ADR-011 — Correções de segurança na imagem
+
+- **Contexto:** a análise da imagem apontou `zlib1g` com correção publicada na Debian e a default gem
+  `json` 2.18.0 do Ruby 4.0.9 afetada pela CVE-2026-33210 (corrigida em ≥ 2.19.2).
+- **Decisão:** a etapa base executa `apt-get upgrade`; a default gem `json` é removida da imagem e a
+  versão corrigida (`json ~> 2.21.2`) é declarada no `Gemfile`. Os executáveis carregam
+  `bundler/setup`, portanto usam sempre a versão do lockfile.
+- **Consequências:** `ruby -rjson` sem Bundler não funciona na imagem de execução; o healthcheck usa
+  somente `net/http`. A análise continua falhando para vulnerabilidades HIGH/CRITICAL corrigíveis.

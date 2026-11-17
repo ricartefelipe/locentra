@@ -10,9 +10,16 @@ ENV LANG=C.UTF-8 \
     BUNDLE_PATH=/usr/local/bundle \
     BUNDLE_JOBS=4 \
     BUNDLE_RETRY=3
+# `apt-get upgrade` aplica correções de segurança publicadas após a construção da imagem base.
 RUN apt-get update \
+ && apt-get -y upgrade \
  && apt-get install -y --no-install-recommends libpq5 libyaml-0-2 tzdata ca-certificates \
  && rm -rf /var/lib/apt/lists/*
+# Remove a default gem json 2.18.0 (CVE-2026-33210). A versão corrigida vem do Gemfile.lock.
+RUN archdir="$(ruby -e 'print RbConfig::CONFIG["archdir"]')" \
+ && rubylibdir="$(ruby -e 'print RbConfig::CONFIG["rubylibdir"]')" \
+ && rm -rf "${rubylibdir}/json" "${rubylibdir}/json.rb" "${archdir}/json" \
+      "$(ruby -e 'print Gem.default_specifications_dir')"/json-*.gemspec
 WORKDIR /app
 
 # ---------------------------------------------------------------------------
@@ -50,7 +57,6 @@ ENV APP_ENV=production \
     BUNDLE_DEPLOYMENT=true \
     BUNDLE_WITHOUT="development test"
 COPY --from=build /usr/local/bundle /usr/local/bundle
-COPY --from=build /app/.bundle /app/.bundle
 COPY . .
 RUN groupadd --system --gid 10001 locentra \
  && useradd --system --uid 10001 --gid locentra --home-dir /app --shell /usr/sbin/nologin locentra \
