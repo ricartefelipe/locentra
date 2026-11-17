@@ -1,0 +1,65 @@
+# frozen_string_literal: true
+
+require "uri"
+
+module Locentra
+  class ConfigError < StandardError; end
+
+  # Configuração lida do ambiente somente quando o sistema é montado (nunca ao carregar o domínio).
+  Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :database_url, :worker_database_url, :migration_database_url,
+                       :pool_size, :pool_timeout, :worker_concurrency, :log_level, :smtp_host, :smtp_port, :mail_from,
+                       :payment_provider, :asaas_base_url, :asaas_api_key, :storage_root, :max_upload_bytes, :bcrypt_cost,
+                       :metrics_token) do
+    def self.from_env(env = ENV, overrides = {})
+      app_env = env.fetch("APP_ENV", "development")
+      values = {
+        env: app_env,
+        base_url: env.fetch("APP_BASE_URL", "http://localhost:9292"),
+        secret_key_base: env["APP_SECRET_KEY_BASE"],
+        encryption_key: env["APP_ENCRYPTION_KEY"],
+        database_url: env["DATABASE_URL"],
+        worker_database_url: env["WORKER_DATABASE_URL"],
+        migration_database_url: env["MIGRATION_DATABASE_URL"],
+        pool_size: Integer(env.fetch("DB_POOL_SIZE", env.fetch("PUMA_THREADS", "5"))),
+        pool_timeout: Integer(env.fetch("DB_POOL_TIMEOUT", "5")),
+        worker_concurrency: Integer(env.fetch("WORKER_CONCURRENCY", "4")),
+        log_level: env.fetch("LOG_LEVEL", "info"),
+        smtp_host: env.fetch("SMTP_HOST", "localhost"),
+        smtp_port: Integer(env.fetch("SMTP_PORT", "1025")),
+        mail_from: env.fetch("MAIL_FROM", "Locentra <nao-responda@locentra.local>"),
+        payment_provider: env.fetch("PAYMENT_PROVIDER", "simulator"),
+        asaas_base_url: env.fetch("ASAAS_BASE_URL", "https://api-sandbox.asaas.com/v3"),
+        asaas_api_key: env["ASAAS_API_KEY"].to_s.empty? ? nil : env["ASAAS_API_KEY"],
+        storage_root: env.fetch("STORAGE_ROOT", File.expand_path("../../storage", __dir__)),
+        max_upload_bytes: Integer(env.fetch("MAX_UPLOAD_BYTES", "10485760")),
+        bcrypt_cost: Integer(env.fetch("BCRYPT_COST", app_env == "test" ? "4" : "12")),
+        metrics_token: env["METRICS_TOKEN"].to_s.empty? ? nil : env["METRICS_TOKEN"]
+      }.merge(overrides)
+      new(**values).tap(&:validate!)
+    rescue ArgumentError => e
+      raise ConfigError, "configuração inválida: #{e.message}"
+    end
+
+    def production? = env == "production"
+    def test? = env == "test"
+
+    def validate!
+      raise ConfigError, "DATABASE_URL obrigatório" if database_url.to_s.empty?
+      raise ConfigError, "APP_SECRET_KEY_BASE deve ter ao menos 32 caracteres" if secret_key_base.to_s.length < 32
+      raise ConfigError, "APP_ENCRYPTION_KEY obrigatório" if encryption_key.to_s.length < 16
+      raise ConfigError, "PAYMENT_PROVIDER inválido" unless %w[simulator asaas].include?(payment_provider)
+      raise ConfigError, "ASAAS_API_KEY obrigatório com PAYMENT_PROVIDER=asaas" if payment_provider == "asaas" && asaas_api_key.nil?
+      raise ConfigError, "APP_BASE_URL deve usar https em produção" if production? && !base_url.start_with?("https://")
+
+      true
+    end
+
+    def secure_cookies? = production? || base_url.start_with?("https://")
+
+    # Representação sem segredos, para diagnóstico.
+    def inspect
+      "#<Locentra::Config env=#{env} base_url=#{base_url} pool_size=#{pool_size} provider=#{payment_provider}>"
+    end
+    alias_method :to_s, :inspect
+  end
+end
