@@ -41,6 +41,14 @@ module Locentra
           SQL
         end
 
+        # Alertas abertos da reserva com outra chave (por exemplo, atraso de um fim previsto anterior).
+        def resolve_superseded(tx, reservation_id:, kind:, keep_key:, resolution:, now:)
+          tx.execute(<<~SQL, [tx.tenant_id!, reservation_id, kind, keep_key, resolution, now])
+            UPDATE reservation_alerts SET status = 'resolved', resolution = $5, resolved_at = $6
+             WHERE organization_id = $1 AND reservation_id = $2 AND kind = $3 AND status = 'open' AND dedup_key <> $4
+          SQL
+        end
+
         def list(tx, status: "open", limit: 100, reservation_id: nil)
           tx.query(<<~SQL, [tx.tenant_id!, status, limit, reservation_id])
             SELECT al.id, al.kind, al.status, al.details, al.created_at, al.resolved_at, al.resolution, al.reservation_id, al.related_reservation_id,
@@ -68,15 +76,18 @@ module Locentra
       class OperationsRepository
         RES = ReservationRepository::COLUMNS.split(", ").map { |c| "r.#{c}" }.join(", ")
 
-        # Reservas em andamento vencidas com itens pendentes. SKIP LOCKED ignora reservas em devolução.
-        def lock_overdue(tx, now, limit)
-          tx.query(<<~SQL, [tx.tenant_id!, now, limit]).map { |row| [ReservationRepository.map(row), row["overdue_since"]] }
+        # Reservas em andamento vencidas com itens pendentes, em lotes paginados por (fim previsto, id):
+        # `after` é o par da última reserva do lote anterior. SKIP LOCKED ignora reservas em devolução.
+        def lock_overdue(tx, now, limit, after: nil)
+          params = [tx.tenant_id!, now, limit, after&.first, after&.last]
+          tx.query(<<~SQL, params).map { |row| [ReservationRepository.map(row), row["overdue_since"]] }
             SELECT #{RES}, r.overdue_since FROM reservations r
              WHERE r.organization_id = $1 AND r.status = 'in_progress' AND r.ends_at <= $2
+               AND ($4::timestamptz IS NULL OR (r.ends_at, r.id) > ($4::timestamptz, $5::uuid))
                AND EXISTS (SELECT 1 FROM pickup_lines l
                             WHERE l.organization_id = r.organization_id AND l.reservation_id = r.id AND l.status IN ('delivered', 'partial')
                               AND l.returned_quantity + l.missing_quantity < l.delivered_quantity)
-             ORDER BY r.ends_at LIMIT $3
+             ORDER BY r.ends_at, r.id LIMIT $3
                FOR UPDATE OF r SKIP LOCKED
           SQL
         end
@@ -90,8 +101,9 @@ module Locentra
           SQL
         end
 
+        # Marca (ou atualiza, quando o prazo mudou para uma data ainda vencida) o início do atraso.
         def mark_overdue(tx, reservation_id, since)
-          tx.execute("UPDATE reservations SET overdue_since = $3 WHERE organization_id = $1 AND id = $2 AND overdue_since IS NULL",
+          tx.execute("UPDATE reservations SET overdue_since = $3 WHERE organization_id = $1 AND id = $2 AND overdue_since IS DISTINCT FROM $3",
                      [tx.tenant_id!, reservation_id, since])
         end
 

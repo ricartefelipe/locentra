@@ -9,6 +9,10 @@ module Locentra
       # Executado pelo worker a cada rotina da organização (`organization.tick`). Idempotente: alertas
       # são deduplicados pela chave e o e-mail de atraso é enfileirado uma única vez por reserva.
       # Nenhuma reserva é cancelada automaticamente.
+      #
+      # Todas as reservas vencidas são processadas a cada execução, em lotes de `limit` (uma transação
+      # por lote, paginada por fim previsto e id): as ainda não sinalizadas recebem o atraso e as já
+      # sinalizadas voltam a identificar reservas futuras criadas depois.
       class DetectOverdue
         def initialize(uow:, operations:, alerts:, alert_book:, allocations:, availability:, coverage:, queue:, audit:, clock:)
           @uow = uow
@@ -24,18 +28,32 @@ module Locentra
         end
 
         def call(actor, limit: 100)
-          @uow.run(actor, "fulfillment.write") do |tx, current|
-            now = @clock.now
-            refresh_extended(tx, now)
-            overdue = @operations.lock_overdue(tx, now, limit).select { |reservation, _| Domain::Alerts::Overdue.overdue?(reservation, now) }
-            overdue.each { |reservation, since| flag(tx, current, reservation, since) }
-            reservations = overdue.map(&:first)
-            identify_affected(tx, reservations, now) unless reservations.empty?
-            reservations.map(&:id)
+          raise ArgumentError, "lote deve ser positivo" unless limit.positive?
+
+          processed = []
+          cursor = nil
+          loop do
+            ids, cursor = @uow.run(actor, "fulfillment.write") { |tx, current| detect_batch(tx, current, cursor, limit) }
+            processed.concat(ids)
+            break unless cursor
           end
+          processed
         end
 
         private
+
+        # Devolve os ids processados e o cursor do próximo lote (nil quando não há mais reservas).
+        def detect_batch(tx, current, cursor, limit)
+          now = @clock.now
+          refresh_extended(tx, now) if cursor.nil?
+          rows = @operations.lock_overdue(tx, now, limit, after: cursor)
+          overdue = rows.select { |reservation, _| Domain::Alerts::Overdue.overdue?(reservation, now) }
+          overdue.each { |reservation, since| flag(tx, current, reservation, since) }
+          reservations = overdue.map(&:first)
+          identify_affected(tx, reservations, now) unless reservations.empty?
+          last = rows.last&.first
+          [reservations.map(&:id), rows.size == limit ? [last.period.ends_at, last.id] : nil]
+        end
 
         # Prazo estendido para o futuro: a reserva deixa de estar atrasada e os alertas são resolvidos.
         def refresh_extended(tx, now)
@@ -47,10 +65,19 @@ module Locentra
           end
         end
 
+        # Um único alerta de atraso aberto por reserva: se o prazo foi alterado para uma data ainda
+        # vencida, o alerta do fim anterior é resolvido e substituído pelo do novo fim previsto.
         def flag(tx, current, reservation, since)
           scheduled_end = reservation.period.ends_at
-          @operations.mark_overdue(tx, reservation.id, scheduled_end) if since.nil?
-          created = @alert_book.raise_alert(tx, reservation_id: reservation.id, kind: "overdue", key: Keys.overdue(reservation.id, scheduled_end),
+          key = Keys.overdue(reservation.id, scheduled_end)
+          unless since == scheduled_end
+            @operations.mark_overdue(tx, reservation.id, scheduled_end)
+            if since
+              @alerts.resolve_superseded(tx, reservation_id: reservation.id, kind: "overdue", keep_key: key, now: @clock.now,
+                                             resolution: "Prazo de devolução alterado; substituído pelo alerta do novo fim previsto")
+            end
+          end
+          created = @alert_book.raise_alert(tx, reservation_id: reservation.id, kind: "overdue", key: key,
                                                 details: { "code" => reservation.code, "ends_at" => scheduled_end.iso8601 })
           return unless created
 
