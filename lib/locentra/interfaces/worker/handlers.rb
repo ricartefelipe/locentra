@@ -94,7 +94,7 @@ module Locentra
           vars = job.payload.fetch("variables", {}).dup
           if job.organization_id
             zone = tenant(job) { |tx| @system.repos[:organizations].find(tx, tx.tenant_id!).time_zone }
-            %w[starts_at ends_at].each do |key|
+            %w[starts_at ends_at valid_until].each do |key|
               vars["#{key}_local"] = zone.format_local(Time.iso8601(vars[key])) if vars[key]
             end
           end

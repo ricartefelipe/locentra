@@ -77,7 +77,8 @@ module Locentra
         contract_renderer: I::Documents::ContractPdf.new,
         contract_guard: A::Contracts::ReservationGuard.new(contracts: repos[:contracts])
       }
-      @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers])
+      @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
+                                                                           quotes: repos[:quotes], contracts: repos[:contracts])
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
                                                                   clock: clock, ids: ids)
       @services[:deliver_webhook] = A::Webhooks::Deliver.new(transactor: transactor, webhooks: repos[:webhooks], http: @http, box: @services[:box],
