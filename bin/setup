@@ -12,7 +12,7 @@ docker compose build
 docker compose up -d --wait postgres mailpit
 docker compose --profile ops run --rm migrate
 docker compose run --rm --no-deps web ruby bin/locentra-admin db:seed
-docker compose up -d --wait web
+docker compose up -d --wait web worker
 
 cat <<'MSG'
 

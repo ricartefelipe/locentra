@@ -34,10 +34,24 @@ incremento indicado. Comandos de verificação estão em `CONTRIBUTING.md`.
 | Seed idempotente com duas organizações | Implementado e verificado na CI | job "Reconstrução do banco e seed" |
 | Cobertura domínio + aplicação | 98,4% linhas / 87,9% branches na última execução local | `rake test:all` com `COVERAGE_CHECK=1` |
 
+## Incremento 3 — Worker, notificações e integrações
+
+| Item | Situação | Evidência |
+|---|---|---|
+| Worker com threads limitadas, lease, fencing, heartbeat, backoff, `dead` e reprocessamento | Implementado e testado | `test/integration/worker_test.rb` |
+| Agendador com chave única por janela (expiração de bloqueios por organização, limpeza) | Implementado e testado | `test_scheduler_fanout_expires_holds_per_organization_once` |
+| Encerramento gracioso (TERM/INT) | Verificado manualmente com `bin/worker` e `docker stop` | logs `worker.stopping`/`worker.stopped` |
+| E-mails transacionais (confirmação, recuperação, convite, reservas) via SMTP | Implementado e testado com mailer em memória; entrega real verificada no Mailpit local | `worker_test.rb` |
+| Outbox → webhooks assinados com identificador estável e retentativas | Implementado e testado com servidor HTTP local | `test_events_are_dispatched_to_signed_webhooks_with_stable_ids` |
+| Proteção SSRF, cifragem de segredos, assinatura | Implementado e testado (sem rede) | `test/unit/infrastructure/security_adapters_test.rb` |
+| Anexos com detecção de tipo, download autenticado e isolamento | Implementado e testado | `test_attachments_upload_download_and_tenant_isolation` |
+| Tela de integrações (endpoints e entregas, reenvio) | Implementado e testado (renderização) | `pages_test.rb` |
+
 ## Limitações conhecidas
 
-- Worker, envio de e-mails, outbox/webhooks, orçamentos, contratos/PDF, retirada/devolução,
-  manutenção, financeiro, portal do cliente, CLI operacional e testes de navegador estão planejados
-  para os próximos incrementos. As tarefas enfileiradas neste incremento (e-mails e eventos) só serão
-  processadas quando o worker existir.
-- O serviço `worker` do Compose depende de `bin/worker` (incremento 3).
+- Orçamentos, contratos/PDF, retirada/devolução, manutenção, financeiro, portal do cliente, CLI
+  operacional e testes de navegador estão planejados para os próximos incrementos.
+- Adaptador de object storage não implementado; somente armazenamento local (fora do diretório
+  público). A interface do adaptador está documentada em ADR-022.
+- Métricas de contadores por processo (Prometheus) refletem apenas o processo consultado; métricas de
+  fila vêm de agregados gravados pelo worker em `queue_stats`.

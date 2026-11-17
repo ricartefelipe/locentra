@@ -134,3 +134,30 @@ atualizado.
 
 - **Decisão:** convites, confirmação de e-mail e recuperação de senha enfileiram apenas identificadores;
   o worker emite o token no momento do envio. Tokens nunca ficam gravados em texto claro na fila.
+
+## ADR-020 — Worker com lease, fencing e agendamento por chave única
+
+- **Decisão:** processo próprio (`bin/worker`) com papel `locentra_worker`, N threads de execução,
+  thread de renovação de leases e thread de agendamento. Reivindicação com `FOR UPDATE SKIP LOCKED` em
+  transação curta; conclusão e reagendamento exigem o `lease_token` atual. Backoff exponencial com
+  variação determinística e teto de 6 horas; tarefas esgotadas ficam `dead` e podem ser reprocessadas
+  por usuário com `jobs.manage`. O agendador usa `unique_key` por janela de 60 s, de modo que vários
+  workers geram uma única tarefa. Encerramento por `TERM`/`INT` via self-pipe, aguardando as threads.
+- **Consequências:** entrega "pelo menos uma vez"; handlers são idempotentes (despacho da outbox marca
+  `dispatched_at` sob lock; entregas de webhook são únicas por `(endpoint, evento)`; e-mails podem ser
+  reenviados em caso de queda entre o envio e a conclusão).
+
+## ADR-021 — Webhooks enviados com proteção contra SSRF
+
+- **Decisão:** somente HTTPS em produção; todos os IPs resolvidos devem ser públicos (bloqueio de
+  privados, loopback, link-local, metadados, multicast, reservados e IPv4 mapeado); conexão pelo IP
+  validado (`Net::HTTP#ipaddr`); redirecionamentos não são seguidos; tempos limite curtos. Assinatura
+  `t=<timestamp>,v1=<HMAC-SHA256>` com identificadores estáveis de evento e entrega. O segredo de
+  assinatura é cifrado com AES-256-GCM (chave derivada por HKDF).
+
+## ADR-022 — Anexos fora do diretório público
+
+- **Decisão:** chaves `<organização>/<anexo>` geradas pelo servidor; tipo detectado pelo conteúdo
+  (PDF, PNG, JPEG, WebP); download apenas por rota autenticada com `Content-Security-Policy: sandbox`
+  e `nosniff`; remoção lógica respeitando retenção. O adaptador local pode ser substituído por object
+  storage privado implementando `put/get/delete/exist?`.

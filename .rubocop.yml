@@ -82,6 +82,7 @@ Metrics/AbcSize:
   Exclude:
     - "test/**/*"
     - "lib/locentra/system.rb"
+    - "lib/locentra/interfaces/http/routes.rb"
 
 Minitest/TestFileName:
   Exclude:
