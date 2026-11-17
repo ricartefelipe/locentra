@@ -37,6 +37,10 @@ tabelas do mesmo tenant e RLS forçada (`app_enable_tenant_rls`). `DELETE` é re
 | `transfers` | Transferência `TR-nnnnnn` de ativo ou de quantidade de estoque entre filiais | Uma transferência ativa por ativo; origem ≠ destino. Gatilho impede alteração após `received`/`cancelled` |
 | `reservation_alerts` | Alertas `overdue`, `affected_by_overdue`, `asset_unavailable`, com reserva relacionada, detalhes e resolução | `UNIQUE (organization_id, dedup_key)`: um alerta por situação. Resolvido exige `resolution`. Gatilho impede alteração após a resolução |
 
+Gatilho em tabela existente: `asset_allocations_status_guard` (`BEFORE INSERT OR UPDATE OF asset_id` em
+`asset_allocations`, só para alocações de reserva ativas) relê o ativo com `FOR SHARE` e recusa ativo extraviado,
+baixado ou, no período, em inspeção, manutenção ou trânsito (mesma regra de `AssetSchedule#free?`). Ver Decisões.
+
 Tabelas existentes usadas: `asset_allocations`/`stock_allocations` (liberação, redução e bloqueios `kind = 'block'`),
 `asset_events` (histórico), `stock_movements` (`loss`, `transfer_out`, `transfer_in`), `reservation_adjustments`
 (`late_fee`, `damage`, `missing`), `attachments` (`owner_type = 'damage_report'` e `'maintenance_order'`),
@@ -78,6 +82,11 @@ com troca de filial. Todas geram `asset_events` com referência ao registro de o
   entregues vão a `checked_out`; itens não conferidos têm a alocação liberada e a linha registra
   `not_delivered`/`partial` com o motivo; a quantidade de estoque não conferida deixa de ocupar o estoque. A reserva
   passa a `in_progress` e o evento `reservation.picked_up` é publicado.
+- **Entrega antecipada** (antes do início da janela alocada, que inclui a preparação anterior): cada alocação entregue
+  passa a começar no instante da entrega, e o item com o cliente deixa de ser oferecido no intervalo. Ativo alocado a
+  outra reserva (ou bloqueio) nesse intervalo é recusado pela exclusion constraint (`Conflict`
+  `early_pickup_unavailable`, com o código da reserva); estoque é conferido pelo pico do intervalo sob lock dos
+  estoques (`Unavailable` com a quantidade livre). A extensão da reserva mantém o início antecipado.
 - **Retirada duplicada**: lock da reserva e verificação de estado (segunda entrega recebe `Conflict`
   `already_picked_up`); no banco, índices únicos parciais em `pickups` e `pickup_lines`.
 
@@ -113,14 +122,24 @@ com troca de filial. Todas geram `asset_events` com referência ao registro de o
   situação anterior (inspeção, quando veio de inspeção reprovada, com nova inspeção pendente).
 - Cobrança de avaria ou falta: somente por quem tem `damage_charges.approve` e com ao menos uma evidência anexada
   (rota `/anexos`, `owner_type = 'damage_report'`). A aprovação grava `reservation_adjustments` `damage`/`missing` com
-  o valor informado ou o estimado. Registros podem ser revisados enquanto abertos ou descartados com motivo.
+  o valor informado ou o estimado (falta: custo de reposição × quantidade). Registros podem ser revisados enquanto
+  abertos ou descartados com motivo.
+- A aprovação recebe a versão do registro exibida ao aprovador (campo oculto do formulário): um registro revisado
+  depois de exibido — por exemplo, custo estimado alterado por quem não aprova cobranças — é recusado com `Conflict`
+  `stale_damage_report`, para que o valor cobrado seja sempre o que foi visto.
+- Evidências: anexar ou remover evidência de avaria bloqueia o registro (`Inspections::EvidenceGuard`, ligado aos
+  casos de uso de anexos) e é recusado depois da decisão (`Conflict` `damage_report_decided`); a aprovação conta as
+  evidências com `FOR SHARE`. Uma remoção concorrente termina antes da contagem (e a aprovação sem evidência é
+  recusada) ou encontra o registro já decidido.
 - A tela do ativo não altera manualmente a situação de ativo com cliente, em trânsito, com inspeção pendente ou com
   ordem de manutenção ativa (`Conflict` `asset_in_operation`).
 
 ### Transferências
 - Ativo: solicitação exige ativo `available`; uma transferência ativa por ativo. Na saída, o ativo não pode ter
   alocações ativas futuras (reservas ou bloqueios) e passa a `in_transit` — indisponível em todas as filiais, pois a
-  filial só muda no recebimento.
+  filial só muda no recebimento. Uma reserva criada em paralelo não escapa da verificação: o gatilho
+  `asset_allocations_status_guard` espera a saída e recusa o ativo em trânsito; se a reserva gravar primeiro, a saída
+  espera e encontra a alocação.
 - Estoque: a quantidade sai do estoque de origem na saída, desde que o pico reservado no horizonte continue coberto,
   e entra no estoque de destino (criado se necessário) no recebimento.
 - Cancelável somente antes da saída.
@@ -131,15 +150,20 @@ com troca de filial. Todas geram `asset_events` com referência ao registro de o
   os mesmos ativos ainda com o cliente, ou cuja capacidade de estoque fica descoberta pelas unidades em atraso,
   recebem `affected_by_overdue` com a reserva de origem. O e-mail `late_return` é enfileirado uma única vez por
   reserva (`unique_key`). Nada é cancelado automaticamente.
-- Prazo estendido para o futuro limpa `overdue_since` e resolve os alertas abertos. Alertas resolvidos não são
-  recriados (chave de deduplicação). A resolução manual exige o registro da decisão.
+- Cada execução percorre todas as reservas vencidas, em lotes de `limit` (padrão 100; uma transação por lote,
+  paginada por fim previsto e id): as ainda não sinalizadas recebem o atraso e as já sinalizadas voltam a identificar
+  reservas futuras criadas depois. Reservas bloqueadas por uma devolução em andamento ficam para a próxima execução.
+- Prazo estendido para o futuro limpa `overdue_since` e resolve os alertas abertos. Prazo alterado para uma data ainda
+  vencida atualiza `overdue_since` e substitui o alerta `overdue` do fim anterior (resolvido automaticamente) pelo do
+  novo fim: há no máximo um alerta de atraso aberto por reserva. Alertas resolvidos não são recriados (chave de
+  deduplicação). A resolução manual exige o registro da decisão.
 
 ## Permissões
 
 | Operação | Permissão |
 |---|---|
 | Separação, conferência, entrega, devolução, resolução de alertas | `fulfillment.write` |
-| Aprovar/reprovar inspeção, registrar e revisar avaria, anexar evidência | `inspections.write` |
+| Aprovar/reprovar inspeção, registrar e revisar avaria, anexar ou remover evidência (só com o registro aberto) | `inspections.write` |
 | Aprovar ou descartar cobrança de avaria/falta | `damage_charges.approve` |
 | Ordens de manutenção | `maintenance.write` |
 | Transferências | `assets.write` |
@@ -172,6 +196,19 @@ Recursos de outra organização resultam em `NotFound` (RLS e filtros explícito
 - **Alertas deduplicados por chave** (`overdue:<reserva>:<fim>`, `affected:<reserva>:<origem>:<recurso>`,
   `unavailable:<reserva>:<recurso>:<origem>`), com `ON CONFLICT DO NOTHING`.
 - Bloqueios temporários vencidos deixaram de ser considerados na realocação de reservas futuras de um ativo.
+- **Alocação de ativo × mudança de situação**: o motor de disponibilidade escolhe a unidade lendo a situação sem lock;
+  quem muda a situação (saída de transferência, manutenção, falta na devolução, mudança manual) bloqueia o ativo com
+  `FOR UPDATE`. O gatilho `asset_allocations_status_guard` fecha a corrida no banco: a gravação da alocação relê o
+  ativo com `FOR SHARE`, espera o commit da mudança e recusa a unidade indisponível com o código
+  `exclusion_violation`, que a aplicação trata como unidade ocupada (o próximo candidato é tentado ou a reserva recebe
+  `Unavailable`). Cobre criação, confirmação, realocação e a troca de unidade na conferência da retirada, que também
+  relê o patrimônio sob lock. Prorrogação do período (`UPDATE` de `period`) não passa pelo gatilho.
+- **Ordem de locks de estoque**: a devolução e a entrega bloqueiam todos os estoques envolvidos de uma vez, em ordem de
+  id, antes das alocações — a mesma ordem da criação e da extensão de reservas (sem ciclo de locks).
+- **Retirada antecipada**: em vez de recusar a entrega antes da janela (o que exigiria uma tolerância configurável), a
+  alocação passa a começar na entrega; a recusa só ocorre quando o intervalo já está comprometido.
+- **Extensão retroativa**: a extensão de reserva em andamento para um fim já vencido continua aceita (regularização de
+  prazo combinado com o cliente e registrado depois); o detector de atrasos substitui o alerta pelo do novo fim.
 
 ## Limitações
 
@@ -182,6 +219,7 @@ Recursos de outra organização resultam em `NotFound` (RLS e filtros explícito
 - Estoque devolvido antes do fim fica disponível imediatamente (sem tempo de preparação); ativo devolvido após o fim
   previsto não recebe bloqueio de preparação adicional.
 - Multa de kit usa a quantidade total do item, mesmo que parte do kit não tenha sido entregue.
+- A retirada antecipada não altera o valor da reserva: o período cobrado continua o reservado.
 - O custo estimado de faltas usa o custo de reposição vigente do produto no momento da devolução.
 - Recebimento de transferência de estoque é integral (sem recebimento parcial).
 - Ativo extraviado que reaparece segue o fluxo existente da tela do ativo (`lost → in_inspection → available`), sem
@@ -196,6 +234,7 @@ bash "$RUN" "$PWD" <banco> bundle exec rake test:unit                           
 bash "$RUN" "$PWD" <banco> bundle exec ruby -Ilib -Itest test/integration/fulfillment_flow_test.rb
 bash "$RUN" "$PWD" <banco> bundle exec ruby -Ilib -Itest test/integration/damage_flow_test.rb
 bash "$RUN" "$PWD" <banco> bundle exec ruby -Ilib -Itest test/integration/maintenance_transfer_overdue_test.rb
+bash "$RUN" "$PWD" <banco> bundle exec ruby -Ilib -Itest test/integration/overdue_alerts_test.rb
 bash "$RUN" "$PWD" <banco> bundle exec ruby -Ilib -Itest test/concurrency/fulfillment_race_test.rb
 bash "$RUN" "$PWD" <banco> bundle exec ruby -Ilib -Itest test/http/operations_pages_test.rb
 DK_EXTRA="-e COVERAGE_CHECK=1" bash "$RUN" "$PWD" <banco> bundle exec rake test:all
@@ -209,7 +248,10 @@ DK_EXTRA="-e COVERAGE_CHECK=1" bash "$RUN" "$PWD" <banco> bundle exec rake test:
 | Avaria → indisponibilidade e manutenção | `test_damage_makes_item_unavailable_and_rejection_opens_maintenance` |
 | Inspeção bloqueando disponibilidade (CheckAvailability) | `test_inspection_blocks_availability_until_released` |
 | Transferência sem duplicidade | `test_asset_transfer_without_duplicity_between_branches`, `test_concurrent_transfer_requests_for_the_same_asset_keep_a_single_destination` |
-| Atraso com alertas e reserva futura afetada | `test_overdue_creates_unique_alerts_identifies_affected_reservations_and_emails_once`, `test_worker_tick_detects_overdue_and_sends_late_return_email` |
+| Saída de transferência / manutenção × nova reserva (concorrente) | `test_dispatch_racing_a_new_reservation_never_ships_an_asset_with_future_allocation`, `test_new_reservation_committed_first_blocks_the_dispatch`, `test_maintenance_racing_a_new_reservation_keeps_the_asset_free_of_allocations`, `test_database_refuses_reservation_allocation_on_asset_in_transit` |
+| Retirada antecipada | `test_early_pickup_occupies_the_items_from_delivery_until_the_reservation_starts`, `test_early_pickup_is_refused_when_the_interval_before_the_start_is_committed` |
+| Atraso com alertas e reserva futura afetada | `test_overdue_creates_unique_alerts_identifies_affected_reservations_and_emails_once`, `test_detect_overdue_covers_every_late_reservation_in_batches`, `test_extension_to_a_date_still_past_keeps_a_single_open_overdue_alert`, `test_worker_tick_detects_overdue_and_sends_late_return_email` |
 | Multa por atraso | `test_late_return_records_late_fee_with_snapshot_table`, `test_late_fee_policy_for_simple_items_and_kits` |
-| Cobrança exige evidência e permissão | `test_damage_charge_requires_evidence_and_permission`, `test_concurrent_charge_approvals_record_a_single_adjustment` |
+| Cobrança exige evidência e permissão | `test_damage_charge_requires_evidence_and_permission`, `test_missing_charge_defaults_to_replacement_cost_and_requires_evidence`, `test_estimated_cost_revised_after_display_invalidates_the_approval`, `test_evidence_of_a_decided_report_cannot_be_removed_or_added`, `test_concurrent_charge_approvals_record_a_single_adjustment`, `test_evidence_removal_racing_an_approval_after_the_count_is_refused`, `test_evidence_removed_before_the_count_blocks_the_approval` |
+| Ordem de locks na devolução | `test_return_locks_stock_pools_in_id_order_while_a_reservation_competes` |
 | Isolamento | `test_operations_resources_are_isolated_between_organizations`, `test_other_tenant_operations_are_not_found` |
