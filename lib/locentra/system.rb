@@ -48,7 +48,8 @@ module Locentra
         users: P::UserRepository.new, sessions: P::SessionRepository.new, user_tokens: P::UserTokenRepository.new,
         access: P::AccessRepository.new, organizations: P::OrganizationRepository.new, subscriptions: P::SubscriptionRepository.new,
         customers: P::CustomerRepository.new, catalog: P::CatalogRepository.new, availability: P::AvailabilityRepository.new,
-        reservations: P::ReservationRepository.new, audit: P::AuditRepository.new, pricing: P::PricingRepository.new
+        reservations: P::ReservationRepository.new, audit: P::AuditRepository.new, pricing: P::PricingRepository.new,
+        credentials: P::CredentialRepository.new, idempotency: P::IdempotencyRepository.new, reports: P::ReportsRepository.new
       }
     end
 
@@ -106,6 +107,14 @@ module Locentra
                                                                                 sessions_repository: r[:sessions], audit: audit)
       uc[:list_members] = A::Organizations::ListMembers.new(uow: uow, organizations: r[:organizations])
       uc[:get_organization] = A::Organizations::GetOrganization.new(uow: uow, organizations: r[:organizations])
+      uc[:create_credential] = A::Integrations::CreateCredential.new(**common, credentials: r[:credentials], limits: s[:limits], audit: audit, ids: ids)
+      uc[:revoke_credential] = A::Integrations::RevokeCredential.new(**common, credentials: r[:credentials], audit: audit)
+      uc[:list_credentials] = A::Integrations::ListCredentials.new(uow: uow, credentials: r[:credentials])
+      uc[:authenticate_credential] = A::Integrations::AuthenticateCredential.new(**common, credentials: r[:credentials])
+      uc[:idempotency] = A::Idempotency.new(**common, repository: r[:idempotency], ids: ids)
+      uc[:dashboard] = A::Reports::Dashboard.new(**common, reports: r[:reports])
+      uc[:list_audit] = A::Reports::ListAudit.new(uow: uow, audit: r[:audit])
+      uc[:collect_metrics] = A::Reports::CollectMetrics.new(transactor: transactor, reports: r[:reports], metrics: metrics, clock: clock)
     end
 
     def build_catalog_use_cases(cases)
