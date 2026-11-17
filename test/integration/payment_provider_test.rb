@@ -93,6 +93,62 @@ class PaymentProviderTest < DatabaseTest
     assert_equal 1, count("audit_events", "action = 'payment.resubmission_scheduled'")
   end
 
+  def test_duplicate_remote_charges_raise_alert_and_remote_cancellation_is_adopted
+    duplicated = request_online(@rental, 3_000, scenario: "timeout_after_success")
+    removed = request_online(@rental, 2_000, scenario: "timeout_after_success")
+    drain
+    owner_query(<<~SQL, [duplicated.id])
+      INSERT INTO payment_simulator_charges (id, organization_id, account_id, external_reference, customer_reference, billing_type, value_cents,
+                                             due_date, status, created_at, updated_at)
+      SELECT 'sim_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', organization_id, account_id, external_reference, customer_reference, billing_type, value_cents,
+             due_date, status, created_at + interval '1 second', updated_at
+        FROM payment_simulator_charges WHERE external_reference = $1
+    SQL
+    owner_query("UPDATE payment_simulator_charges SET status = 'DELETED' WHERE external_reference = $1", [removed.id])
+    system_actor = A::Actor.system(organization_id: @org[:organization_id])
+
+    assert_equal :resolved, uc(:resolve_submission).call(system_actor, duplicated.id)
+    assert_equal :resolved, uc(:resolve_submission).call(system_actor, removed.id)
+    assert_equal :already_pending, uc(:resolve_submission).call(system_actor, duplicated.id)
+    assert_equal "pending", payment(duplicated.id).status
+    assert_equal "cancelled", payment(removed.id).status
+    assert_equal(["duplicate_provider_charge"], uc(:finance).overview(@actor)[:alerts].map { |a| a["kind"] })
+  end
+
+  def test_reconciliation_schedules_resubmission_for_unknown_submission_absent_in_provider
+    requested = request_online(@rental, 10_000, scenario: "timeout_after_success")
+    drain
+    owner_query("DELETE FROM payment_simulator_charges")
+    data = uc(:finance).report(@actor, uc(:reconcile_payments).call(@actor))
+
+    assert_equal([%w[missing_remote resubmission_scheduled]], data[:items].map { |i| i.values_at("kind", "action") })
+    assert_equal "pending_submission", payment(requested.id).status
+  end
+
+  def test_submission_after_account_deactivation_fails_and_invalid_jobs_die
+    requested = request_online(@rental, 10_000)
+    uc(:deactivate_payment_account).call(@actor, @account["id"])
+    drain
+    failed = payment(requested.id)
+
+    assert_equal "failed", failed.status
+    assert_match(/desativada/, failed.failure_reason)
+    worker_system.transactor.call(tenant_id: @org[:organization_id]) do |tx|
+      worker_system.queue.enqueue(tx, "payments.submit", { "payment_id" => SecureRandom.uuid })
+      worker_system.queue.enqueue(tx, "finance.sync_reservation", { "reservation_id" => "nao-e-uuid" })
+    end
+    drain
+
+    assert_equal 2, count("jobs", "status = 'dead' AND kind IN ('payments.submit', 'finance.sync_reservation')")
+  end
+
+  def test_only_simulated_charges_can_be_simulated
+    manual = pay(@rental, 1_000)
+
+    assert_raises(D::Conflict) { uc(:simulate_payment).call(@actor, manual.id) }
+    assert_raises(D::NotFound) { uc(:simulate_payment).call(@actor, SecureRandom.uuid) }
+  end
+
   def test_rejected_submission_fails_payment
     requested = request_online(@rental, 10_000, scenario: "fail")
     drain

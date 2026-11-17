@@ -182,6 +182,32 @@ class FinancePagesTest < HttpTest
     assert_equal "paid", balance_of(damage).status
   end
 
+  def test_deposit_charged_through_provider_screen
+    deposit = uc(:open_deposit).call(@actor, @reservation.id, kind: "paid_deposit")
+    post_form "/financeiro/caucoes/#{deposit.id}/solicitar", { "metodo" => "pix", "valor" => "300,00", "cenario" => "success" }
+
+    assert_equal 303, last_response.status
+    payment_id = last_response.location[%r{/financeiro/pagamentos/([0-9a-f-]{36})}, 1]
+    uc(:submit_payment).call(system_actor, payment_id)
+    uc(:simulate_payment).call(@actor, payment_id)
+    uc(:process_payment_webhook).call(system_actor, owner_query("SELECT id FROM inbound_webhooks").first["id"])
+    get "/financeiro/caucoes/#{deposit.id}"
+
+    assert_includes last_response.body, "Retida"
+    post_form "/financeiro/caucoes/#{deposit.id}/solicitar", { "metodo" => "pix", "valor" => "1,00", "vencimento" => "05/03/2026" }
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "data inválida"
+    post_form "/financeiro/pagamentos/#{payment_id}/simular", {}
+
+    assert_equal 303, last_response.status, "simulação repetida de cobrança paga é descartada"
+    manual = pay(@rental, 1_000)
+    post_form "/financeiro/pagamentos/#{manual.id}/simular", {}
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "Somente cobranças registradas no simulador"
+  end
+
   def test_alert_resolution_and_provider_configuration
     reservation = booking(day: 22).tap { |r| sync(r) }
     uc(:cancel_reservation).call(@actor, reservation.id, reason: "Cancelada")

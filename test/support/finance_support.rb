@@ -38,9 +38,7 @@ module FinanceHelpers
   def trial_balance = uc(:finance).overview(@actor)[:trial_balance].transform_values(&:cents)
 
   def unbalanced_transactions
-    owner_query(<<~SQL)
-      SELECT transaction_id FROM financial_entries GROUP BY transaction_id HAVING sum(debit_cents) <> sum(credit_cents)
-    SQL
+    @system.transactor.call(tenant_id: @org[:organization_id]) { |tx| @system.repos[:ledger_entries].unbalanced_transactions(tx) }
   end
 
   def count(table, where = "TRUE", params = [])
