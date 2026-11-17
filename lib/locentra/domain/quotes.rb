@@ -84,10 +84,18 @@ module Locentra
         end
       end
 
-      # Versão imutável: itens precificados, período, validade, condições e totais.
+      # Versão imutável: itens precificados, período, validade, condições e totais. `sent_at` registra
+      # o envio da versão ao cliente (no máximo uma vez); versões nunca enviadas são internas.
       Version = Data.define(:id, :quote_id, :number, :branch_id, :period, :valid_until, :items, :pricing, :terms,
-                            :manual_discount_bps, :deposit, :total, :created_at) do
+                            :manual_discount_bps, :deposit, :total, :created_at, :sent_at) do
         def expired?(now) = now >= valid_until
+        def sent? = !sent_at.nil?
+
+        def mark_sent(now)
+          raise InvariantViolation, "versão #{number} já enviada" if sent?
+
+          with(sent_at: now)
+        end
 
         def lines
           items.map { |item| Reservations::Line.new(product_id: item.fetch("product_id"), quantity: item.fetch("quantity")) }

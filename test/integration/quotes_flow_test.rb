@@ -296,6 +296,37 @@ class QuotesFlowTest < DatabaseTest
     assert_equal 1, uc(:list_quotes).call(owner).total
   end
 
+  # O cliente só enxerga orçamentos já enviados e, deles, somente as versões enviadas: rascunhos
+  # internos e versões em preparação não aparecem.
+  def test_customer_sees_only_quotes_and_versions_that_were_sent
+    quote = uc(:create_quote).call(@actor, quote_input(terms: "Proposta inicial"))
+    owner = portal_actor(@customer)
+
+    assert_raises(D::NotFound) { uc(:get_quote).call(owner, quote.id) }
+    assert_equal 0, uc(:list_quotes).call(owner).total
+    assert_raises(D::NotFound) { uc(:approve_quote).call(owner, quote.id, version: 1, approver_name: "Cliente Teste") }
+    uc(:send_quote).call(@actor, quote.id)
+    uc(:revise_quote).call(@actor, quote.id, quote_input(terms: "Ajuste interno em preparação", manual_discount_bps: 500))
+    data = uc(:get_quote).call(owner, quote.id)
+
+    assert_equal [1], data[:versions].map(&:number)
+    assert_equal "Proposta inicial", data[:versions].first.terms
+    assert_nil data[:current], "a versão 2 ainda não foi enviada"
+    listed = uc(:list_quotes).call(owner)
+
+    assert_equal 1, listed.total
+    assert_equal 24_000, listed.items.first[:total].cents, "a lista do cliente mostra a última versão enviada"
+    assert_equal 22_800, uc(:list_quotes).call(@actor).items.first[:total].cents, "a equipe vê a versão atual"
+    staff = uc(:get_quote).call(@actor, quote.id)
+
+    assert_equal [nil, @clock.now], staff[:versions].map(&:sent_at)
+    @clock.advance(60)
+    uc(:send_quote).call(@actor, quote.id)
+
+    assert_equal [2, 1], uc(:get_quote).call(owner, quote.id)[:versions].map(&:number)
+    assert_equal 22_800, uc(:list_quotes).call(owner).items.first[:total].cents
+  end
+
   def test_quotes_are_isolated_between_organizations
     quote = uc(:create_quote).call(@actor, quote_input)
     beta = create_organization(name: "Locadora Beta", email: "beta@example.test")

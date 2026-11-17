@@ -8,22 +8,24 @@ module Locentra
     module Quotes
       Q = Domain::Quotes
 
-      # Acesso ao orçamento respeitando o escopo do ator: clientes só enxergam os próprios
-      # orçamentos; qualquer outro caso resulta em "não encontrado".
+      # Acesso ao orçamento respeitando o escopo do ator: clientes só enxergam os próprios orçamentos
+      # que já tiveram alguma versão enviada (rascunhos internos nunca enviados não existem para o
+      # cliente); qualquer outro caso resulta em "não encontrado".
       module Scope
         module_function
 
         def lock!(quotes, tx, actor, quote_id)
-          visible!(actor, quotes.lock(tx, Domain::Identifier.parse(quote_id)))
+          visible!(quotes, tx, actor, quotes.lock(tx, Domain::Identifier.parse(quote_id)))
         end
 
         def find!(quotes, tx, actor, quote_id)
-          visible!(actor, quotes.find(tx, Domain::Identifier.parse(quote_id)))
+          visible!(quotes, tx, actor, quotes.find(tx, Domain::Identifier.parse(quote_id)))
         end
 
-        def visible!(actor, quote)
+        def visible!(quotes, tx, actor, quote)
           raise Domain::NotFound, "orçamento" unless quote
-          raise Domain::NotFound, "orçamento" if actor.customer? && quote.customer_id != actor.customer_id
+          return quote unless actor.customer?
+          raise Domain::NotFound, "orçamento" unless quote.customer_id == actor.customer_id && quotes.ever_sent?(tx, quote.id)
 
           quote
         end
@@ -56,7 +58,7 @@ module Locentra
           Q::Version.new(id: @ids.uuid, quote_id: quote_id, number: number, branch_id: branch_id, period: period, valid_until: valid_until,
                          items: priced, pricing: summary, terms: Q::Rules.terms(input[:terms]), manual_discount_bps: discount,
                          deposit: Domain::Money.new(summary.fetch("deposit_cents")), total: Domain::Money.new(summary.fetch("total_cents")),
-                         created_at: now)
+                         created_at: now, sent_at: nil)
         end
 
         private
@@ -237,6 +239,7 @@ module Locentra
             hold = create_hold(tx, current, sent, version) if sent.hold_on_send?
             sent = sent.with_hold(hold.id) if hold
             @quotes.update(tx, sent, now)
+            @quotes.mark_version_sent(tx, version.mark_sent(now))
             @audit.record(tx, current, "quote.sent", "quote", quote.id, "code" => quote.code, "version" => version.number,
                                                                         "hold_policy" => quote.hold_policy, "hold_reservation" => hold&.code)
             @events.publish(tx, "quote.sent", "quote", quote.id, "code" => quote.code, "version" => version.number,
@@ -481,7 +484,7 @@ module Locentra
           @uow.run(actor, Scope.read_permission(actor)) do |tx, current|
             customer = current.customer? ? current.customer_id : (customer_id && Domain::Identifier.parse(customer_id, "cliente"))
             items, total = @quotes.search(tx, status: status, customer_id: customer, search: search.to_s.strip[0, 40], sort: sort,
-                                              limit: lim, offset: off)
+                                              limit: lim, offset: off, sent_only: current.customer?)
             Page.new(items: items, limit: lim, offset: off, total: total)
           end
         end
@@ -499,6 +502,8 @@ module Locentra
           @uow.run(actor, Scope.read_permission(actor)) do |tx, current|
             quote = Scope.find!(@quotes, tx, current, quote_id)
             versions = @quotes.versions(tx, quote.id)
+            # O cliente vê somente as versões que lhe foram enviadas.
+            versions = versions.select(&:sent?) if current.customer?
             { quote: quote, versions: versions, current: versions.find { |v| v.number == quote.current_version },
               customer: @customers.find(tx, quote.customer_id),
               hold: quote.hold_reservation_id && @reservations.find(tx, quote.hold_reservation_id),

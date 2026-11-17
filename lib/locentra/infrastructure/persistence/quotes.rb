@@ -3,15 +3,23 @@
 module Locentra
   module Infrastructure
     module Persistence
-      # Orçamentos e versões. Versões são somente inserção (UPDATE/DELETE revogados no banco).
+      # Orçamentos e versões. O conteúdo das versões é imutável no banco: somente `sent_at` é
+      # preenchido, uma vez, no envio (privilégio de coluna e trigger).
       class QuoteRepository
         Q = Domain::Quotes
         COLUMNS = "id, organization_id, code, customer_id, branch_id, status, current_version, approved_version, hold_policy, hold_minutes, " \
                   "hold_reservation_id, reservation_id, sent_at, approved_at, approved_by_type, approved_by_user_id, approved_by_name, " \
                   "approved_ip, rejected_at, rejection_reason, expired_at, converted_at, lock_version"
         VERSION_COLUMNS = "id, quote_id, version, branch_id, starts_at, ends_at, valid_until, items, pricing, terms, manual_discount_bps, " \
-                          "deposit_cents, total_cents, created_at"
+                          "deposit_cents, total_cents, created_at, sent_at"
         SORTS = { "-created_at" => "q.created_at DESC, q.id", "created_at" => "q.created_at ASC, q.id", "code" => "q.code ASC" }.freeze
+        # Versão exibida na lista: a atual para a equipe; para o cliente, a última enviada (orçamentos
+        # sem versão enviada ficam fora da junção).
+        LISTED_VERSION = {
+          false => "v.version = q.current_version",
+          true => "v.version = (SELECT max(s.version) FROM quote_versions s WHERE s.organization_id = q.organization_id " \
+                  "AND s.quote_id = q.id AND s.sent_at IS NOT NULL)"
+        }.freeze
 
         def insert(tx, quote, created_by, now)
           tx.execute(<<~SQL, [quote.id, quote.organization_id, quote.code, quote.customer_id, quote.branch_id, quote.status, quote.current_version, quote.hold_policy, quote.hold_minutes, created_by, now])
@@ -80,6 +88,20 @@ module Locentra
           row && self.class.map_version(row)
         end
 
+        # Registra o envio da versão (uma única vez; o banco recusa nova alteração).
+        def mark_version_sent(tx, version)
+          count = tx.execute(<<~SQL, [tx.tenant_id!, version.quote_id, version.number, version.sent_at])
+            UPDATE quote_versions SET sent_at = $4 WHERE organization_id = $1 AND quote_id = $2 AND version = $3 AND sent_at IS NULL
+          SQL
+          raise Domain::Conflict.new("versão do orçamento já enviada", code: "stale_quote") unless count == 1
+        end
+
+        def ever_sent?(tx, quote_id)
+          tx.query_value(<<~SQL, [tx.tenant_id!, quote_id])
+            SELECT EXISTS (SELECT 1 FROM quote_versions WHERE organization_id = $1 AND quote_id = $2 AND sent_at IS NOT NULL)
+          SQL
+        end
+
         def versions(tx, quote_id)
           tx.query("SELECT #{VERSION_COLUMNS} FROM quote_versions WHERE organization_id = $1 AND quote_id = $2 ORDER BY version DESC",
                    [tx.tenant_id!, quote_id]).map { |row| self.class.map_version(row) }
@@ -96,7 +118,7 @@ module Locentra
           SQL
         end
 
-        def search(tx, status:, customer_id:, search:, sort:, limit:, offset:)
+        def search(tx, status:, customer_id:, search:, sort:, limit:, offset:, sent_only: false)
           params = [tx.tenant_id!]
           conditions = ["q.organization_id = $1"]
           { "q.status = $%d" => status, "q.customer_id = $%d" => customer_id }.each do |fragment, value|
@@ -111,7 +133,7 @@ module Locentra
           end
           where = conditions.join(" AND ")
           from_sql = "FROM quotes q JOIN customers c ON c.organization_id = q.organization_id AND c.id = q.customer_id " \
-                     "JOIN quote_versions v ON v.organization_id = q.organization_id AND v.quote_id = q.id AND v.version = q.current_version"
+                     "JOIN quote_versions v ON v.organization_id = q.organization_id AND v.quote_id = q.id AND #{LISTED_VERSION.fetch(sent_only)}"
           total = tx.query_value("SELECT count(*) #{from_sql} WHERE #{where}", params)
           rows = tx.query(<<~SQL, params + [limit, offset])
             SELECT #{COLUMNS.split(", ").map { |c| "q.#{c}" }.join(", ")}, c.name AS customer_name, v.total_cents, v.valid_until,
@@ -130,7 +152,7 @@ module Locentra
                          period: Domain::Period.new(row["starts_at"], row["ends_at"]), valid_until: row["valid_until"].utc,
                          items: row["items"], pricing: row["pricing"], terms: row["terms"], manual_discount_bps: row["manual_discount_bps"],
                          deposit: Domain::Money.new(row["deposit_cents"]), total: Domain::Money.new(row["total_cents"]),
-                         created_at: row["created_at"].utc)
+                         created_at: row["created_at"].utc, sent_at: row["sent_at"]&.utc)
         end
 
         private

@@ -187,6 +187,10 @@ class QuotesContractsPagesTest < HttpTest
 
     assert_equal 422, last_response.status
     assert_includes last_response.body, "conversão do orçamento aprovado"
+    body = get_ok("/orcamentos/#{quote_id}")
+
+    assert_includes body, "Enviada ao cliente"
+    refute_includes body, "não enviada (interna)"
   end
 
   def test_attendant_sees_quotes_and_contracts_without_cancellation

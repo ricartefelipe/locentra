@@ -11,7 +11,8 @@ class QuotesDomainTest < UnitTest
   def version(number: 1, valid_until: t("2026-03-05T12:00:00Z"), rental_period: rental, total: 24_000)
     Q::Version.new(id: "v#{number}", quote_id: "q1", number: number, branch_id: "b1", period: rental_period, valid_until: valid_until,
                    items: [{ "product_id" => "p1", "quantity" => 2, "total_cents" => total }], pricing: { "total_cents" => total },
-                   terms: "Condições", manual_discount_bps: 0, deposit: Domain::Money.zero, total: Domain::Money.new(total), created_at: now)
+                   terms: "Condições", manual_discount_bps: 0, deposit: Domain::Money.zero, total: Domain::Money.new(total), created_at: now,
+                   sent_at: nil)
   end
 
   def draft = Q::Quote.draft(id: "q1", organization_id: "o1", customer_id: "c1", branch_id: "b1", hold_policy: "none", hold_minutes: nil)
@@ -55,6 +56,13 @@ class QuotesDomainTest < UnitTest
     assert_equal [Domain::Reservations::Line.new(product_id: "p1", quantity: 2)], v.lines
     assert_equal v.fingerprint, version(number: 2).fingerprint
     refute_equal v.fingerprint, version(total: 30_000).fingerprint
+    refute_predicate v, :sent?
+    delivered = v.mark_sent(now)
+
+    assert_equal now, delivered.sent_at
+    assert_predicate delivered, :sent?
+    assert_equal v.fingerprint, delivered.fingerprint, "o envio não altera o conteúdo da versão"
+    assert_raises(Domain::InvariantViolation) { delivered.mark_sent(now + 60) }
   end
 
   # O bloqueio do envio fica ligado ao orçamento enquanto ele está enviado ou aprovado (ainda não

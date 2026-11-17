@@ -33,6 +33,7 @@
       <dt>Devolução</dt><dd><%= datetime(v.period.ends_at) %></dd>
       <dt>Validade</dt><dd><%= datetime(v.valid_until) %><% if v.expired?(@now) %> <%= badge("vencida", "danger") %><% end %></dd>
       <dt>Criada em</dt><dd><%= datetime(v.created_at) %></dd>
+      <dt>Enviada ao cliente</dt><dd><%= v.sent? ? datetime(v.sent_at) : "não enviada (interna)" %></dd>
       <dt>Condições</dt><dd class="pre"><%= v.terms || "—" %></dd>
     </dl>
     <table class="table">
@@ -108,13 +109,14 @@
 <section class="panel" aria-labelledby="versoes-titulo">
   <h2 id="versoes-titulo">Versões</h2>
   <table class="table">
-    <thead><tr><th scope="col">Versão</th><th scope="col">Criada em</th><th scope="col">Período</th><th scope="col">Validade</th><th scope="col" class="num">Total</th></tr></thead>
+    <thead><tr><th scope="col">Versão</th><th scope="col">Criada em</th><th scope="col">Enviada em</th><th scope="col">Período</th><th scope="col">Validade</th><th scope="col" class="num">Total</th></tr></thead>
     <tbody>
       <% @data[:versions].each do |version| %>
         <tr>
           <td><a href="/orcamentos/<%= q.id %>?versao=<%= version.number %>"<%= version.number == v.number ? raw(' aria-current="true"') : raw("") %>>Versão <%= version.number %></a>
             <% if version.number == q.current_version %><%= badge("atual", "info") %><% end %><% if version.number == q.approved_version %><%= badge("aprovada", "success") %><% end %></td>
           <td><%= datetime(version.created_at) %></td>
+          <td><%= version.sent? ? datetime(version.sent_at) : "—" %></td>
           <td><%= datetime(version.period.starts_at) %> a <%= datetime(version.period.ends_at) %></td>
           <td><%= datetime(version.valid_until) %></td>
           <td class="num"><%= money(version.total) %></td>
@@ -122,7 +124,7 @@
       <% end %>
     </tbody>
   </table>
-  <p class="muted">Versões são imutáveis: alterações criam uma nova versão.</p>
+  <p class="muted">Versões são imutáveis: alterações criam uma nova versão. Versões não enviadas são internas e não ficam visíveis para o cliente.</p>
 </section>
 <%= partial("shared/attachments", attachments: @attachments, owner_type: "quote", owner_id: q.id, can_upload: can?("quotes.write")) %>
 <section class="panel" aria-labelledby="historico-titulo">

@@ -2,7 +2,8 @@
 -- versionados, aceite eletrônico simples e aditivos.
 --
 -- Garantias:
--- * Versões de orçamento são somente inserção (UPDATE/DELETE revogados).
+-- * Conteúdo das versões de orçamento é imutável: somente o instante de envio (sent_at) é
+--   preenchido, uma única vez (privilégio de coluna e trigger).
 -- * Uma reserva por orçamento: índice único parcial em reservations (organization_id, quote_id).
 -- * Um contrato por reserva; termos, partes e número do contrato são imutáveis após a emissão
 --   (trigger); contratos encerrados ou cancelados não mudam mais.
@@ -54,7 +55,9 @@ CREATE INDEX quotes_customer_idx ON quotes (organization_id, customer_id, create
 CREATE INDEX quotes_hold_idx ON quotes (organization_id, hold_reservation_id) WHERE hold_reservation_id IS NOT NULL;
 REVOKE DELETE ON quotes FROM locentra_app, locentra_worker;
 
--- Cada versão guarda o conteúdo enviado ao cliente e o snapshot de preços calculado no momento.
+-- Cada versão guarda o conteúdo proposto ao cliente e o snapshot de preços calculado no momento.
+-- `sent_at` registra o envio da versão (cada versão é enviada no máximo uma vez): o cliente só
+-- enxerga versões enviadas.
 CREATE TABLE quote_versions (
   id uuid PRIMARY KEY,
   organization_id uuid NOT NULL REFERENCES organizations (id),
@@ -72,6 +75,7 @@ CREATE TABLE quote_versions (
   total_cents bigint NOT NULL CHECK (total_cents >= 0),
   created_by uuid,
   created_at timestamptz NOT NULL,
+  sent_at timestamptz,
   UNIQUE (organization_id, id),
   UNIQUE (organization_id, quote_id, version),
   FOREIGN KEY (organization_id, quote_id) REFERENCES quotes (organization_id, id),
@@ -79,6 +83,26 @@ CREATE TABLE quote_versions (
   CHECK (ends_at > starts_at)
 );
 REVOKE UPDATE, DELETE ON quote_versions FROM locentra_app, locentra_worker;
+GRANT UPDATE (sent_at) ON quote_versions TO locentra_app, locentra_worker;
+
+CREATE FUNCTION quote_versions_protect() RETURNS trigger
+  LANGUAGE plpgsql
+  AS $$
+BEGIN
+  IF OLD.sent_at IS NOT NULL OR NEW.sent_at IS NULL THEN
+    RAISE EXCEPTION 'o envio da versão do orçamento é registrado uma única vez' USING ERRCODE = 'check_violation';
+  END IF;
+  IF (NEW.id, NEW.organization_id, NEW.quote_id, NEW.version, NEW.branch_id, NEW.starts_at, NEW.ends_at, NEW.valid_until, NEW.items,
+      NEW.pricing, NEW.terms, NEW.manual_discount_bps, NEW.deposit_cents, NEW.total_cents, NEW.created_by, NEW.created_at)
+     IS DISTINCT FROM
+     (OLD.id, OLD.organization_id, OLD.quote_id, OLD.version, OLD.branch_id, OLD.starts_at, OLD.ends_at, OLD.valid_until, OLD.items,
+      OLD.pricing, OLD.terms, OLD.manual_discount_bps, OLD.deposit_cents, OLD.total_cents, OLD.created_by, OLD.created_at) THEN
+    RAISE EXCEPTION 'versão de orçamento é imutável' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER quote_versions_protect BEFORE UPDATE ON quote_versions FOR EACH ROW EXECUTE FUNCTION quote_versions_protect();
 
 -- Conversão idempotente: no máximo uma reserva por orçamento, inclusive sob concorrência.
 ALTER TABLE reservations
