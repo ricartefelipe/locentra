@@ -1,0 +1,17 @@
+# Ambiente local
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.swp
+
+# Dependências e artefatos
+/vendor/bundle/
+/.bundle/
+/coverage/
+/tmp/
+/log/
+/storage/
+/test/reports/
+*.gem

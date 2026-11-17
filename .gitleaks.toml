@@ -1,0 +1,13 @@
+title = "Locentra"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Valores fictícios usados exclusivamente em testes e no ambiente local"
+paths = [
+  '''^\.env\.example$''',
+]
+regexes = [
+  '''locentra-local-[a-z-]+''',
+]
