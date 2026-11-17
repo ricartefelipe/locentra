@@ -19,26 +19,35 @@ module Locentra
           @ids = ids
         end
 
-        def call(actor, to_branch_id:, asset_id: nil, product_id: nil, from_branch_id: nil, quantity: nil, notes: nil)
+        # Ativo por identificador ou pelo patrimônio lido; estoque por produto, filial de origem e quantidade.
+        def call(actor, to_branch_id:, asset_id: nil, asset_tag: nil, product_id: nil, from_branch_id: nil, quantity: nil, notes: nil)
           @uow.run(actor, "assets.write") do |tx, current|
             destination = Domain::Identifier.parse(to_branch_id, "destino")
             raise Domain::NotFound, "filial" unless @organizations.branch_active?(tx, destination)
 
-            source = asset_id.to_s.empty? ? for_stock(tx, product_id, from_branch_id, quantity) : for_asset(tx, asset_id)
+            asset = target_asset(tx, asset_id, asset_tag)
+            source = asset ? for_asset(asset) : for_stock(tx, product_id, from_branch_id, quantity)
             # O código sequencial é obtido por último: o lock do contador dura só até o commit.
             transfer = T::Transfer.build(**source, id: @ids.uuid, organization_id: tx.tenant_id!, to_branch_id: destination,
                                                    requested_at: @clock.now, notes: notes, code: @organizations.next_code(tx, "transfer", "TR"))
             @transfers.insert(tx, transfer, current.audit_actor_id)
             @audit.record(tx, current, "transfer.requested", "transfer", transfer.id, "code" => transfer.code, "asset_id" => transfer.asset_id,
-                                                                                     "quantity" => transfer.quantity, "to_branch_id" => destination)
+                                                                                      "quantity" => transfer.quantity, "to_branch_id" => destination)
             transfer
           end
         end
 
         private
 
-        def for_asset(tx, asset_id)
-          asset = @catalog.find_asset(tx, Domain::Identifier.parse(asset_id, "ativo")) || raise(Domain::NotFound, "ativo")
+        def target_asset(tx, asset_id, asset_tag)
+          found = if !asset_id.to_s.empty? then @catalog.find_asset(tx, Domain::Identifier.parse(asset_id, "ativo"))
+                  elsif !asset_tag.to_s.strip.empty? then @catalog.find_asset_by_tag(tx, asset_tag.to_s.strip)
+                  else return nil
+                  end
+          found || raise(Domain::NotFound, "ativo")
+        end
+
+        def for_asset(asset)
           raise Domain::InvalidTransition.new("ativo", asset.status, "in_transit") unless asset.can_transition_to?("in_transit")
 
           { product_id: asset.product_id, asset_id: asset.id, from_branch_id: asset.branch_id }

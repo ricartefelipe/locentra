@@ -137,9 +137,7 @@ module Locentra
 
         # A cobrança exige ao menos uma evidência anexada e valor positivo.
         def approve(amount:, evidence_count:, adjustment_id:, notes: nil)
-          unless evidence_count.positive?
-            raise ValidationError.field("evidencias", "anexe ao menos uma evidência antes de aprovar a cobrança")
-          end
+          raise ValidationError.field("evidencias", "anexe ao menos uma evidência antes de aprovar a cobrança") unless evidence_count.positive?
           raise ValidationError.field("valor", "a cobrança deve ser positiva") unless amount.positive?
 
           transition("approved").with(charged: amount, adjustment_id: adjustment_id, decision_notes: Organizations::Text.optional(notes, max: 1000))

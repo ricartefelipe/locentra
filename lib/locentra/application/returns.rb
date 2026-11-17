@@ -103,8 +103,9 @@ module Locentra
                                           asset_id: asset.id, reservation_id: ctx.reservation.id, return_line_id: return_line_id)
           elsif entry.missing?
             unresolved = @relocation.relocate(ctx.tx, moved, ctx.now).map { |allocation| allocation["reservation_id"] }.uniq
+            details = { "tag" => asset.tag, "reason" => "faltante na devolução de #{ctx.reservation.code}" }
             @alert_book.unavailable(ctx.tx, unresolved, resource_id: asset.id, source_id: ctx.return_id, related_reservation_id: ctx.reservation.id,
-                                                        asset_id: asset.id, details: { "tag" => asset.tag, "reason" => "faltante na devolução de #{ctx.reservation.code}" })
+                                                        asset_id: asset.id, details: details)
           end
         end
 
@@ -182,7 +183,7 @@ module Locentra
         end
 
         def inspection_reason(ctx, entry)
-          "#{entry.outcome_label} na devolução da reserva #{ctx.reservation.code}#{entry.notes ? ": #{entry.notes}" : ""}"[0, 500]
+          "#{entry.outcome_label} na devolução da reserva #{ctx.reservation.code}#{": #{entry.notes}" if entry.notes}"[0, 500]
         end
 
         def charge_late_fee(ctx, fee)

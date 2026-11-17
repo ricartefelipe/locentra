@@ -62,7 +62,7 @@ module Locentra
         private
 
         def map(row)
-          T::Transfer.new(**row.transform_keys(&:to_sym).merge(requested_at: row["requested_at"].utc))
+          T::Transfer.new(**row.transform_keys(&:to_sym), requested_at: row["requested_at"].utc)
         end
       end
     end

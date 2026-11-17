@@ -23,9 +23,7 @@ module Locentra
       # Quem retirou: o próprio cliente pessoa física ou um contato autorizado, sempre com CPF.
       Picker = Data.define(:kind, :contact_id, :name, :document) do
         def self.customer(customer)
-          unless customer.kind == "individual"
-            raise ValidationError.field("retirante", "cliente pessoa jurídica retira somente por contato autorizado")
-          end
+          raise ValidationError.field("retirante", "cliente pessoa jurídica retira somente por contato autorizado") unless customer.kind == "individual"
 
           new(kind: "customer", contact_id: nil, name: customer.name, document: customer.document)
         end

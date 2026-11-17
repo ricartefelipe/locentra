@@ -54,7 +54,7 @@ module Locentra
         private
 
         def map(row)
-          M::Inspection.new(**row.transform_keys(&:to_sym).merge(created_at: row["created_at"].utc, decided_at: row["decided_at"]&.utc))
+          M::Inspection.new(**row.transform_keys(&:to_sym), created_at: row["created_at"].utc, decided_at: row["decided_at"]&.utc)
         end
       end
 
@@ -123,7 +123,7 @@ module Locentra
 
         def map(row)
           attrs = row.except("cost_cents").transform_keys(&:to_sym)
-          M::Order.new(**attrs.merge(cost: row["cost_cents"] && Domain::Money.new(row["cost_cents"]), opened_at: row["opened_at"].utc))
+          M::Order.new(**attrs, cost: row["cost_cents"] && Domain::Money.new(row["cost_cents"]), opened_at: row["opened_at"].utc)
         end
       end
 

@@ -20,13 +20,15 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, description:, asset_id: nil, product_id: nil, branch_id: nil, quantity: nil)
+        # Ativo por identificador ou pelo patrimônio lido; estoque por produto, filial e quantidade.
+        def call(actor, description:, asset_id: nil, asset_tag: nil, product_id: nil, branch_id: nil, quantity: nil)
           @uow.run(actor, "maintenance.write") do |tx, current|
             now = @clock.now
-            order = if asset_id.to_s.empty?
-                      for_stock(tx, current, product_id, branch_id, quantity, description, now)
+            asset = target_asset(tx, asset_id, asset_tag)
+            order = if asset
+                      for_asset(tx, current, asset, description, now)
                     else
-                      for_asset(tx, current, asset_id, description, now)
+                      for_stock(tx, current, product_id, branch_id, quantity, description, now)
                     end
             @audit.record(tx, current, "maintenance.opened", "maintenance_order", order.id,
                           "code" => order.code, "asset_id" => order.asset_id, "stock_pool_id" => order.stock_pool_id, "quantity" => order.quantity)
@@ -36,8 +38,15 @@ module Locentra
 
         private
 
-        def for_asset(tx, current, asset_id, description, now)
-          asset = @catalog.lock_asset(tx, Domain::Identifier.parse(asset_id, "ativo")) || raise(Domain::NotFound, "ativo")
+        def target_asset(tx, asset_id, asset_tag)
+          found = if !asset_id.to_s.empty? then @catalog.find_asset(tx, Domain::Identifier.parse(asset_id, "ativo"))
+                  elsif !asset_tag.to_s.strip.empty? then @catalog.find_asset_by_tag(tx, asset_tag.to_s.strip)
+                  else return nil
+                  end
+          (found && @catalog.lock_asset(tx, found.id)) || raise(Domain::NotFound, "ativo")
+        end
+
+        def for_asset(tx, current, asset, description, now)
           if asset.status == "in_inspection"
             raise Domain::Conflict.new("ativo em inspeção: reprove a inspeção para encaminhá-lo à manutenção", code: "asset_in_inspection")
           end

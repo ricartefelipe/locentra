@@ -89,7 +89,7 @@ module Locentra
             lines = @fulfillment.pickup_lines(tx, pickup.id, lock: true).to_h { |line| [line.id, line] }
             swaps = check_all(tx, current, pickup, lines, entries)
             @audit.record(tx, current, "pickup.checked", "reservation", reservation.id, "pickup_id" => pickup.id, "entries" => entries.size,
-                                                                                       "swaps" => swaps)
+                                                                                        "swaps" => swaps)
             @fulfillment.pickup_lines(tx, pickup.id)
           end
         end
@@ -121,9 +121,7 @@ module Locentra
 
           asset = scanned_asset!(tx, pickup, line, entry[:tag])
           allocation = @allocations.lock_asset_allocation(tx, line.asset_allocation_id)
-          unless allocation&.fetch("active")
-            raise Domain::Conflict.new("a alocação do item foi alterada; reinicie a separação", code: "allocation_changed")
-          end
+          raise Domain::Conflict.new("a alocação do item foi alterada; reinicie a separação", code: "allocation_changed") unless allocation&.fetch("active")
           return [line.check_asset(asset.id), nil] if allocation["asset_id"] == asset.id
 
           begin
@@ -211,7 +209,11 @@ module Locentra
         def deliver_line(tx, current, pickup, line, now)
           done = line.deliver
           if line.asset?
-            done.delivered_quantity.positive? ? hand_over(tx, current, pickup, done, now) : @allocations.release_asset_allocation(tx, line.asset_allocation_id, now)
+            if done.delivered_quantity.positive?
+              hand_over(tx, current, pickup, done, now)
+            else
+              @allocations.release_asset_allocation(tx, line.asset_allocation_id, now)
+            end
           elsif done.delivered_quantity.zero?
             @allocations.release_stock_allocation(tx, line.stock_allocation_id, now)
           elsif done.undelivered_quantity.positive?
