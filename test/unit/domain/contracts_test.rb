@@ -30,7 +30,7 @@ class ContractsDomainTest < UnitTest
     started = C::Contract.issue(id: "k2", organization_id: "o1", reservation: reservation(status: "in_progress"), terms: terms, now: now)
 
     assert_equal "issued", started.status
-    assert started.amendable?
+    assert_predicate started, :amendable?
   end
 
   def test_issue_refuses_reservations_that_are_not_confirmed
@@ -54,7 +54,7 @@ class ContractsDomainTest < UnitTest
 
     assert_raises(Domain::InvalidTransition) { closed.accept(now) }
     assert_raises(Domain::InvalidTransition) { closed.amend(3) }
-    refute closed.open?
+    refute_predicate closed, :open?
     assert_equal "Encerrado", closed.status_label
   end
 
@@ -104,7 +104,7 @@ class ContractsDomainTest < UnitTest
     assert_equal "72 h ou mais antes do início: multa de 0% do valor contratado", lines[0]
     assert_equal "de 24 h a menos de 72 h antes do início: multa de 30% do valor contratado", lines[1]
     assert_equal "menos de 24 h antes do início (ou após o início): multa de 100% do valor contratado", lines[2]
-    assert_equal %w[25,5% 12,34% 30%], [2550, 1234, 3000].map { |bps| C::Cancellation.percent_label(bps) }
+    assert_equal(%w[25,5% 12,34% 30%], [2550, 1234, 3000].map { |bps| C::Cancellation.percent_label(bps) })
   end
 
   def test_acceptance_validates_identification_and_channel

@@ -98,7 +98,7 @@ class QuotesDomainTest < UnitTest
     revised = with_hold.revise(branch_id: "b2", hold_policy: "hold_on_send", hold_minutes: 60)
 
     assert_equal ["draft", 2, nil, nil, "b2"], [revised.status, revised.current_version, revised.hold_reservation_id, revised.sent_at, revised.branch_id]
-    assert revised.hold_on_send?
+    assert_predicate revised, :hold_on_send?
     again = draft.revise(branch_id: "b1", hold_policy: "none", hold_minutes: nil)
 
     assert_equal [2, "draft"], [again.current_version, again.status]
