@@ -1,0 +1,18 @@
+<header class="page-header"><h1>Auditoria</h1></header>
+<form method="get" action="/auditoria" class="filters">
+  <label for="acao">Ação</label><input id="acao" name="acao" value="<%= @filters["action"] %>" placeholder="ex.: reservation.confirmed">
+  <label for="recurso">Recurso</label><input id="recurso" name="recurso" value="<%= @filters["resource_type"] %>" placeholder="ex.: reservation">
+  <button type="submit">Filtrar</button>
+</form>
+<% if @page.items.empty? %><p class="empty">Nenhum evento.</p><% else %>
+  <table class="table">
+    <thead><tr><th scope="col">Quando</th><th scope="col">Ator</th><th scope="col">Ação</th><th scope="col">Recurso</th><th scope="col">Detalhes</th><th scope="col">Requisição</th></tr></thead>
+    <tbody>
+      <% @page.items.each do |e| %>
+        <tr><td><%= datetime(e["occurred_at"], "%d/%m/%Y %H:%M:%S") %></td><td><%= e["actor_name"] || e["actor_type"] %></td><td><code><%= e["action"] %></code></td>
+          <td><%= e["resource_type"] %></td><td><code class="small"><%= JSON.generate(e["details"] || {}) %></code></td><td><code class="small"><%= e["request_id"] %></code></td></tr>
+      <% end %>
+    </tbody>
+  </table>
+  <%= partial("shared/pagination", page: @page, base_path: "/auditoria", query: { "acao" => @filters["action"], "recurso" => @filters["resource_type"] }) %>
+<% end %>

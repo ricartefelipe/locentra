@@ -1,0 +1,6 @@
+<% if @flash %>
+  <div class="flash flash-<%= @flash["type"] == "notice" ? "success" : "error" %>" role="<%= @flash["type"] == "notice" ? "status" : "alert" %>" data-flash>
+    <span><%= @flash["text"] %></span>
+    <button type="button" class="flash-close" data-dismiss aria-label="Fechar mensagem">×</button>
+  </div>
+<% end %>

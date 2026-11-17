@@ -1,0 +1,29 @@
+<header class="page-header"><h1>Consultar disponibilidade</h1></header>
+<section class="panel">
+  <%= partial("shared/errors") %>
+  <form method="get" action="/disponibilidade/consulta" class="filters">
+    <label for="filial">Filial</label>
+    <select id="filial" name="filial"><% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["filial"], b.id) %>><%= b.name %></option><% end %></select>
+    <label for="inicio">Início</label><input id="inicio" name="inicio" type="datetime-local" required value="<%= @values["inicio"] %>">
+    <label for="fim">Fim</label><input id="fim" name="fim" type="datetime-local" required value="<%= @values["fim"] %>">
+    <button type="submit" class="primary">Consultar</button>
+  </form>
+</section>
+<% if @result %>
+  <section class="panel">
+    <h2>Resultado</h2>
+    <p class="muted">Considera a ocupação máxima simultânea dentro do período, e não a soma de todas as reservas que o intersectam.</p>
+    <table class="table">
+      <thead><tr><th scope="col">Produto</th><th scope="col">Rastreamento</th><th scope="col" class="num">Disponíveis</th><th scope="col" class="num">Total</th></tr></thead>
+      <tbody>
+        <% @result.each do |row| %>
+          <tr><td><%= row["product"].name %></td><td><%= row["product"].tracking_label %></td>
+            <td class="num"><strong><%= row["available"] %></strong></td><td class="num"><%= row["total"] %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+    <% if can?("reservations.write") %>
+      <a class="button primary" href="<%= url("/reservas/nova", "inicio" => @values["inicio"], "fim" => @values["fim"], "filial_id" => @values["filial"]) %>">Reservar neste período</a>
+    <% end %>
+  </section>
+<% end %>

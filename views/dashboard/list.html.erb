@@ -1,0 +1,9 @@
+<% if @rows.empty? %>
+  <p class="empty"><%= @empty %></p>
+<% else %>
+  <ul class="row-list">
+    <% @rows.each do |row| %>
+      <li><a href="/reservas/<%= row["id"] %>"><strong><%= row["code"] %></strong></a> · <%= row["customer_name"] %> · <%= datetime(row[@column.to_s]) %></li>
+    <% end %>
+  </ul>
+<% end %>

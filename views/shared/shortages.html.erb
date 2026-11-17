@@ -1,0 +1,14 @@
+<% if @shortages && !@shortages.empty? %>
+  <div class="shortages" role="alert">
+    <p><strong>Itens sem disponibilidade suficiente:</strong></p>
+    <ul>
+      <% @shortages.each do |s| %>
+        <li>
+          <%= s["name"] || s["sku"] || s["product_id"] %>
+          <% if s["requested"] %>— solicitado <%= s["requested"] %>, disponível <%= s["available"] %><% end %>
+          <% if s["conflict"] %>— conflita com <%= s["conflict"] %><% end %>
+        </li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
