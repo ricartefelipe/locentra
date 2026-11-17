@@ -70,7 +70,8 @@ module Locentra
           raise Domain::ValidationError.field("modo", "use request, hold ou confirm") unless MODES.include?(mode)
 
           if tx
-            execute(tx, tx.actor || actor, input, mode)
+            # Composição: o chamador já abriu a transação e verificou a permissão do ator revalidado.
+            execute(tx, actor, input, mode)
           else
             @uow.run(actor, "reservations.write") { |t, current| execute(t, current, input, mode) }
           end
@@ -172,7 +173,7 @@ module Locentra
         end
 
         def call(actor, reservation_id, tx: nil)
-          return execute(tx, tx.actor || actor, reservation_id) if tx
+          return execute(tx, actor, reservation_id) if tx
 
           result = @uow.run(actor, "reservations.write") do |t, current|
             execute(t, current, reservation_id)
@@ -231,18 +232,24 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, reservation_id, reason:)
-          @uow.run(actor, "reservations.cancel") do |tx, current|
-            now = @clock.now
-            reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
-            cancelled = reservation.cancel
-            text = Domain::Organizations::Text.required(reason, "motivo", max: 500)
-            @reservations.update_status(tx, cancelled, now, "cancelled_at" => now, "cancellation_reason" => text)
-            @reservations.release_allocations(tx, reservation.id, now)
-            @audit.record(tx, current, "reservation.cancelled", "reservation", reservation.id, "reason" => text)
-            @events.publish(tx, "reservation.cancelled", "reservation", reservation.id, "code" => reservation.code)
-            cancelled
-          end
+        def call(actor, reservation_id, reason:, tx: nil)
+          return execute(tx, actor, reservation_id, reason) if tx
+
+          @uow.run(actor, "reservations.cancel") { |t, current| execute(t, current, reservation_id, reason) }
+        end
+
+        private
+
+        def execute(tx, current, reservation_id, reason)
+          now = @clock.now
+          reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
+          cancelled = reservation.cancel
+          text = Domain::Organizations::Text.required(reason, "motivo", max: 500)
+          @reservations.update_status(tx, cancelled, now, "cancelled_at" => now, "cancellation_reason" => text)
+          @reservations.release_allocations(tx, reservation.id, now)
+          @audit.record(tx, current, "reservation.cancelled", "reservation", reservation.id, "reason" => text)
+          @events.publish(tx, "reservation.cancelled", "reservation", reservation.id, "code" => reservation.code)
+          cancelled
         end
       end
 

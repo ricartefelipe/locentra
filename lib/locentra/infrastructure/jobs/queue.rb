@@ -22,15 +22,21 @@ module Locentra
           @lease_seconds = lease_seconds
         end
 
+        # Retorna o id gerado (ou nil quando a chave única já existia). Sem RETURNING: tarefas sem
+        # organização podem ser inseridas pela aplicação, mas não lidas por ela (política de RLS).
         def enqueue(tx, kind, payload = {}, run_at: nil, priority: 100, max_attempts: 10, unique_key: nil, correlation_id: nil,
                     queue: "default")
           now = @clock.now
-          tx.query_value(<<~SQL, [@ids.uuid, tx.tenant_id, queue, kind, payload, priority, run_at || now, max_attempts, unique_key, correlation_id, now])
+          id = @ids.uuid
+          # ON CONFLICT exige que a linha passe também pela política de leitura; por isso só é usado
+          # quando há chave única (agendamentos do worker).
+          conflict = unique_key ? "ON CONFLICT (unique_key) WHERE unique_key IS NOT NULL DO NOTHING" : ""
+          inserted = tx.execute(<<~SQL, [id, tx.tenant_id, queue, kind, payload, priority, run_at || now, max_attempts, unique_key, correlation_id, now])
             INSERT INTO jobs (id, organization_id, queue, kind, payload, priority, run_at, max_attempts, unique_key, correlation_id, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
-            ON CONFLICT (unique_key) WHERE unique_key IS NOT NULL DO NOTHING
-            RETURNING id
+            #{conflict}
           SQL
+          inserted == 1 ? id : nil
         end
 
         def claim(tx, worker:, limit:, queues: ["default"])

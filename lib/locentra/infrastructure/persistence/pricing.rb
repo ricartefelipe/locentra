@@ -3,49 +3,6 @@
 module Locentra
   module Infrastructure
     module Persistence
-      # Trilha de auditoria: somente inserção (UPDATE/DELETE revogados no banco).
-      class AuditRepository
-        FILTERS = { "action" => "e.action = $%d", "resource_type" => "e.resource_type = $%d", "actor_id" => "e.actor_id = $%d" }.freeze
-
-        def insert(tx, row)
-          tx.execute(<<~SQL, row.values_at("id", "organization_id", "actor_type", "actor_id", "action", "resource_type", "resource_id", "request_id", "ip", "details", "occurred_at"))
-            INSERT INTO audit_events (id, organization_id, actor_type, actor_id, action, resource_type, resource_id, request_id, ip, details, occurred_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-          SQL
-        end
-
-        def search(tx, filters:, limit:, offset:)
-          params = [tx.tenant_id!]
-          conditions = ["e.organization_id = $1"]
-          filters.each do |key, value|
-            fragment = FILTERS[key.to_s]
-            next if fragment.nil? || value.to_s.empty?
-
-            params << value.to_s
-            conditions << format(fragment, params.size)
-          end
-          where = conditions.join(" AND ")
-          total = tx.query_value("SELECT count(*) FROM audit_events e WHERE #{where}", params)
-          rows = tx.query(<<~SQL, params + [limit, offset])
-            SELECT e.id, e.actor_type, e.actor_id, e.action, e.resource_type, e.resource_id, e.request_id, e.ip, e.details, e.occurred_at,
-                   u.name AS actor_name
-              FROM audit_events e LEFT JOIN users u ON u.id = e.actor_id
-             WHERE #{where}
-             ORDER BY e.occurred_at DESC, e.id DESC LIMIT $#{params.size + 1} OFFSET $#{params.size + 2}
-          SQL
-          [rows, total]
-        end
-
-        def for_resource(tx, resource_type, resource_id, limit: 50)
-          tx.query(<<~SQL, [tx.tenant_id!, resource_type, resource_id, limit])
-            SELECT e.action, e.actor_type, e.details, e.occurred_at, u.name AS actor_name
-              FROM audit_events e LEFT JOIN users u ON u.id = e.actor_id
-             WHERE e.organization_id = $1 AND e.resource_type = $2 AND e.resource_id = $3
-             ORDER BY e.occurred_at DESC LIMIT $4
-          SQL
-        end
-      end
-
       class PricingRepository
         def find_coupon(tx, code, lock: false)
           row = tx.query_one(<<~SQL, [tx.tenant_id!, code])
@@ -101,26 +58,6 @@ module Locentra
               FROM customer_price_agreements a LEFT JOIN products p ON p.organization_id = a.organization_id AND p.id = a.product_id
              WHERE a.organization_id = $1 AND a.customer_id = $2 ORDER BY a.created_at DESC
           SQL
-        end
-      end
-
-      # Publica eventos de negócio na outbox e agenda o despacho na mesma transação.
-      class EventPublisher
-        def initialize(queue:, clock:, ids:)
-          @queue = queue
-          @clock = clock
-          @ids = ids
-        end
-
-        def publish(tx, event_type, aggregate_type, aggregate_id, payload = {})
-          id = @ids.uuid
-          correlation = tx.actor&.request_id
-          tx.execute(<<~SQL, [id, tx.tenant_id!, event_type, aggregate_type, aggregate_id, payload, correlation, @clock.now])
-            INSERT INTO outbox_events (id, organization_id, event_type, aggregate_type, aggregate_id, payload, correlation_id, occurred_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          SQL
-          @queue.enqueue(tx, "events.dispatch", { "event_id" => id }, correlation_id: correlation, priority: 50)
-          id
         end
       end
     end
