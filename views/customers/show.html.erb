@@ -1,7 +1,12 @@
 <% c = @data[:customer] %>
 <header class="page-header">
   <h1><%= c.name %> <%= status_badge(c.status, Locentra::Domain::Customers::STATUSES[c.status]) %></h1>
-  <% if can?("reservations.write") && c.status == "active" %><a class="button primary" href="/reservas/nova?cliente_id=<%= c.id %>">Nova reserva</a><% end %>
+  <% if c.status == "active" && (can?("reservations.write") || can?("quotes.write")) %>
+    <div class="actions">
+      <% if can?("quotes.write") %><a class="button" href="/orcamentos/novo?cliente_id=<%= c.id %>">Novo orçamento</a><% end %>
+      <% if can?("reservations.write") %><a class="button primary" href="/reservas/nova?cliente_id=<%= c.id %>">Nova reserva</a><% end %>
+    </div>
+  <% end %>
 </header>
 <%= partial("shared/errors") %>
 <div class="grid-2">

@@ -42,6 +42,8 @@ class QuotesContractsPagesTest < HttpTest
     assert_includes get_ok("/orcamentos"), "Nenhum orçamento encontrado"
     assert_includes get_ok("/contratos"), "Nenhum contrato encontrado"
     assert_includes get_ok("/orcamentos/novo"), "não garante disponibilidade"
+    assert_includes get_ok("/clientes/#{@customer.id}"), "/orcamentos/novo?cliente_id=#{@customer.id}"
+    assert_includes get_ok("/orcamentos/novo?cliente_id=#{@customer.id}"), %(value="#{@customer.id}" selected)
   end
 
   def test_quote_flow_through_the_screens_until_conversion
