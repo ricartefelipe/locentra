@@ -1,0 +1,69 @@
+<% fin = Locentra::Domain::Finance %>
+<% payment = @data[:payment] %>
+<header class="page-header">
+  <h1>Pagamento de <%= money(payment.amount) %> <%= finance_badge(payment.status, payment.status_label) %></h1>
+  <p class="muted"><%= fin::PAYMENT_PURPOSES.fetch(payment.purpose) %> da reserva <a href="/reservas/<%= payment.reservation_id %>"><%= @data[:reservation]&.code %></a> ·
+    <% if payment.receivable_id %><a href="/financeiro/cobrancas/<%= payment.receivable_id %>">ver cobrança</a><% else %><a href="/financeiro/caucoes/<%= payment.deposit_id %>">ver caução</a><% end %></p>
+</header>
+<%= partial("shared/errors") %>
+<% if payment.requires_review %>
+  <div class="notice notice-danger" role="alert"><strong>Revisão necessária.</strong> <%= payment.review_reason %></div>
+<% end %>
+<% if payment.status == "submission_unknown" %>
+  <div class="notice" role="status">O provedor não confirmou o envio (tempo esgotado). Antes de qualquer nova tentativa, a cobrança é procurada no provedor pela referência <code><%= payment.external_reference %></code>.</div>
+<% end %>
+<div class="grid-2">
+  <section class="panel" aria-labelledby="titulo-detalhes">
+    <h2 id="titulo-detalhes">Detalhes</h2>
+    <dl class="details">
+      <dt>Método</dt><dd><%= payment.method_label %></dd>
+      <dt>Provedor</dt><dd><%= payment.provider_label %></dd>
+      <dt>Referência externa</dt><dd><code class="small"><%= payment.external_reference %></code></dd>
+      <dt>Identificador no provedor</dt><dd><%= payment.provider_payment_id || "—" %></dd>
+      <% if payment.invoice_url %><dt>Página de pagamento</dt><dd><a href="<%= payment.invoice_url %>" rel="noopener noreferrer">abrir no provedor</a></dd><% end %>
+      <% if payment.simulator_scenario %><dt>Cenário do simulador</dt><dd><%= fin::SIMULATOR_SCENARIOS.fetch(payment.simulator_scenario) %></dd><% end %>
+      <dt>Vencimento</dt><dd><%= date(payment.due_on) %></dd>
+      <dt>Envios ao provedor</dt><dd><%= payment.submission_attempts %></dd>
+      <dt>Pago em</dt><dd><%= datetime(payment.paid_at) %></dd>
+      <dt>Confirmado em</dt><dd><%= datetime(payment.confirmed_at) %></dd>
+      <% if payment.failure_reason %><dt>Motivo</dt><dd><%= payment.failure_reason %></dd><% end %>
+      <dt>Observações</dt><dd><%= payment.notes || "—" %></dd>
+    </dl>
+    <% if payment.provider == "simulator" && payment.status == "pending" && payment.provider_payment_id && can?("finance.write") %>
+      <form method="post" action="/financeiro/pagamentos/<%= payment.id %>/simular"><%= csrf_field %><button type="submit" class="primary">Simular confirmação pelo provedor</button></form>
+      <p class="muted">Gera o webhook de pagamento recebido, processado pelo worker como um evento real.</p>
+    <% end %>
+  </section>
+  <section class="panel" aria-labelledby="titulo-reembolsos">
+    <h2 id="titulo-reembolsos">Reembolsos</h2>
+    <% if @data[:refunds].empty? %><p class="empty">Nenhum reembolso.</p><% else %>
+      <table class="table">
+        <caption class="sr-only">Reembolsos do pagamento</caption>
+        <thead><tr><th scope="col">Data</th><th scope="col">Motivo</th><th scope="col" class="num">Valor</th><th scope="col">Situação</th></tr></thead>
+        <tbody>
+          <% @data[:refunds].each do |row| %>
+            <tr><td><%= datetime(row[:created_at]) %></td><td><%= row[:refund].reason %><%= row[:refund].failure_reason ? " (#{row[:refund].failure_reason})" : "" %></td>
+              <td class="num"><%= money(row[:refund].amount) %></td><td><%= finance_badge(row[:refund].status, row[:refund].status_label) %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+    <% if payment.refundable? && can?("finance.refund") && @data[:eligible].positive? %>
+      <form method="post" action="/financeiro/pagamentos/<%= payment.id %>/reembolsos" class="stack" data-confirm="Registrar o reembolso ao cliente?">
+        <%= csrf_field %>
+        <p>Saldo elegível para reembolso: <strong><%= money(@data[:eligible]) %></strong></p>
+        <label for="valor-reembolso">Valor (R$)</label>
+        <input id="valor-reembolso" name="valor" inputmode="decimal" required value="<%= @data[:eligible].to_decimal_string %>"<%= invalid(@errors, "valor") %>>
+        <%= field_errors(@errors, "valor") %>
+        <label for="motivo-reembolso">Motivo</label>
+        <input id="motivo-reembolso" name="motivo" required minlength="3" maxlength="500"<%= invalid(@errors, "motivo") %>>
+        <%= field_errors(@errors, "motivo") %>
+        <button type="submit" class="danger">Reembolsar</button>
+      </form>
+    <% elsif payment.purpose == "deposit" %>
+      <p class="muted">Cauções são devolvidas pela tela da caução.</p>
+    <% end %>
+  </section>
+</div>
+<% unless @data[:alerts].empty? %><%= partial("finance/alerts", alerts: @data[:alerts]) %><% end %>
+<%= partial("finance/journal", entries: @data[:entries]) %>

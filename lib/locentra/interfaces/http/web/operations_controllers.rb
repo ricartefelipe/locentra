@@ -216,8 +216,9 @@ module Locentra
             history = @system.uow.run(ctx.actor, "reservations.read") do |tx, _|
               @system.repos[:audit].for_resource(tx, "reservation", data[:reservation].id)
             end
+            finance = ctx.can?("finance.read") ? uc(:finance).reservation(ctx.actor, data[:reservation].id) : nil
             render(ctx, "reservations/show", title: "Reserva #{data[:reservation].code}", status: status, data: data, customer: customer,
-                                             history: history, errors: errors, shortages: shortages, now: @system.clock.now)
+                                             history: history, errors: errors, shortages: shortages, now: @system.clock.now, finance: finance)
           end
 
           def confirm(ctx)

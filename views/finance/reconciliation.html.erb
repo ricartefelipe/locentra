@@ -1,0 +1,45 @@
+<% fin = Locentra::Domain::Finance %>
+<% report = @data[:report] %>
+<% statuses = { "running" => "Em execução", "completed" => "Concluída", "failed" => "Falhou" } %>
+<header class="page-header">
+  <h1>Conciliação de <%= datetime(report["started_at"]) %> <%= finance_badge(report["status"], statuses.fetch(report["status"])) %></h1>
+  <p class="muted">Provedor <%= fin::PROVIDERS.fetch(report["provider"], report["provider"]) %>; pagamentos e cobranças desde <%= datetime(report["window_start"]) %>. <a href="/financeiro">Voltar ao financeiro</a></p>
+</header>
+<% if report["status"] == "failed" %>
+  <div class="notice notice-danger" role="alert">A consulta ao provedor falhou: <%= report["error"] %>. Nenhuma alteração foi feita; a próxima execução tenta novamente.</div>
+<% end %>
+<% if report["status"] == "completed" %>
+  <section class="cards" aria-label="Resumo da conciliação">
+    <div class="card"><span class="card-value"><%= report["summary"]["checked"] %></span><span class="card-label">Pagamentos verificados</span></div>
+    <% report["summary"]["by_kind"].each do |kind, total| %>
+      <div class="card"><span class="card-value"><%= total %></span><span class="card-label"><%= fin::Reconciliation::KINDS.fetch(kind) %></span></div>
+    <% end %>
+  </section>
+<% end %>
+<section class="panel" aria-labelledby="titulo-divergencias">
+  <h2 id="titulo-divergencias">Divergências</h2>
+  <% if @data[:items].empty? %>
+    <p class="empty">Nenhuma divergência encontrada.</p>
+  <% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <caption class="sr-only">Divergências entre o Locentra e o provedor</caption>
+        <thead><tr><th scope="col">Tipo</th><th scope="col">Pagamento</th><th scope="col">No provedor</th><th scope="col">Situação local</th><th scope="col">Situação no provedor</th><th scope="col" class="num">Valor local</th><th scope="col" class="num">Valor no provedor</th><th scope="col">Ação</th></tr></thead>
+        <tbody>
+          <% @data[:items].each do |item| %>
+            <tr>
+              <td><%= fin::Reconciliation::KINDS.fetch(item["kind"]) %></td>
+              <td><% if item["payment_id"] %><a href="/financeiro/pagamentos/<%= item["payment_id"] %>">ver pagamento</a><% else %><code class="small"><%= item["external_reference"] || "—" %></code><% end %></td>
+              <td><code class="small"><%= item["provider_payment_id"] || "—" %></code></td>
+              <td><%= item["local_status"] ? fin::PAYMENT_STATUSES.fetch(item["local_status"], item["local_status"]) : "—" %></td>
+              <td><%= item["remote_status"] ? fin::REMOTE_STATUSES.fetch(item["remote_status"], item["remote_status"]) : "—" %></td>
+              <td class="num"><%= item["local_amount_cents"] ? money(item["local_amount_cents"]) : "—" %></td>
+              <td class="num"><%= item["remote_amount_cents"] ? money(item["remote_amount_cents"]) : "—" %></td>
+              <td><%= fin::Reconciliation::ACTIONS.fetch(item["action"]) %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>

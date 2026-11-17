@@ -80,6 +80,7 @@
     <p class="muted">Preços congelados em <%= pricing["priced_at"] ? datetime(Time.iso8601(pricing["priced_at"])) : "—" %>; alterações de catálogo não afetam esta reserva.</p>
   </section>
 </div>
+<% if @finance %><%= partial("finance/reservation_panel", reservation: r) %><% end %>
 <section class="panel">
   <h2>Itens e alocações</h2>
   <table class="table">

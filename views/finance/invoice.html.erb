@@ -1,0 +1,31 @@
+<% fin = Locentra::Domain::Finance %>
+<% invoice = @invoice %>
+<header class="page-header">
+  <h1>Fatura <%= invoice["number"] %></h1>
+  <p class="muted">Demonstrativo comercial emitido em <%= datetime(invoice["issued_at"]) %>. Documento sem valor fiscal: a emissão de nota fiscal de serviço (NFS-e) não é feita pelo Locentra.</p>
+</header>
+<section class="panel" aria-labelledby="titulo-partes">
+  <h2 id="titulo-partes">Partes</h2>
+  <dl class="details">
+    <dt>Locadora</dt><dd><%= invoice["organization_name"] %></dd>
+    <dt>Cliente</dt><dd><%= invoice["customer_name"] %> (<%= Locentra::Domain::Customers::Document.format(invoice["customer_document"]) %>)</dd>
+    <dt>Reserva</dt><dd><a href="/reservas/<%= invoice["reservation_id"] %>"><%= invoice["reservation_code"] %></a></dd>
+  </dl>
+</section>
+<section class="panel" aria-labelledby="titulo-itens-fatura">
+  <h2 id="titulo-itens-fatura">Cobranças</h2>
+  <table class="table">
+    <caption class="sr-only">Cobranças da fatura</caption>
+    <thead><tr><th scope="col">Descrição</th><th scope="col">Tipo</th><th scope="col">Vencimento</th><th scope="col" class="num">Valor</th><th scope="col" class="num">Recebido</th><th scope="col" class="num">Saldo</th></tr></thead>
+    <tbody>
+      <% invoice["lines"].each do |line| %>
+        <tr><td><%= line["description"] %></td><td><%= fin::RECEIVABLE_KINDS.fetch(line["kind"], line["kind"]) %></td><td><%= date(Date.iso8601(line["due_on"])) %></td>
+          <td class="num"><%= money(line["amount_cents"]) %></td><td class="num"><%= money(line["settled_cents"]) %></td><td class="num"><%= money(line["outstanding_cents"]) %></td></tr>
+      <% end %>
+    </tbody>
+    <tfoot>
+      <tr><th scope="row" colspan="3">Totais</th><td class="num"><strong><%= money(invoice["total_cents"]) %></strong></td><td class="num"><%= money(invoice["settled_cents"]) %></td><td class="num"><strong><%= money(invoice["outstanding_cents"]) %></strong></td></tr>
+    </tfoot>
+  </table>
+  <% if invoice["notes"] %><p class="pre"><%= invoice["notes"] %></p><% end %>
+</section>
