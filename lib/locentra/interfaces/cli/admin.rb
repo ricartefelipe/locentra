@@ -92,6 +92,7 @@ module Locentra
         end
 
         def db_seed(options)
+          require_relative "../../system"
           require_relative "../../seed"
           system = System.boot(@env)
           summary = Seed.new(system).run
