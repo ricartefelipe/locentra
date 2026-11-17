@@ -89,9 +89,11 @@ module Locentra
           end
         end
 
+        # Ocupações recortadas à janela consultada: bloqueios sem fim definido ([início, ∞), usados em
+        # inspeções e manutenções de estoque) entram com o fim da janela.
         def stock_occupancies(tx, pool_id, window, now)
           tx.query(<<~SQL, [tx.tenant_id!, pool_id, window, now]).map { |row| occupancy(row) }
-            SELECT lower(s.period) AS starts_at, upper(s.period) AS ends_at, s.quantity
+            SELECT lower(s.period * $3::tstzrange) AS starts_at, upper(s.period * $3::tstzrange) AS ends_at, s.quantity
               FROM stock_allocations s LEFT JOIN reservations r ON r.organization_id = s.organization_id AND r.id = s.reservation_id
              WHERE s.organization_id = $1 AND s.stock_pool_id = $2 AND s.active AND s.period && $3::tstzrange
                AND #{format(LIVE, now: 4)}
@@ -182,7 +184,7 @@ module Locentra
         # Alocações de reservas ainda não retiradas que podem ser realocadas para outra unidade.
         def future_reservation_allocations(tx, asset_id, now)
           tx.query(<<~SQL, [tx.tenant_id!, asset_id, now])
-            SELECT a.id, a.asset_id, a.product_id, lower(a.period) AS starts_at, upper(a.period) AS ends_at,
+            SELECT a.id, a.asset_id, a.product_id, lower(a.period) AS starts_at, upper(a.period) AS ends_at, r.id AS reservation_id,
                    r.code AS reservation_code, r.starts_at AS rental_starts_at, r.ends_at AS rental_ends_at
               FROM asset_allocations a JOIN reservations r ON r.organization_id = a.organization_id AND r.id = a.reservation_id
              WHERE a.organization_id = $1 AND a.asset_id = $2 AND a.active AND upper(a.period) > $3
