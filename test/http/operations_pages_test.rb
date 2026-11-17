@@ -32,7 +32,8 @@ class OperationsPagesTest < HttpTest
     north = uc(:create_branch).call(@actor, name: "Filial Norte", code: "NORTE")
     open = confirmed([line(@camera, 1)])
     pickup = uc(:start_pickup).call(@actor, open.id)
-    returned = confirmed([line(@camera, 1), line(@chairs, 2)], after_rental)
+    # Mesmo período: cada reserva recebe uma unidade e a retirada antecipada não invade a outra.
+    returned = confirmed([line(@camera, 1), line(@chairs, 2)])
     pick_up(returned)
     receipt = return_all(returned, outcome: "damaged", notes: "<b>arranhado</b>")
     report = uc(:list_damage_reports).call(@actor).first
