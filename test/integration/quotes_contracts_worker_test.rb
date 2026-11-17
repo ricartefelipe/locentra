@@ -83,6 +83,6 @@ class QuotesContractsWorkerTest < DatabaseTest
 
     assert_equal "cancelled", uc(:get_reservation).call(@actor, sent.hold_reservation_id)[:reservation].status
     refute(@mailer.deliveries.any? { |d| d[:subject].start_with?("Reserva") }, "o bloqueio do orçamento não gera e-mail de reserva")
-    assert_equal 1, @mailer.deliveries.count { |d| d[:subject].start_with?("Orçamento") }
+    assert_equal(1, @mailer.deliveries.count { |d| d[:subject].start_with?("Orçamento") })
   end
 end
