@@ -132,11 +132,14 @@ module Locentra
           [line.check_asset(asset.id), { "from" => allocation["asset_id"], "to" => asset.id }]
         end
 
+        # A situação é relida sob lock do ativo: uma mudança concorrente (transferência, manutenção)
+        # termina antes da verificação.
         def scanned_asset!(tx, pickup, line, tag)
           text = tag.to_s.strip.upcase
           raise invalid("informe o patrimônio conferido") if text.empty?
 
-          asset = @catalog.find_asset_by_tag(tx, text) || raise(invalid("patrimônio #{text} não encontrado"))
+          found = @catalog.find_asset_by_tag(tx, text) || raise(invalid("patrimônio #{text} não encontrado"))
+          asset = @catalog.lock_asset(tx, found.id)
           raise invalid("patrimônio #{text} é de outro produto") unless asset.product_id == line.product_id
           raise invalid("patrimônio #{text} pertence a outra filial") unless asset.branch_id == pickup.branch_id
           raise invalid("patrimônio #{text} está #{asset.status_label.downcase}") unless asset.status == "available"

@@ -399,6 +399,37 @@ CREATE TRIGGER reservation_alerts_final_guard BEFORE UPDATE ON reservation_alert
   FOR EACH ROW EXECUTE FUNCTION app_guard_final_state('resolved');
 
 -- ---------------------------------------------------------------------------
+-- Alocação de ativo × mudança de situação.
+-- ---------------------------------------------------------------------------
+-- O motor de disponibilidade escolhe a unidade lendo a situação do ativo sem lock. Ao gravar uma
+-- alocação de reserva (inclusão ou troca de unidade), este gatilho relê o ativo com FOR SHARE, que
+-- conflita com o FOR UPDATE de quem muda a situação (saída de transferência, manutenção, falta na
+-- devolução, mudança manual): a gravação espera o commit e recusa o ativo que ficou indisponível no
+-- período. Na ordem inversa, quem muda a situação espera a alocação e passa a enxergá-la. A regra
+-- espelha Domain::Availability::AssetSchedule#free?. O código exclusion_violation faz a aplicação
+-- tratar a recusa como unidade ocupada e tentar o próximo candidato.
+CREATE FUNCTION asset_allocations_status_guard() RETURNS trigger
+  LANGUAGE plpgsql
+  AS $$
+DECLARE
+  current_status text;
+  blocked_until timestamptz;
+BEGIN
+  SELECT status, unavailable_until INTO current_status, blocked_until
+    FROM assets WHERE organization_id = NEW.organization_id AND id = NEW.asset_id
+     FOR SHARE;
+  IF current_status IN ('lost', 'retired')
+     OR (current_status IN ('in_inspection', 'in_maintenance', 'in_transit')
+         AND (blocked_until IS NULL OR lower(NEW.period) < blocked_until)) THEN
+    RAISE EXCEPTION 'ativo indisponível para alocação (%)', current_status USING ERRCODE = 'exclusion_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER asset_allocations_status_guard BEFORE INSERT OR UPDATE OF asset_id ON asset_allocations
+  FOR EACH ROW WHEN (NEW.active AND NEW.kind = 'reservation') EXECUTE FUNCTION asset_allocations_status_guard();
+
+-- ---------------------------------------------------------------------------
 -- Privilégios e Row-Level Security.
 -- ---------------------------------------------------------------------------
 REVOKE UPDATE, DELETE ON returns, return_lines FROM locentra_app, locentra_worker;

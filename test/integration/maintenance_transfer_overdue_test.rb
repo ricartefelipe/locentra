@@ -153,6 +153,22 @@ class MaintenanceTransferOverdueTest < DatabaseTest
     assert_raises(D::NotFound) { uc(:request_transfer).call(@actor, asset_id: asset.id, to_branch_id: SecureRandom.uuid) }
   end
 
+  def test_database_refuses_reservation_allocation_on_asset_in_transit
+    north = uc(:create_branch).call(@actor, name: "Filial Norte", code: "NORTE")
+    moving, spare = register_assets(@actor, @camera, @branch, 2)
+    uc(:dispatch_transfer).call(@actor, uc(:request_transfer).call(@actor, asset_id: moving.id, to_branch_id: north.id).id)
+    reservation = confirmed([line(@camera, 1)], after_rental)
+    allocation = owner_query("SELECT id, asset_id FROM asset_allocations WHERE reservation_id = $1", [reservation.id]).first
+
+    assert_equal spare.id, allocation["asset_id"]
+    assert_raises(A::AllocationConflict, "o gatilho recusa a troca para o ativo em trânsito") do
+      @system.transactor.call(tenant_id: @org[:organization_id]) do |tx|
+        @system.repos[:availability].reassign_asset_allocation(tx, allocation["id"], moving.id)
+      end
+    end
+    assert_equal spare.id, owner_query("SELECT asset_id FROM asset_allocations WHERE id = $1", [allocation["id"]]).first["asset_id"]
+  end
+
   def test_stock_transfer_moves_quantities_respecting_future_coverage
     north = uc(:create_branch).call(@actor, name: "Filial Norte", code: "NORTE")
     confirmed([line(@chairs, 6)], after_rental)

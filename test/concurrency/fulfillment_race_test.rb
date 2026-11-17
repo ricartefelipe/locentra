@@ -181,6 +181,91 @@ class FulfillmentRaceTest < DatabaseTest
     assert_equal 1, count("SELECT count(*) FROM transfers WHERE asset_id = $1 AND status = 'requested'", [asset.id])
   end
 
+  def create_reservation_use_case(availability)
+    allocator = A::Availability::Allocator.new(repository: availability, ids: @system.ids)
+    A::Reservations::CreateReservation.new(uow: @system.uow, reservations: repo(:reservations), customers: repo(:customers),
+                                           organizations: repo(:organizations), allocator: allocator, pricer: @system.services[:pricer],
+                                           audit: @system.services[:audit], events: @system.services[:events], clock: @clock, ids: @system.ids)
+  end
+
+  def new_reservation(use_case, product)
+    use_case.call(@actor, { customer_id: @customer.id, branch_id: @branch.id, period: after_rental, lines: [line(product, 1)], mode: "confirm" })
+  end
+
+  # A reserva lê o ativo como disponível duas vezes (cálculo de faltas e escolha da unidade) e pausa
+  # depois da segunda leitura, enquanto a outra operação já bloqueou o ativo e vai mudar a situação.
+  def paused_reservation(barrier) = create_reservation_use_case(PausingProxy.new(repo(:availability), :asset_schedules, barrier, after: true, skip: 1))
+
+  def single_asset_product
+    lens = create_product(@actor, sku: "LEN-RACE", tracking: "serialized")
+    [lens, register_assets(@actor, lens, @branch, 1).first]
+  end
+
+  def active_allocations_of(asset) = count("SELECT count(*) FROM asset_allocations WHERE asset_id = $1 AND active", [asset.id])
+
+  def test_dispatch_racing_a_new_reservation_never_ships_an_asset_with_future_allocation
+    north = uc(:create_branch).call(@actor, name: "Filial Norte", code: "NORTE")
+    lens, asset = single_asset_product
+    transfer = uc(:request_transfer).call(@actor, asset_id: asset.id, to_branch_id: north.id)
+    barrier = Barrier.new(2)
+    dispatch = A::Transfers::DispatchTransfer.new(
+      uow: @system.uow, transfers: repo(:transfers), catalog: repo(:catalog), availability: repo(:availability), ledger: ledger,
+      allocations: PausingProxy.new(repo(:operational_allocations), :active_future_allocations, barrier, after: true),
+      audit: @system.services[:audit], clock: @clock, ids: @system.ids
+    )
+
+    results = race(-> { dispatch.call(@actor, transfer.id).status }, -> { new_reservation(paused_reservation(barrier), lens) })
+
+    assert_equal [:ok, "in_transit"], results.first
+    assert_equal :error, results.last.first
+    assert_kind_of D::Unavailable, results.last.last
+    assert_equal "in_transit", asset_status(asset.id)
+    assert_equal 0, active_allocations_of(asset), "o ativo em trânsito não pode ficar com alocação futura na origem"
+    assert_equal 0, count("SELECT count(*) FROM reservations")
+  end
+
+  def test_new_reservation_committed_first_blocks_the_dispatch
+    north = uc(:create_branch).call(@actor, name: "Filial Norte", code: "NORTE")
+    lens, asset = single_asset_product
+    transfer = uc(:request_transfer).call(@actor, asset_id: asset.id, to_branch_id: north.id)
+    barrier = Barrier.new(2)
+    dispatch = A::Transfers::DispatchTransfer.new(
+      uow: @system.uow, transfers: repo(:transfers), catalog: PausingProxy.new(repo(:catalog), :lock_asset, barrier), ledger: ledger,
+      allocations: repo(:operational_allocations), availability: repo(:availability), audit: @system.services[:audit], clock: @clock, ids: @system.ids
+    )
+    create = create_reservation_use_case(PausingProxy.new(repo(:availability), :insert_asset_allocation, barrier, after: true))
+
+    results = race(-> { dispatch.call(@actor, transfer.id) }, -> { new_reservation(create, lens).status })
+
+    assert_equal :error, results.first.first
+    assert_equal "asset_committed", results.first.last.code
+    assert_equal [:ok, "confirmed"], results.last
+    assert_equal "available", asset_status(asset.id)
+    assert_equal 1, active_allocations_of(asset)
+  end
+
+  def test_maintenance_racing_a_new_reservation_keeps_the_asset_free_of_allocations
+    lens, asset = single_asset_product
+    barrier = Barrier.new(2)
+    allocations = repo(:operational_allocations)
+    relocation = OPS::AssetRelocation.new(availability: PausingProxy.new(repo(:availability), :future_reservation_allocations, barrier, after: true),
+                                          allocator: @system.services[:allocator])
+    open_order = A::Maintenance::OpenMaintenanceOrder.new(
+      uow: @system.uow, catalog: repo(:catalog), allocations: allocations, availability: repo(:availability), ledger: ledger, relocation: relocation,
+      desk: OPS::MaintenanceDesk.new(orders: repo(:maintenance_orders), inspections: repo(:inspections), allocations: allocations,
+                                     organizations: repo(:organizations), ids: @system.ids),
+      audit: @system.services[:audit], clock: @clock
+    )
+
+    results = race(-> { open_order.call(@actor, description: "Troca do anel de foco", asset_id: asset.id).status },
+                   -> { new_reservation(paused_reservation(barrier), lens) })
+
+    assert_equal [:ok, "open"], results.first
+    assert_kind_of D::Unavailable, results.last.last
+    assert_equal "in_maintenance", asset_status(asset.id)
+    assert_equal 0, active_allocations_of(asset)
+  end
+
   def test_concurrent_charge_approvals_record_a_single_adjustment
     reservation = confirmed([line(@camera, 1)])
     pick_up(reservation)
