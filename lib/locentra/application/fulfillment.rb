@@ -158,14 +158,20 @@ module Locentra
 
       # Entrega: somente itens conferidos. Ativos entregues passam a "com cliente"; itens não entregues
       # têm a alocação liberada e o registro explícito na linha. A reserva passa a em andamento.
+      #
+      # Entrega antes do início da janela alocada: cada alocação entregue passa a começar no instante da
+      # entrega, para que o item com o cliente não seja oferecido no intervalo. Ativo com outra alocação
+      # nesse intervalo é recusado pela exclusion constraint; estoque é conferido pelo pico, sob lock dos
+      # estoques (em ordem de id, antes das alocações).
       class DeliverPickup
         include PickupLocking
 
-        def initialize(uow:, reservations:, fulfillment:, allocations:, customers:, catalog:, ledger:, audit:, events:, clock:)
+        def initialize(uow:, reservations:, fulfillment:, allocations:, availability:, customers:, catalog:, ledger:, audit:, events:, clock:)
           @uow = uow
           @reservations = reservations
           @fulfillment = fulfillment
           @allocations = allocations
+          @availability = availability
           @customers = customers
           @catalog = catalog
           @ledger = ledger
@@ -184,7 +190,8 @@ module Locentra
 
             who = picker_for(tx, reservation, picker)
             now = @clock.now
-            delivered_lines = lines.map { |line| deliver_line(tx, current, pickup, line, now) }
+            pools = @allocations.lock_pools_in_order(tx, lines.select(&:checked?).filter_map(&:stock_pool_id))
+            delivered_lines = lines.map { |line| deliver_line(tx, current, pickup, line, now, pools) }
             @reservations.update_status(tx, reservation.start, now)
             delivered = pickup.deliver(who, now, notes: notes)
             @fulfillment.update_pickup(tx, delivered, current.audit_actor_id)
@@ -209,7 +216,7 @@ module Locentra
           end
         end
 
-        def deliver_line(tx, current, pickup, line, now)
+        def deliver_line(tx, current, pickup, line, now, pools)
           done = line.deliver
           if line.asset?
             if done.delivered_quantity.positive?
@@ -220,7 +227,7 @@ module Locentra
           elsif done.delivered_quantity.zero?
             @allocations.release_stock_allocation(tx, line.stock_allocation_id, now)
           else
-            hand_over_stock(tx, done)
+            hand_over_stock(tx, done, pools.fetch(done.stock_pool_id), now)
           end
           @fulfillment.update_pickup_line(tx, done, release_reason: done.undelivered_quantity.positive? ? "não conferido na retirada" : nil)
           done
@@ -228,13 +235,27 @@ module Locentra
 
         # A alocação de estoque precisa continuar ativa (reagendamento ou cancelamento a substituem);
         # a quantidade não conferida deixa de ocupar o estoque.
-        def hand_over_stock(tx, line)
+        def hand_over_stock(tx, line, pool, now)
           allocation = @allocations.lock_stock_allocation(tx, line.stock_allocation_id)
           unless allocation&.fetch("active")
             raise Domain::Conflict.new("a alocação do item foi alterada após a conferência; reinicie a separação", code: "allocation_changed")
           end
 
           @allocations.set_stock_quantity(tx, allocation["id"], line.delivered_quantity) if line.undelivered_quantity.positive?
+          bring_stock_forward(tx, allocation, line, pool, now) if allocation["starts_at"] > now
+        end
+
+        # Só o intervalo [agora, início) é novo; o restante da janela já estava ocupado pela alocação.
+        def bring_stock_forward(tx, allocation, line, pool, now)
+          @allocations.advance_stock_allocation(tx, allocation["id"], now)
+          gap = Domain::Period.new(now, allocation["starts_at"])
+          ledger = Domain::Availability::StockLedger.new(capacity: pool.total_quantity,
+                                                         occupancies: @availability.stock_occupancies(tx, pool.id, gap, now))
+          return if ledger.peak(gap) <= ledger.capacity
+
+          free = [ledger.capacity - (ledger.peak(gap) - line.delivered_quantity), 0].max
+          raise Domain::Unavailable.new([{ "product_id" => line.product_id, "requested" => line.delivered_quantity, "available" => free }],
+                                        "Retirada antecipada indisponível: as unidades estão comprometidas antes do início da reserva")
         end
 
         def hand_over(tx, current, pickup, line, now)
@@ -248,7 +269,17 @@ module Locentra
             raise Domain::Conflict.new("ativo #{asset.tag} não está disponível para entrega (#{asset.status_label})", code: "asset_unavailable")
           end
 
+          bring_asset_forward(tx, allocation, asset, pickup, now) if allocation["starts_at"] > now
           @ledger.move(tx, current, asset, "checked_out", kind: "checked_out", now: now, reference_type: "pickup", reference_id: pickup.id)
+        end
+
+        def bring_asset_forward(tx, allocation, asset, pickup, now)
+          tx.savepoint { @allocations.advance_asset_allocation(tx, allocation["id"], now) }
+        rescue AllocationConflict
+          gap = Domain::Period.new(now, allocation["starts_at"])
+          holder = @availability.conflicting_reservation_code(tx, asset.id, gap, pickup.reservation_id)
+          raise Domain::Conflict.new("patrimônio #{asset.tag} está alocado (#{holder}) antes do início desta reserva; confira outra unidade " \
+                                     "ou entregue mais perto do início", code: "early_pickup_unavailable")
         end
 
         def record(tx, current, reservation, pickup, lines)

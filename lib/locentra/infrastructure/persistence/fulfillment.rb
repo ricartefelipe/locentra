@@ -199,6 +199,21 @@ module Locentra
           tx.execute("UPDATE stock_allocations SET quantity = $3 WHERE organization_id = $1 AND id = $2 AND active", [tx.tenant_id!, id, quantity])
         end
 
+        # Retirada antes da janela alocada: a alocação passa a começar no instante da entrega.
+        def advance_asset_allocation(tx, id, starts_at)
+          tx.execute(<<~SQL, [tx.tenant_id!, id, starts_at])
+            UPDATE asset_allocations SET period = tstzrange($3::timestamptz, upper(period), '[)')
+             WHERE organization_id = $1 AND id = $2 AND active AND lower(period) > $3::timestamptz
+          SQL
+        end
+
+        def advance_stock_allocation(tx, id, starts_at)
+          tx.execute(<<~SQL, [tx.tenant_id!, id, starts_at])
+            UPDATE stock_allocations SET period = tstzrange($3::timestamptz, upper(period), '[)')
+             WHERE organization_id = $1 AND id = $2 AND active AND lower(period) > $3::timestamptz
+          SQL
+        end
+
         # Bloqueio de estoque sem fim definido, encerrado somente na liberação.
         def insert_open_stock_block(tx, row)
           tx.execute(<<~SQL, [row["id"], tx.tenant_id!, *row.values_at("stock_pool_id", "product_id", "reason", "quantity", "starts_at", "created_by", "created_at")])
@@ -253,6 +268,17 @@ module Locentra
              WHERE a.organization_id = $1 AND a.asset_id = $2 AND a.active AND upper(a.period) > $3
                AND #{format(LIVE, now: 3)}
              ORDER BY lower(a.period)
+          SQL
+        end
+
+        # Lock de vários estoques em ordem de id, a mesma do motor de disponibilidade (sem deadlock com
+        # criação ou extensão de reservas que disputem os mesmos estoques).
+        def lock_pools_in_order(tx, pool_ids)
+          return {} if pool_ids.empty?
+
+          tx.query(<<~SQL, [tx.tenant_id!, pool_ids.uniq]).to_h { |row| [row["id"], Domain::Catalog::StockPool.new(**row.transform_keys(&:to_sym))] }
+            SELECT id, organization_id, product_id, branch_id, total_quantity FROM stock_pools
+             WHERE organization_id = $1 AND id = ANY($2::uuid[]) ORDER BY id FOR UPDATE
           SQL
         end
 

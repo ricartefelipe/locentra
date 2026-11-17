@@ -41,7 +41,7 @@ class FulfillmentRaceTest < DatabaseTest
   end
 
   def deliver_use_case(reservations)
-    A::Fulfillment::DeliverPickup.new(uow: @system.uow, reservations: reservations, fulfillment: repo(:fulfillment),
+    A::Fulfillment::DeliverPickup.new(uow: @system.uow, reservations: reservations, fulfillment: repo(:fulfillment), availability: repo(:availability),
                                       allocations: repo(:operational_allocations), customers: repo(:customers), catalog: repo(:catalog),
                                       ledger: ledger, audit: @system.services[:audit], events: @system.services[:events], clock: @clock)
   end

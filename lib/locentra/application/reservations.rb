@@ -340,13 +340,13 @@ module Locentra
             window = product.blocked_period(extended.period)
             if allocation["asset_id"]
               begin
-                tx.savepoint { @availability.update_asset_allocation_period(tx, allocation["id"], window) }
+                tx.savepoint { @availability.extend_asset_allocation(tx, allocation["id"], window) }
               rescue AllocationConflict
                 shortages << { "product_id" => product.id, "sku" => product.sku, "asset_id" => allocation["asset_id"],
                                "conflict" => @availability.conflicting_reservation_code(tx, allocation["asset_id"], window, reservation.id) }
               end
             else
-              @availability.update_stock_allocation_period(tx, allocation["id"], window)
+              @availability.extend_stock_allocation(tx, allocation["id"], window)
               pool_ledger = Domain::Availability::StockLedger.new(
                 capacity: @availability.pool_capacity(tx, allocation["stock_pool_id"]),
                 occupancies: @availability.stock_occupancies(tx, allocation["stock_pool_id"], window, now)

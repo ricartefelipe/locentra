@@ -74,6 +74,62 @@ class FulfillmentFlowTest < DatabaseTest
     assert_equal 10, available(@chairs, rental_period)
   end
 
+  def later_rental = period("2026-03-10T09:00:00Z", "2026-03-12T09:00:00Z")
+  def gap_window = period("2026-03-04T09:00:00Z", "2026-03-06T09:00:00Z")
+
+  def allocation_starts(table, reservation)
+    owner_query("SELECT lower(period) AS s FROM #{table} WHERE reservation_id = $1 AND active", [reservation.id]).map { |row| Time.parse(row["s"]) }
+  end
+
+  def single_lens
+    lens = create_product(@actor, sku: "LEN-OP", tracking: "serialized")
+    register_assets(@actor, lens, @branch, 1)
+    lens
+  end
+
+  def test_early_pickup_occupies_the_items_from_delivery_until_the_reservation_starts
+    lens = single_lens
+    reservation = confirmed([line(lens, 1), line(@chairs, 6)], later_rental)
+    confirmed([line(@chairs, 4)], gap_window)
+
+    assert_equal [1, 6], [available(lens, gap_window), available(@chairs, gap_window)]
+    pick_up(reservation)
+
+    assert_equal [0, 0], [available(lens, gap_window), available(@chairs, gap_window)], "o que está com o cliente não é oferecido no intervalo"
+    assert_raises(D::Unavailable) { confirmed([line(lens, 1)], gap_window) }
+    assert_equal [[@clock.now], [@clock.now]], [allocation_starts("asset_allocations", reservation), allocation_starts("stock_allocations", reservation)]
+    uc(:extend_reservation).call(@actor, reservation.id, ends_at: t("2026-03-13T09:00:00Z"))
+
+    assert_equal [[@clock.now], [@clock.now]], [allocation_starts("asset_allocations", reservation), allocation_starts("stock_allocations", reservation)],
+                 "a extensão não adia o início antecipado"
+    assert_equal [0, 0], [available(lens, gap_window), available(@chairs, gap_window)]
+  end
+
+  def test_early_pickup_is_refused_when_the_interval_before_the_start_is_committed
+    lens = single_lens
+    reservation = confirmed([line(lens, 1)], later_rental)
+    blocker = confirmed([line(lens, 1)], gap_window)
+    pickup = uc(:start_pickup).call(@actor, reservation.id)
+    uc(:check_pickup).call(@actor, pickup.id, check_entries(@actor, pickup))
+
+    error = assert_raises(D::Conflict) { uc(:deliver_pickup).call(@actor, pickup.id, picker: { kind: "customer" }) }
+    assert_equal "early_pickup_unavailable", error.code
+    assert_includes error.message, blocker.code
+    assert_equal "confirmed", reservation_status(reservation)
+    chairs = confirmed([line(@chairs, 6)], later_rental)
+    confirmed([line(@chairs, 5)], gap_window)
+    pickup = uc(:start_pickup).call(@actor, chairs.id)
+    uc(:check_pickup).call(@actor, pickup.id, check_entries(@actor, pickup))
+
+    error = assert_raises(D::Unavailable) { uc(:deliver_pickup).call(@actor, pickup.id, picker: { kind: "customer" }) }
+    assert_equal [6, 5], error.shortages.first.values_at("requested", "available")
+    assert_equal [t("2026-03-10T09:00:00Z")], allocation_starts("stock_allocations", chairs)
+    @clock.travel_to(t("2026-03-06T09:00:00Z"))
+    uc(:deliver_pickup).call(@actor, pickup.id, picker: { kind: "customer" })
+
+    assert_equal [@clock.now], allocation_starts("stock_allocations", chairs), "fora do intervalo comprometido a entrega antecipada é aceita"
+  end
+
   def test_check_rejects_wrong_product_other_branch_and_unavailable_unit
     other_branch = uc(:create_branch).call(@actor, name: "Filial Norte", code: "NORTE")
     elsewhere = register_assets(@actor, @camera, other_branch, 1, prefix: "CAM-NORTE").first

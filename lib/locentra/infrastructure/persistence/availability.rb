@@ -163,14 +163,20 @@ module Locentra
                      [tx.tenant_id!, allocation_id, asset_id])
         end
 
-        def update_asset_allocation_period(tx, allocation_id, window)
-          tx.execute("UPDATE asset_allocations SET period = $3::tstzrange WHERE organization_id = $1 AND id = $2 AND active",
-                     [tx.tenant_id!, allocation_id, window])
+        # Extensão: o fim passa a ser o da nova janela e o início nunca é adiado, para manter o trecho
+        # antecipado por uma retirada antes do início da reserva.
+        def extend_asset_allocation(tx, allocation_id, window)
+          tx.execute(<<~SQL, [tx.tenant_id!, allocation_id, window])
+            UPDATE asset_allocations SET period = tstzrange(LEAST(lower(period), lower($3::tstzrange)), upper($3::tstzrange), '[)')
+             WHERE organization_id = $1 AND id = $2 AND active
+          SQL
         end
 
-        def update_stock_allocation_period(tx, allocation_id, window)
-          tx.execute("UPDATE stock_allocations SET period = $3::tstzrange WHERE organization_id = $1 AND id = $2 AND active",
-                     [tx.tenant_id!, allocation_id, window])
+        def extend_stock_allocation(tx, allocation_id, window)
+          tx.execute(<<~SQL, [tx.tenant_id!, allocation_id, window])
+            UPDATE stock_allocations SET period = tstzrange(LEAST(lower(period), lower($3::tstzrange)), upper($3::tstzrange), '[)')
+             WHERE organization_id = $1 AND id = $2 AND active
+          SQL
         end
 
         def conflicting_reservation_code(tx, asset_id, window, exclude_reservation_id)

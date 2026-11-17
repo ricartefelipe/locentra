@@ -227,8 +227,9 @@ module Locentra
       uc[:start_pickup] = A::Fulfillment::StartPickup.new(**common, **pickup, audit: audit, ids: ids)
       uc[:check_pickup] = A::Fulfillment::CheckPickup.new(**common, **pickup, allocations: allocations, availability: r[:availability],
                                                                               catalog: r[:catalog], audit: audit)
-      uc[:deliver_pickup] = A::Fulfillment::DeliverPickup.new(**common, **pickup, allocations: allocations, customers: r[:customers],
-                                                                                  catalog: r[:catalog], ledger: ledger, audit: audit, events: s[:events])
+      uc[:deliver_pickup] = A::Fulfillment::DeliverPickup.new(**common, **pickup, allocations: allocations, availability: r[:availability],
+                                                                                  customers: r[:customers], catalog: r[:catalog], ledger: ledger,
+                                                                                  audit: audit, events: s[:events])
       uc[:cancel_pickup] = A::Fulfillment::CancelPickup.new(**common, **pickup, audit: audit)
       uc[:get_pickup] = A::Fulfillment::GetPickup.new(uow: uow, **pickup, customers: r[:customers])
 
