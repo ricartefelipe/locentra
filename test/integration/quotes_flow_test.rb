@@ -204,6 +204,25 @@ class QuotesFlowTest < DatabaseTest
     assert_equal ["confirmed", 24_000, quote.id], [result.reservation.status, result.reservation.total.cents, result.reservation.quote_id]
   end
 
+  # Defesa adicional: um bloqueio que diverge da versão aprovada (alterado fora da aplicação) não é
+  # confirmado com os preços dessa versão; cancelado o bloqueio, a conversão usa o snapshot.
+  def test_conversion_refuses_a_hold_that_diverges_from_the_approved_version
+    quote = uc(:create_quote).call(@actor, quote_input(hold_policy: "hold_on_send", hold_minutes: 1440))
+    hold_id = uc(:send_quote).call(@actor, quote.id).hold_reservation_id
+    uc(:approve_quote).call(@actor, quote.id, version: 1, approver_name: "Maria")
+    owner_query("UPDATE reservations SET ends_at = ends_at + interval '3 days' WHERE id = $1", [hold_id])
+
+    error = assert_raises(D::Conflict) { uc(:convert_quote).call(@actor, quote.id) }
+    assert_equal "quote_hold_mismatch", error.code
+    assert_includes error.message, "cancele a reserva de bloqueio"
+    assert_equal "approved", uc(:get_quote).call(@actor, quote.id)[:quote].status
+    assert_equal "held", uc(:get_reservation).call(@actor, hold_id)[:reservation].status
+    uc(:cancel_reservation).call(@actor, hold_id, reason: "Bloqueio divergente")
+    result = uc(:convert_quote).call(@actor, quote.id)
+
+    assert_equal [rental, 24_000], [result.reservation.period, result.reservation.total.cents]
+  end
+
   def test_hold_on_send_without_availability_keeps_the_quote_in_draft
     reserve(@actor, @customer, @branch, rental, [line(@camera, 1)], mode: "confirm")
     quote = uc(:create_quote).call(@actor, quote_input(hold_policy: "hold_on_send", hold_minutes: 60))

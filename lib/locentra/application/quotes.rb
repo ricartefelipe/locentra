@@ -82,7 +82,8 @@ module Locentra
       end
 
       # Libera o bloqueio temporário criado no envio quando o orçamento deixa de estar enviado
-      # (nova versão, rejeição ou expiração). Bloqueios já expirados ou convertidos são mantidos.
+      # (nova versão, rejeição ou expiração). A decisão é tomada sobre a linha bloqueada (FOR UPDATE):
+      # um bloqueio expirado pela varredura ou cancelado diretamente enquanto isso é mantido como está.
       class HoldRelease
         def initialize(reservations:, cancel:)
           @reservations = reservations
@@ -92,7 +93,7 @@ module Locentra
         def call(tx, actor, quote, reason)
           return nil unless quote.hold_reservation_id
 
-          hold = @reservations.find(tx, quote.hold_reservation_id)
+          hold = @reservations.lock(tx, quote.hold_reservation_id)
           return nil unless hold&.held?
 
           @cancel.call(actor, hold.id, reason: "#{reason} (orçamento #{quote.code})", tx: tx, via: :quote)
@@ -360,7 +361,7 @@ module Locentra
       # encontra a reserva já vinculada. O índice único parcial em reservations (organization_id,
       # quote_id) garante, no banco, no máximo uma reserva por orçamento. A reserva usa o snapshot de
       # preços da versão aprovada, nunca o catálogo atual. Com bloqueio temporário vigente, a própria
-      # reserva bloqueada é confirmada.
+      # reserva bloqueada é confirmada, desde que ainda corresponda à versão aprovada.
       class ConvertQuote
         Result = Data.define(:quote, :reservation, :created)
         DUPLICATE_CODE = "duplicate:reservations_quote_key"
@@ -394,7 +395,7 @@ module Locentra
           raise Domain::InvalidTransition.new("orçamento", quote.status, "converted") unless quote.status == "approved"
 
           version = @quotes.find_version(tx, quote.id, quote.approved_version)
-          reservation = existing || from_hold(tx, current, quote, now)
+          reservation = existing || from_hold(tx, current, quote, version, now)
           unless reservation
             reservation, created = create(tx, current, quote, version)
             # Outra transação converteu primeiro (detectado pelo índice único): devolve a mesma reserva.
@@ -411,20 +412,34 @@ module Locentra
           Result.new(quote: converted, reservation: @reservations.find(tx, reservation.id), created: true)
         end
 
-        # Bloqueio vigente criado no envio: confirmado com revalidação. Se venceu no instante da
-        # confirmação, a tentativa é desfeita (savepoint) e uma nova reserva é criada.
-        def from_hold(tx, current, quote, now)
+        # Bloqueio criado no envio, decidido sobre a linha bloqueada (FOR UPDATE): vigente, é confirmado
+        # com revalidação; expirado ou cancelado (inclusive por outra transação concluída enquanto
+        # esta aguardava o lock), uma nova reserva é criada a partir do snapshot. Se venceu no instante
+        # da confirmação, a tentativa é desfeita (savepoint).
+        def from_hold(tx, current, quote, version, now)
           return nil unless quote.hold_reservation_id
 
-          hold = @reservations.find(tx, quote.hold_reservation_id)
-          return hold if hold&.status == "confirmed"
+          hold = @reservations.lock(tx, quote.hold_reservation_id)
           return nil unless hold&.hold_valid?(now)
 
+          ensure_hold_matches!(tx, quote, hold, version)
           tx.savepoint { @confirm_reservation.call(current, hold.id, tx: tx, via: :quote) }
         rescue Domain::HoldExpired
           nil
         rescue Domain::Unavailable => e
           raise Domain::Unavailable.new(e.shortages, "Sem disponibilidade para confirmar o bloqueio do orçamento #{quote.code}")
+        end
+
+        # A reserva de bloqueio não é alterada diretamente (ChangeGuard); esta verificação impede que
+        # um bloqueio divergente da versão aprovada seja confirmado com os preços dessa versão.
+        def ensure_hold_matches!(tx, quote, hold, version)
+          items = @reservations.items(tx, hold.id).map { |i| [i["product_id"], i["quantity"]] }.sort
+          expected = version.lines.map { |l| [l.product_id, l.quantity] }.sort
+          return if hold.period == version.period && items == expected && hold.total == version.total
+
+          raise Domain::Conflict.new("O bloqueio #{hold.code} não corresponde à versão #{version.number} aprovada do orçamento #{quote.code} " \
+                                     "(período, itens ou valor): cancele a reserva de bloqueio e converta novamente",
+                                     code: "quote_hold_mismatch")
         end
 
         # Retorna [reserva, criada?]. A criação ocorre sob savepoint: se o índice único acusar outra
