@@ -3,6 +3,12 @@
   <h1>Ativo <%= a.tag %> <%= status_badge(a.status, a.status_label) %></h1>
   <p class="muted"><a href="/produtos/<%= @data[:product].id %>"><%= @data[:product].name %></a> · Série <%= a.serial_number || "—" %> · Condição <%= a.condition_label %>
     <% if a.unavailable_until %> · indisponível até <%= datetime(a.unavailable_until) %><% end %></p>
+  <% if a.status == "available" %>
+    <nav class="actions" aria-label="Operações do ativo">
+      <% if can?("maintenance.write") %><a class="button" href="<%= url("/manutencao", "ativo" => a.tag) %>">Abrir ordem de manutenção</a><% end %>
+      <% if can?("assets.write") %><a class="button" href="<%= url("/transferencias", "ativo" => a.tag) %>">Transferir para outra filial</a><% end %>
+    </nav>
+  <% end %>
 </header>
 <%= partial("shared/errors") %>
 <div class="grid-2">

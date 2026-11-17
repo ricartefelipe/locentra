@@ -1,0 +1,112 @@
+<% kinds = Locentra::Domain::Alerts::KINDS %>
+<header class="page-header">
+  <h1>Retiradas e devoluções</h1>
+  <nav class="actions" aria-label="Áreas da operação">
+    <a class="button" href="/operacao/inspecoes">Inspeções</a>
+    <a class="button" href="/operacao/avarias">Avarias e faltas</a>
+    <a class="button" href="/transferencias">Transferências</a>
+    <% if can?("maintenance.write") %><a class="button" href="/manutencao">Manutenção</a><% end %>
+  </nav>
+</header>
+<%= partial("shared/errors") %>
+<section class="cards" aria-label="Resumo da operação">
+  <div class="card"><span class="card-value"><%= @data[:pickups].size %></span><span class="card-label">Retiradas pendentes até hoje</span></div>
+  <div class="card"><span class="card-value"><%= @data[:returns_due].size %></span><span class="card-label">Devoluções previstas para hoje</span></div>
+  <div class="card card-alert"><span class="card-value"><%= @data[:overdue].size %></span><span class="card-label">Devoluções em atraso</span></div>
+  <div class="card card-alert"><span class="card-value"><%= @data[:alerts].size %></span><span class="card-label">Alertas abertos</span></div>
+  <a class="card" href="/operacao/inspecoes"><span class="card-value"><%= @data[:inspections].size %></span><span class="card-label">Inspeções pendentes</span></a>
+  <a class="card" href="/operacao/avarias"><span class="card-value"><%= @data[:damage_reports].size %></span><span class="card-label">Avarias aguardando aprovação</span></a>
+</section>
+<div class="grid-2">
+  <section class="panel" aria-labelledby="h-retiradas">
+    <h2 id="h-retiradas">Retiradas do dia</h2>
+    <% if @data[:pickups].empty? %>
+      <p class="empty">Nenhuma retirada prevista para hoje.</p>
+    <% else %>
+      <table class="table">
+        <thead><tr><th scope="col">Reserva</th><th scope="col">Cliente</th><th scope="col">Retirada prevista</th><th scope="col">Ação</th></tr></thead>
+        <tbody>
+          <% @data[:pickups].each do |row| %>
+            <tr>
+              <td><a href="/reservas/<%= row["id"] %>"><%= row["code"] %></a></td>
+              <td><%= row["customer_name"] %></td>
+              <td><%= datetime(row["starts_at"]) %><% if row["starts_at"] < @data[:now] %> <%= badge("atrasada", "danger") %><% end %></td>
+              <td>
+                <% if row["pickup_id"] %>
+                  <a href="/operacao/retiradas/<%= row["pickup_id"] %>">Continuar separação</a>
+                <% elsif can?("fulfillment.write") %>
+                  <form method="post" action="/operacao/reservas/<%= row["id"] %>/retirada" class="inline"><%= csrf_field %><button type="submit">Iniciar retirada</button></form>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+  </section>
+  <section class="panel" aria-labelledby="h-devolucoes">
+    <h2 id="h-devolucoes">Devoluções previstas para hoje</h2>
+    <%= partial("operations/in_progress_table", rows: @data[:returns_due], empty: "Nenhuma devolução prevista para hoje.") %>
+  </section>
+  <section class="panel" aria-labelledby="h-atrasos">
+    <h2 id="h-atrasos">Devoluções em atraso</h2>
+    <%= partial("operations/in_progress_table", rows: @data[:overdue], empty: "Nenhuma devolução em atraso.") %>
+  </section>
+  <section class="panel" aria-labelledby="h-inspecoes">
+    <h2 id="h-inspecoes">Inspeções pendentes</h2>
+    <% if @data[:inspections].empty? %>
+      <p class="empty">Nenhum item aguardando inspeção.</p>
+    <% else %>
+      <ul class="row-list">
+        <% @data[:inspections].each do |i| %>
+          <li><strong><%= i["product_name"] %></strong> <%= i["tag"] || "#{i["quantity"]} un." %> · <span class="muted"><%= i["reason"] %></span></li>
+        <% end %>
+      </ul>
+      <p><a href="/operacao/inspecoes">Decidir inspeções</a></p>
+    <% end %>
+  </section>
+</div>
+<section class="panel" aria-labelledby="h-alertas">
+  <h2 id="h-alertas">Alertas de atraso e indisponibilidade</h2>
+  <% if @data[:alerts].empty? %>
+    <p class="empty">Nenhum alerta aberto.</p>
+  <% else %>
+    <table class="table">
+      <thead><tr><th scope="col">Alerta</th><th scope="col">Reserva</th><th scope="col">Origem</th><th scope="col">Registrado em</th><th scope="col">Decisão</th></tr></thead>
+      <tbody>
+        <% @data[:alerts].each do |a| %>
+          <tr>
+            <td><%= status_badge(a["kind"], kinds.fetch(a["kind"])) %> <span class="muted"><%= a["tag"] %> <%= a["details"]["reason"] %></span></td>
+            <td><a href="/reservas/<%= a["reservation_id"] %>"><%= a["reservation_code"] %></a> · <%= a["customer_name"] %><br><span class="muted">retirada <%= datetime(a["starts_at"]) %></span></td>
+            <td><% if a["related_reservation_id"] %><a href="/reservas/<%= a["related_reservation_id"] %>"><%= a["related_code"] %></a><% else %>—<% end %></td>
+            <td><%= datetime(a["created_at"]) %></td>
+            <td>
+              <% if can?("fulfillment.write") %>
+                <form method="post" action="/operacao/alertas/<%= a["id"] %>/resolver" class="inline">
+                  <%= csrf_field %>
+                  <label for="decisao-<%= a["id"] %>" class="sr-only">Decisão para o alerta da reserva <%= a["reservation_code"] %></label>
+                  <input id="decisao-<%= a["id"] %>" name="decisao" required minlength="3" maxlength="1000" placeholder="Decisão tomada">
+                  <button type="submit">Resolver</button>
+                </form>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+    <p class="muted">Nenhuma reserva é cancelada automaticamente: registre a decisão (troca de unidade, contato com o cliente, reagendamento).</p>
+  <% end %>
+</section>
+<section class="panel" aria-labelledby="h-transferencias">
+  <h2 id="h-transferencias">Transferências em andamento</h2>
+  <% if @data[:transfers].empty? %>
+    <p class="empty">Nenhuma transferência em andamento.</p>
+  <% else %>
+    <ul class="row-list">
+      <% @data[:transfers].each do |t| %>
+        <li><strong><%= t["code"] %></strong> <%= t["product_name"] %> <%= t["tag"] || "#{t["quantity"]} un." %> · <%= t["from_code"] %> → <%= t["to_code"] %> <%= status_badge(t["status"], Locentra::Domain::Transfers::STATUSES.fetch(t["status"])) %></li>
+      <% end %>
+    </ul>
+  <% end %>
+  <p><a href="/transferencias">Gerenciar transferências</a></p>
+</section>

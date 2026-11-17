@@ -4,6 +4,8 @@ require_relative "web/auth_controller"
 require_relative "web/main_controllers"
 require_relative "web/operations_controllers"
 require_relative "web/integrations_controller"
+require_relative "web/fulfillment_controllers"
+require_relative "web/maintenance_controllers"
 require_relative "api/v1"
 
 module Locentra
@@ -107,6 +109,57 @@ module Locentra
           r.post "/anexos", attachments, :create
           r.get "/anexos/:id", attachments, :show, auth: :staff_or_portal
           r.post "/anexos/:id/remover", attachments, :remove
+
+          draw_operations(r, deps, w)
+        end
+
+        # Retirada, devolução, inspeção, avarias, manutenção e transferências.
+        def draw_operations(router, deps, web)
+          r = router
+          w = web
+          board = w::OperationsController.new(deps)
+          r.get "/operacao", board, :show
+          r.post "/operacao/alertas/:id/resolver", board, :resolve_alert
+
+          pickups = w::PickupsController.new(deps)
+          r.post "/operacao/reservas/:id/retirada", pickups, :start
+          r.get "/operacao/retiradas/:id", pickups, :show
+          r.post "/operacao/retiradas/:id/conferir", pickups, :check
+          r.post "/operacao/retiradas/:id/entregar", pickups, :deliver
+          r.post "/operacao/retiradas/:id/cancelar", pickups, :cancel
+
+          returns = w::ReturnsController.new(deps)
+          r.get "/operacao/reservas/:id/devolucao", returns, :new
+          r.post "/operacao/reservas/:id/devolucao", returns, :create
+          r.get "/operacao/devolucoes/:id", returns, :show
+
+          inspections = w::InspectionsController.new(deps)
+          r.get "/operacao/inspecoes", inspections, :index
+          r.post "/operacao/inspecoes/:id/aprovar", inspections, :approve
+          r.post "/operacao/inspecoes/:id/reprovar", inspections, :reject
+
+          damages = w::DamageReportsController.new(deps)
+          r.get "/operacao/avarias", damages, :index
+          r.post "/operacao/avarias", damages, :create
+          r.get "/operacao/avarias/:id", damages, :show
+          r.post "/operacao/avarias/:id", damages, :update
+          r.post "/operacao/avarias/:id/aprovar", damages, :approve
+          r.post "/operacao/avarias/:id/descartar", damages, :dismiss
+
+          maintenance = w::MaintenanceController.new(deps)
+          r.get "/manutencao", maintenance, :index
+          r.post "/manutencao", maintenance, :create
+          r.get "/manutencao/:id", maintenance, :show
+          r.post "/manutencao/:id/iniciar", maintenance, :start
+          r.post "/manutencao/:id/concluir", maintenance, :complete
+          r.post "/manutencao/:id/cancelar", maintenance, :cancel
+
+          transfers = w::TransfersController.new(deps)
+          r.get "/transferencias", transfers, :index
+          r.post "/transferencias", transfers, :create
+          r.post "/transferencias/:id/saida", transfers, :dispatch_transfer
+          r.post "/transferencias/:id/recebimento", transfers, :receive
+          r.post "/transferencias/:id/cancelar", transfers, :cancel
         end
 
         def draw_api(router, api)

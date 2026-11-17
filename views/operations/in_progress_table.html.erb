@@ -1,0 +1,17 @@
+<% if @rows.empty? %>
+  <p class="empty"><%= @empty %></p>
+<% else %>
+  <table class="table">
+    <thead><tr><th scope="col">Reserva</th><th scope="col">Cliente</th><th scope="col">Devolução prevista</th><th scope="col">Ação</th></tr></thead>
+    <tbody>
+      <% @rows.each do |row| %>
+        <tr>
+          <td><a href="/reservas/<%= row["id"] %>"><%= row["code"] %></a></td>
+          <td><%= row["customer_name"] %></td>
+          <td><%= datetime(row["ends_at"]) %><% if row["overdue_since"] %> <%= badge("em atraso", "danger") %><% end %></td>
+          <td><% if can?("fulfillment.write") %><a href="/operacao/reservas/<%= row["id"] %>/devolucao">Registrar devolução</a><% end %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

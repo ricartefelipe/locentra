@@ -1,0 +1,67 @@
+<% d = @data[:report] %>
+<% l = @data[:labels] %>
+<% severities = Locentra::Domain::Maintenance::SEVERITIES %>
+<header class="page-header">
+  <h1><%= d.kind_label %> <%= d.code %> <%= status_badge(d.status, d.status_label) %></h1>
+  <p class="muted"><%= l["product_name"] %> <%= l["tag"] || "#{d.quantity} un." %> · reserva <a href="/reservas/<%= d.reservation_id %>"><%= l["reservation_code"] %></a>
+    · devolução de <a href="/operacao/devolucoes/<%= l["return_id"] %>"><%= datetime(l["returned_at"]) %></a></p>
+</header>
+<%= partial("shared/errors") %>
+<div class="grid-2">
+  <section class="panel" aria-labelledby="h-dados">
+    <h2 id="h-dados">Registro</h2>
+    <dl class="details">
+      <dt>Descrição</dt><dd class="pre"><%= d.description %></dd>
+      <dt>Severidade</dt><dd><%= d.severity_label %></dd>
+      <dt>Quantidade</dt><dd><%= d.quantity %></dd>
+      <dt>Custo estimado</dt><dd><%= money(d.estimated_cost) %></dd>
+      <% if d.kind == "missing" %><dt>Custo de reposição</dt><dd><%= money(l["replacement_cost_cents"]) %> por unidade</dd><% end %>
+      <% if d.charged %><dt>Cobrança aprovada</dt><dd><strong><%= money(d.charged) %></strong></dd><% end %>
+      <% unless d.open? %><dt>Decisão</dt><dd><%= l["decided_by_name"] || "—" %> em <%= datetime(l["decided_at"]) %><% if d.decision_notes %>: <%= d.decision_notes %><% end %></dd><% end %>
+    </dl>
+    <% if d.open? && can?("inspections.write") %>
+      <details>
+        <summary>Revisar registro</summary>
+        <form method="post" action="/operacao/avarias/<%= d.id %>" class="stack">
+          <%= csrf_field %>
+          <label for="descricao">Descrição</label>
+          <textarea id="descricao" name="descricao" rows="3" required minlength="3" maxlength="2000"<%= invalid(@errors, "descricao") %>><%= d.description %></textarea><%= field_errors(@errors, "descricao") %>
+          <label for="severidade">Severidade</label>
+          <select id="severidade" name="severidade"><% severities.each do |k, label| %><option value="<%= k %>"<%= selected(d.severity, k) %>><%= label %></option><% end %></select>
+          <label for="custo">Custo estimado (R$)</label>
+          <input id="custo" name="custo" inputmode="decimal" value="<%= d.estimated_cost.to_decimal_string.tr(".", ",") %>"<%= invalid(@errors, "custo_estimado") %>><%= field_errors(@errors, "custo_estimado") %>
+          <button type="submit">Salvar revisão</button>
+        </form>
+      </details>
+    <% end %>
+  </section>
+  <section class="panel" aria-labelledby="h-cobranca">
+    <h2 id="h-cobranca">Cobrança</h2>
+    <% if !d.open? %>
+      <p class="muted">Registro encerrado.</p>
+    <% elsif can?("damage_charges.approve") %>
+      <% if @data[:attachments].empty? %>
+        <div class="notice notice-danger" role="status">Anexe ao menos uma evidência (foto ou documento) antes de aprovar a cobrança.</div>
+      <% end %>
+      <form method="post" action="/operacao/avarias/<%= d.id %>/aprovar" class="stack">
+        <%= csrf_field %>
+        <label for="valor">Valor da cobrança (R$)</label>
+        <input id="valor" name="valor" inputmode="decimal" placeholder="<%= d.estimated_cost.to_decimal_string.tr(".", ",") %>"<%= invalid(@errors, "valor") %>><%= field_errors(@errors, "valor") %>
+        <p class="muted">Em branco, usa o custo estimado. A cobrança é lançada como ajuste da reserva.</p>
+        <label for="obs-aprovacao">Observações</label><input id="obs-aprovacao" name="observacoes" maxlength="1000">
+        <button type="submit" class="primary">Aprovar cobrança</button>
+      </form>
+      <details>
+        <summary>Descartar sem cobrança</summary>
+        <form method="post" action="/operacao/avarias/<%= d.id %>/descartar" class="stack">
+          <%= csrf_field %>
+          <label for="motivo">Motivo</label><input id="motivo" name="motivo" required maxlength="1000">
+          <button type="submit" class="danger">Descartar</button>
+        </form>
+      </details>
+    <% else %>
+      <p class="muted">A aprovação da cobrança exige a permissão de aprovar cobranças de avaria.</p>
+    <% end %>
+  </section>
+</div>
+<%= partial("shared/attachments", attachments: @data[:attachments], owner_type: "damage_report", owner_id: d.id, can_upload: d.open? && can?("inspections.write")) %>
