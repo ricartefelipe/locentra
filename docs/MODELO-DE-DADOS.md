@@ -20,6 +20,8 @@ erDiagram
   plans ||--o{ subscriptions : define
   organizations ||--o{ customers : atende
   customers ||--o{ customer_contacts : tem
+  customers ||--o{ portal_accesses : "acesso ao portal"
+  customer_contacts ||--o{ portal_invitations : convida
   organizations ||--o{ products : cataloga
   products ||--o{ kit_components : compõe
   products ||--o{ assets : "unidades individuais"
@@ -77,6 +79,7 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 | `rate_limits` | não | bucket:text!, window_start:timestamptz!, hits:integer! |
 | `organizations` | sim/sim | id:uuid!, name:text!, slug:text!, legal_document:text, timezone:text!, status:text!, settings:jsonb!, created_at:timestamptz!, updated_at:timestamptz! |
 | `queue_stats` | não | queue:text!, status:text!, size:integer!, oldest_age_seconds:numeric!, updated_at:timestamptz! |
+| `job_outcome_totals` | não | queue:text!, kind:text!, outcome:text!, total:bigint!, updated_at:timestamptz! |
 | `schema_migrations` | não | version:text!, name:text!, checksum:text!, applied_at:timestamptz! |
 
 ### Organização, acesso e assinatura
@@ -89,7 +92,8 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 | `subscriptions` | sim/sim | id:uuid!, organization_id:uuid!, plan_id:text!, status:text!, started_at:timestamptz!, trial_ends_at:timestamptz, current_period_start:date!, current_period_end:date!, implementation_fee_cents:bigint!, extra_features:array!, cancelled_at:timestamptz, created_at:timestamptz!, updated_at:timestamptz! |
 | `organization_counters` | sim/sim | organization_id:uuid!, name:text!, value:bigint! |
 | `api_credentials` | sim/sim | id:uuid!, organization_id:uuid!, name:text!, kind:text!, token_digest:text!, token_hint:text!, scopes:array!, created_by:uuid, created_at:timestamptz!, expires_at:timestamptz, revoked_at:timestamptz, last_used_at:timestamptz |
-| `portal_accesses` | sim/sim | id:uuid!, organization_id:uuid!, user_id:uuid!, customer_id:uuid!, status:text!, created_by:uuid, created_at:timestamptz!, revoked_at:timestamptz |
+| `portal_invitations` | sim/sim | id:uuid!, organization_id:uuid!, customer_id:uuid!, contact_id:uuid!, email:text!, token_digest:text!, invited_by:uuid!, expires_at:timestamptz!, accepted_at:timestamptz, accepted_user_id:uuid, revoked_at:timestamptz, revoked_by:uuid, created_at:timestamptz! |
+| `portal_accesses` | sim/sim | id:uuid!, organization_id:uuid!, user_id:uuid!, customer_id:uuid!, status:text!, created_by:uuid, created_at:timestamptz!, revoked_at:timestamptz, contact_id:uuid, invitation_id:uuid, revoked_by:uuid, updated_at:timestamptz |
 | `audit_events` | sim/sim | id:uuid!, organization_id:uuid!, actor_type:text!, actor_id:uuid, action:text!, resource_type:text!, resource_id:uuid, request_id:text, ip:text, details:jsonb!, occurred_at:timestamptz! |
 | `idempotency_keys` | sim/sim | id:uuid!, organization_id:uuid!, scope:text!, key:text!, fingerprint:text!, response_status:integer!, response_body:jsonb!, created_at:timestamptz!, expires_at:timestamptz! |
 
