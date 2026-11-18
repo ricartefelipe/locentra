@@ -133,6 +133,17 @@ class ApiTest < HttpTest
     assert_equal 401, last_response.status
   end
 
+  def test_credentials_of_a_suspended_organization_stop_working
+    owner_query("UPDATE organizations SET status = 'suspended' WHERE id = $1", [@org[:organization_id]], tenant: @org[:organization_id])
+    get "/api/v1/customers", {}, auth
+
+    assert_equal 401, last_response.status
+    owner_query("UPDATE organizations SET status = 'active' WHERE id = $1", [@org[:organization_id]], tenant: @org[:organization_id])
+    get "/api/v1/customers", {}, auth
+
+    assert_equal 200, last_response.status
+  end
+
   def test_malformed_json_and_depth_limit
     post "/api/v1/customers", "{invalido", auth
 

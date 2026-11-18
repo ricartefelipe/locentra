@@ -116,12 +116,13 @@ module Locentra
           SQL
         end
 
+        # Como no vínculo de usuários, a organização precisa estar ativa (não suspensa nem encerrada).
         def active_credential(tx, credential_id, now)
           return nil unless credential_id
 
           tx.query_one(<<~SQL, [credential_id, now])
-            SELECT id, organization_id, kind, scopes FROM api_credentials
-             WHERE id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $2)
+            SELECT c.id, c.organization_id, c.kind, c.scopes FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
+             WHERE c.id = $1 AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > $2) AND o.status = 'active'
           SQL
         end
 

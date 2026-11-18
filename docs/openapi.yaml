@@ -317,7 +317,8 @@ components:
       scheme: bearer
       description: >-
         Token `lcn_<organização>_<segredo>` criado em Usuários e permissões, com escopos e validade. Somente
-        credenciais do tipo `api` são aceitas; credenciais da CLI operacional (tipo `cli`) recebem 401.
+        credenciais do tipo `api` de organização ativa são aceitas; credenciais da CLI operacional (tipo `cli`)
+        e de organização suspensa ou encerrada recebem 401.
   parameters:
     Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }

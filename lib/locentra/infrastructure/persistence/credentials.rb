@@ -11,10 +11,12 @@ module Locentra
           SQL
         end
 
+        # Credencial válida de organização ativa (suspensa ou encerrada não autentica).
         def find_active(tx, digest, now)
           tx.query_one(<<~SQL, [tx.tenant_id!, digest, now])
-            SELECT id, kind, scopes FROM api_credentials
-             WHERE organization_id = $1 AND token_digest = $2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $3)
+            SELECT c.id, c.kind, c.scopes FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
+             WHERE c.organization_id = $1 AND c.token_digest = $2 AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > $3)
+               AND o.status = 'active'
           SQL
         end
 
