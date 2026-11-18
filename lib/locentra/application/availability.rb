@@ -175,31 +175,37 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, branch_id:, period:, product_ids: nil)
-          @uow.run(actor, "availability.read") do |tx, _current|
-            branch = Domain::Identifier.parse(branch_id, "filial")
-            ids = product_ids&.map { |id| Domain::Identifier.parse(id, "produto") } || @repository.active_product_ids(tx)
-            products = @allocator.products_for(tx, ids)
-            now = @clock.now
-            physical = products.values.reject { |p| p[:product].kit? }.to_h do |p|
-              [p[:product].id, units(tx, p[:product], branch, period, now)]
-            end
-            ids.filter_map do |id|
-              entry = products[id]
-              next unless entry
+        # Com `tx:`, compõe a consulta na transação do chamador, que já verificou a permissão do ator
+        # revalidado (por exemplo, a consulta do portal do cliente).
+        def call(actor, branch_id:, period:, product_ids: nil, tx: nil)
+          return check(tx, branch_id, period, product_ids) if tx
 
-              product = entry[:product]
-              result = if product.kit?
-                         kit_units(entry[:spec], physical)
-                       else
-                         physical.fetch(id)
-                       end
-              { "product" => product, "available" => result[:available], "total" => result[:total] }
-            end
-          end
+          @uow.run(actor, "availability.read") { |t, _current| check(t, branch_id, period, product_ids) }
         end
 
         private
+
+        def check(tx, branch_id, period, product_ids)
+          branch = Domain::Identifier.parse(branch_id, "filial")
+          ids = product_ids&.map { |id| Domain::Identifier.parse(id, "produto") } || @repository.active_product_ids(tx)
+          products = @allocator.products_for(tx, ids)
+          now = @clock.now
+          physical = products.values.reject { |p| p[:product].kit? }.to_h do |p|
+            [p[:product].id, units(tx, p[:product], branch, period, now)]
+          end
+          ids.filter_map do |id|
+            entry = products[id]
+            next unless entry
+
+            product = entry[:product]
+            result = if product.kit?
+                       kit_units(entry[:spec], physical)
+                     else
+                       physical.fetch(id)
+                     end
+            { "product" => product, "available" => result[:available], "total" => result[:total] }
+          end
+        end
 
         def units(tx, product, branch_id, period, now)
           window = product.blocked_period(period)
