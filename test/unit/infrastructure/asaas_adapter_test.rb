@@ -125,6 +125,25 @@ class AsaasAdapterTest < UnitTest
     assert_equal %w[pay_9 REFUND_REQUESTED], [refund.reference, refund.status]
   end
 
+  def test_out_of_range_amounts_are_rejected_before_expansion
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    huge = [%({"id":"e","event":"PAYMENT_RECEIVED","payment":{"id":"p","value":1e99999999}}),
+            %({"id":"e","event":"PAYMENT_RECEIVED","payment":{"id":"p","value":"1E999999999"}}),
+            %({"id":"e","event":"PAYMENT_RECEIVED","payment":{"id":"p","value":#{"9" * 40}}}),
+            %({"id":"e","event":"PAYMENT_RECEIVED","payment":{"id":"p","value":"Infinity"}})]
+    huge.each do |body|
+      error = assert_raises(Domain::ValidationError, body[0, 80]) { I::AsaasFormat.parse_event(body) }
+
+      assert_match(/fora do limite/, error.message)
+    end
+
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 1.0, "sem expansão do expoente"
+    assert_equal Domain::Money::MAX_CENTS, I::AsaasFormat.cents("9999999999.99").cents
+    assert_equal 0, I::AsaasFormat.cents(0).cents
+    assert_raises(Domain::ValidationError) { I::AsaasFormat.cents("1e-99999999") }
+    assert_raises(Domain::ValidationError) { I::AsaasFormat.cents("10000000000") }
+  end
+
   def test_http_errors_are_translated
     cases = {
       { status: 401, body: '{"errors":[{"code":"invalid_access_token"}]}' } => FN::ProviderRejected,

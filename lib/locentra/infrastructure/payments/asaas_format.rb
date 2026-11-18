@@ -21,6 +21,11 @@ module Locentra
         }.freeze
         CONFIRM_EVENTS = %w[PAYMENT_CONFIRMED PAYMENT_RECEIVED].freeze
         CANCEL_EVENTS = %w[PAYMENT_DELETED].freeze
+        # Teto de Domain::Money (R$ 9.999.999.999,99: 10 dígitos inteiros, 2 decimais), verificado antes
+        # de qualquer conversão: expoentes enormes ("1e99999999") não chegam a ser expandidos.
+        MAX_EXPONENT = 10
+        MAX_DIGITS = 12
+        MAX_INTEGER = 10**MAX_EXPONENT
 
         module_function
 
@@ -33,10 +38,12 @@ module Locentra
         # "150.5" → 15050. Mais de duas casas decimais é recusado.
         def cents(value)
           decimal = case value
-                    when Integer, BigDecimal then BigDecimal(value)
+                    when Integer then value.abs < MAX_INTEGER ? BigDecimal(value) : out_of_range!
+                    when BigDecimal then value
                     when String then BigDecimal(value.strip)
                     else raise Domain::ValidationError.field("valor", "valor ausente ou inválido no provedor")
                     end
+          out_of_range! unless within_limits?(decimal)
           scaled = decimal * 100
           raise Domain::ValidationError.field("valor", "valor com fração de centavo") unless scaled.frac.zero?
 
@@ -44,6 +51,12 @@ module Locentra
         rescue ArgumentError
           raise Domain::ValidationError.field("valor", "valor inválido no provedor")
         end
+
+        def within_limits?(decimal)
+          decimal.finite? && (decimal.zero? || (decimal.exponent <= MAX_EXPONENT && decimal.n_significant_digits <= MAX_DIGITS))
+        end
+
+        def out_of_range! = raise(Domain::ValidationError.field("valor", "valor fora do limite permitido"))
 
         # Número decimal exato para o corpo JSON ("150.50").
         def decimal(money) = JSON::Fragment.new(money.to_decimal_string)
