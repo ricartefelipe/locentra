@@ -62,6 +62,19 @@ module Locentra
           SQL
         end
 
+        # Cauções de um cliente com o saldo derivado dos movimentos (extrato do portal).
+        def for_customer(tx, customer_id, limit: 100)
+          tx.query(<<~SQL, [tx.tenant_id!, customer_id, limit]).map { |row| { deposit: self.class.map(row), ledger: self.class.ledger(row), reservation_code: row["reservation_code"] } }
+            SELECT #{COLUMNS}, r.code AS reservation_code, #{SUMS}
+              FROM deposits d
+              JOIN reservations r ON r.organization_id = d.organization_id AND r.id = d.reservation_id
+              LEFT JOIN deposit_entries e ON e.organization_id = d.organization_id AND e.deposit_id = d.id
+             WHERE d.organization_id = $1 AND d.customer_id = $2
+             GROUP BY d.id, r.code
+             ORDER BY d.created_at DESC LIMIT $3
+          SQL
+        end
+
         def self.map(row)
           F::Deposit.new(id: row["id"], organization_id: row["organization_id"], reservation_id: row["reservation_id"], customer_id: row["customer_id"],
                          kind: row["kind"], expected: Domain::Money.new(row["expected_cents"]), notes: row["notes"])
