@@ -120,17 +120,71 @@ class CliIdentityTest < CliTest
 
     assert_equal [2, "configuration"], [owner.status, owner.error["code"]]
     assert_includes owner.error["message"], "credencial de migrations"
-    password = "senha-que-nao-pode-vazar"
-    down = cli("whoami", "--json", system: nil, env: { "DATABASE_URL" => "postgres://locentra_app:#{password}@127.0.0.1:1/locentra" })
+    down = cli("whoami", "--json", system: nil, env: { "DATABASE_URL" => "postgres://locentra_app:senha-local@127.0.0.1:1/locentra" })
 
     assert_equal [2, "connection"], [down.status, down.error["code"]]
     assert_includes down.error["message"], "não foi possível conectar ao banco"
-    refute_includes down.text, password
     unset = cli("whoami", system: nil, env: { "DATABASE_URL" => "" })
 
     assert_equal 2, unset.status
     assert_includes unset.err, "DATABASE_URL obrigatório"
     [owner, down, unset].each { |outcome| assert_no_secret(outcome) }
+  end
+
+  # O libpq repete a URL inteira quando não consegue interpretá-la: a mensagem chega à saída com a
+  # senha mascarada, como erro de configuração (2), e não como erro interno.
+  def test_malformed_database_url_is_a_configuration_error_with_the_password_masked
+    password = "senha-que-nao-pode-vazar"
+    url = "postgress://locentra_app:#{password}@127.0.0.1:1/locentra"
+    json = cli("whoami", "--json", system: nil, env: { "DATABASE_URL" => url, "LOCENTRA_CLI_LOG_LEVEL" => "info" })
+
+    assert_equal [2, "configuration", 2], [json.status, *json.error.values_at("code", "exit_code")]
+    assert_includes json.error["message"], "DATABASE_URL"
+    assert_includes json.error["message"], "postgress://locentra_app:[omitido]@127.0.0.1:1/locentra", "a mensagem do libpq contém a URL"
+    human = cli("whoami", system: nil, env: { "DATABASE_URL" => url })
+
+    assert_equal 2, human.status
+    assert_includes human.err, "postgress://locentra_app:[omitido]@127.0.0.1:1/locentra"
+    [json, human].each do |outcome|
+      refute_includes outcome.text, password
+      refute_includes outcome.text, "cli.error", "não é registrado como erro interno"
+    end
+  end
+
+  # O papel é conferido no banco, com ou sem MIGRATION_DATABASE_URL no ambiente: proprietário do
+  # schema (migrations) e papel do worker (políticas para todas as organizações) são recusados.
+  def test_database_role_is_verified_even_without_migration_database_url
+    without_migration = [nil, ""]
+    { "proprietário do schema" => TestDatabase.owner_url, "todas as organizações" => TestDatabase.worker_url }.each do |reason, url|
+      without_migration.each do |migration|
+        outcome = cli("whoami", "--json", system: nil, env: { "DATABASE_URL" => url, "MIGRATION_DATABASE_URL" => migration })
+
+        assert_equal [2, "configuration"], [outcome.status, outcome.error["code"]], reason
+        assert_includes outcome.error["message"], reason
+        assert_includes outcome.error["message"], "exige o papel da aplicação"
+        assert_empty outcome.out
+      end
+    end
+
+    assert_nil owner_query("SELECT last_used_at FROM api_credentials WHERE id = $1", [@credential["id"]]).first["last_used_at"],
+               "a recusa ocorre antes da autenticação"
+  end
+
+  # Organização suspensa ou encerrada: a credencial deixa de autenticar e um ator já autenticado é
+  # recusado pela UnitOfWork, como acontece com os vínculos de usuários.
+  def test_credentials_of_inactive_organizations_are_refused
+    actor = uc(:authenticate_credential).call(@token, kind: "cli")
+    %w[suspended closed].each do |status|
+      owner_query("UPDATE organizations SET status = $2 WHERE id = $1", [@org[:organization_id], status])
+      outcome = cli("whoami", "--json")
+
+      assert_equal [77, "credential_rejected"], [outcome.status, outcome.error["code"]], status
+      assert_raises(D::AccessDenied, status) { uc(:whoami).call(actor) }
+      assert_raises(D::AccessDenied, status) { CLI::Commands.new(system: @system, actor: actor).run(CLI::Parser.new.parse(%w[jobs failures])) }
+    end
+    owner_query("UPDATE organizations SET status = 'active' WHERE id = $1", [@org[:organization_id]])
+
+    assert_equal 0, cli("whoami").status
   end
 
   def test_usage_errors_exit_64_without_echoing_values

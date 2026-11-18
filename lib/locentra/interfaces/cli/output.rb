@@ -1,10 +1,16 @@
 # frozen_string_literal: true
 
+require "json"
+
 module Locentra
   module Interfaces
     module CLI
       # Filtro aplicado a toda a saída da CLI (stdout, stderr e log): remove a credencial em uso,
       # qualquer token de credencial e senhas em URLs ou parâmetros de conexão com o banco.
+      #
+      # `scrub` trata texto livre. Para JSON, `scrub_data` redige cada chave e cada valor antes da
+      # serialização: aplicar as expressões ao documento já serializado poderia consumir aspas e
+      # vírgulas da sintaxe e produzir JSON inválido.
       module Redactor
         TOKEN = /lcn_[0-9a-f]{32}_[A-Za-z0-9_-]{43}/
         URL_PASSWORD = %r{(\b[a-z][a-z0-9+.-]*://[^/\s:@]*):[^@\s/]*@}i
@@ -19,10 +25,19 @@ module Locentra
           secrets.each { |secret| clean = clean.gsub(secret, MASK) if secret.length >= MIN_SECRET_LENGTH }
           clean.gsub(TOKEN, "lcn_#{MASK}").gsub(URL_PASSWORD, "\\1:#{MASK}@").gsub(CONNINFO_PASSWORD, "password=#{MASK}")
         end
+
+        def scrub_data(value, secrets = [])
+          case value
+          when Hash then value.to_h { |key, item| [scrub_data(key, secrets), scrub_data(item, secrets)] }
+          when Array then value.map { |item| scrub_data(item, secrets) }
+          when String then scrub(value, secrets)
+          else value
+          end
+        end
       end
 
-      # Escrita com redação. Os segredos conhecidos (a credencial lida) são registrados assim que
-      # obtidos, antes de qualquer saída que possa repeti-los.
+      # Escrita com redação. Os segredos conhecidos (a credencial lida e as senhas das URLs de banco)
+      # são registrados assim que obtidos, antes de qualquer saída que possa repeti-los.
       class SafeOutput
         def initialize(io)
           @io = io
@@ -33,11 +48,35 @@ module Locentra
           @secrets << secret.to_s unless secret.to_s.empty?
         end
 
+        # Texto humano, linha a linha.
         def puts(text = "")
           @io.puts(Redactor.scrub(text, @secrets))
         end
 
+        # Documento JSON redigido valor a valor e só então serializado (indentado ou em uma linha).
+        def json(data, pretty: true)
+          clean = Redactor.scrub_data(data, @secrets)
+          @io.puts(pretty ? JSON.pretty_generate(clean) : JSON.generate(clean))
+        end
+
+        # Destino do log estruturado: cada linha recebida é um objeto JSON e é reescrita com `json`.
+        def log_io = LogLines.new(self)
+
         def flush = @io.flush
+      end
+
+      # Adaptador de IO para o StructuredLogger: o logger serializa cada registro em JSON; aqui o
+      # registro é lido de volta e redigido por valor, para que o log continue com um JSON por linha.
+      class LogLines
+        def initialize(output)
+          @output = output
+        end
+
+        def puts(line)
+          @output.json(JSON.parse(line), pretty: false)
+        rescue JSON::ParserError
+          @output.puts(line)
+        end
       end
 
       # Formatação da saída humana em português. Valores vindos do banco passam por `clean`:

@@ -54,6 +54,17 @@ class CliJobsTest < CliTest
     end
   end
 
+  # Erro terminado em `password=...` ou com credenciais de cabeçalho: JSON válido e sem os valores.
+  def test_failures_json_stays_valid_and_hides_header_credentials
+    dead_job(error: "401 Authorization: Bearer sk_live_ABCDEF123 access_token=$aact_prod_XYZ client_secret=s3cr3t password=x")
+    outcome = cli("jobs", "failures", "--json")
+
+    assert_equal 0, outcome.status, outcome.err
+    assert_equal "IOError: 401 Authorization: [omitido] access_token=[omitido] client_secret=[omitido] password=[omitido]",
+                 outcome.json["data"].first["last_error"]
+    %w[sk_live_ABCDEF123 aact_prod_XYZ s3cr3t].each { |secret| refute_includes outcome.text, secret }
+  end
+
   def test_retry_requeues_the_dead_job_and_is_audited_as_cli
     id = dead_job
     human = cli("jobs", "retry", id)

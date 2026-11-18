@@ -20,15 +20,35 @@ module Locentra
       #   `--token-file` e autenticada por AuthenticateCredential. A UnitOfWork revalida credencial,
       #   tipo e escopos em cada operação; a auditoria registra actor_type `cli` e o request id da
       #   execução. Não há atalho: cada comando chama os mesmos casos de uso da web e da API.
-      # - Banco: DATABASE_URL com o papel da aplicação (RLS e grants da aplicação). A credencial de
-      #   migrations é recusada; comandos de banco continuam em bin/locentra-admin.
+      # - Banco: DATABASE_URL com o papel da aplicação (RLS e grants da aplicação). Na montagem, o
+      #   papel conectado é conferido no próprio banco: superusuário, BYPASSRLS, proprietário do
+      #   schema (credencial de migrations) e papel com políticas para todas as organizações (worker)
+      #   são recusados. Comandos de banco continuam em bin/locentra-admin.
       # - Saída: texto em português ou JSON estável (`--json`) no stdout; erros e log no stderr.
-      #   Toda saída passa pelo Redactor (token, senhas de banco). Códigos em ExitCodes.
+      #   Toda saída passa pelo Redactor (token, senhas de banco); no JSON, valor a valor. Códigos
+      #   em ExitCodes.
       class Operational
         E = ExitCodes
         DATABASE = Infrastructure::Database
         POOL_SIZE = 2
         LOG_LEVEL_ENV = "LOCENTRA_CLI_LOG_LEVEL"
+        DATABASE_URLS = %w[DATABASE_URL MIGRATION_DATABASE_URL WORKER_DATABASE_URL].freeze
+        URL_PASSWORD = %r{\A\s*[a-z][a-z0-9+.-]*://[^/:@\s]*:([^@\s]+)@}i
+        CONNINFO_PASSWORD = /\bpassword\s*=\s*(?:'([^']*)'|(\S+))/i
+
+        # Atributos do papel conectado que o tornam inadequado para a CLI de negócio.
+        ROLE_CHECK = <<~SQL
+          SELECT r.rolsuper OR r.rolbypassrls AS bypasses_rls,
+                 EXISTS (SELECT 1 FROM pg_tables t WHERE t.schemaname = current_schema() AND pg_has_role(t.tableowner, 'USAGE')) AS owns_schema,
+                 EXISTS (SELECT 1 FROM pg_policies p
+                          WHERE p.schemaname = current_schema() AND current_user = ANY (p.roles) AND p.qual = 'true') AS all_organizations
+            FROM pg_roles r WHERE r.rolname = current_user
+        SQL
+        ROLE_REFUSALS = {
+          "bypasses_rls" => "superusuário ou BYPASSRLS",
+          "owns_schema" => "proprietário do schema, credencial de migrations",
+          "all_organizations" => "políticas com acesso a todas as organizações, papel do worker"
+        }.freeze
 
         FAILURES = [
           [UsageError, E::USAGE, "usage"], [OptionParser::ParseError, E::USAGE, "usage"],
@@ -50,7 +70,8 @@ module Locentra
           @system = system
           @request_id = SecureRandom.uuid
           protect(@env[TokenSource::ENV_NAME])
-          @logger = Infrastructure::Observability::StructuredLogger.new(io: @err, level: @env.fetch(LOG_LEVEL_ENV, "warn"),
+          DATABASE_URLS.each { |name| database_passwords(@env[name]).each { |password| protect(password) } }
+          @logger = Infrastructure::Observability::StructuredLogger.new(io: @err.log_io, level: @env.fetch(LOG_LEVEL_ENV, "warn"),
                                                                         base: { "service" => "locentra-cli", "request_id" => @request_id })
         end
 
@@ -71,6 +92,16 @@ module Locentra
 
         def protect(secret)
           [@out, @err].each { |io| io.protect(secret.to_s.strip) }
+        end
+
+        # Senhas das URLs de banco do ambiente (formato URL, literal e decodificada, ou chave=valor),
+        # mascaradas literalmente mesmo quando uma mensagem as repete fora do formato original.
+        def database_passwords(url)
+          text = url.to_s
+          found = [text[URL_PASSWORD, 1], *text.scan(CONNINFO_PASSWORD).flatten].compact
+          found + found.map { |password| URI.decode_www_form_component(password) }
+        rescue ArgumentError
+          found
         end
 
         def help(parser, invocation)
@@ -99,13 +130,35 @@ module Locentra
           system&.shutdown
         end
 
+        # Monta o System e abre a primeira conexão já na montagem, para que URL inválida, banco
+        # inacessível e papel inadequado sejam erros de configuração (2) antes de qualquer comando.
         def boot
           refuse_migration_credential!
-          System.boot(@env, {}, logger: @logger, pool_name: "cli", pool_size: POOL_SIZE)
+          system = System.boot(@env, {}, logger: @logger, pool_name: "cli", pool_size: POOL_SIZE)
+          verify_database_role!(system)
+          system
+        rescue StandardError
+          system&.shutdown
+          raise
         end
 
-        # A CLI de negócio usa o papel da aplicação: a credencial de migrations (proprietária do
-        # schema) é recusada mesmo que configurada por engano em DATABASE_URL.
+        # O papel é conferido no banco, independentemente de MIGRATION_DATABASE_URL estar configurada.
+        def verify_database_role!(system)
+          role = system.pool.with_connection { |conn| conn.exec(ROLE_CHECK)[0] }
+          refusal = ROLE_REFUSALS.find { |attribute, _| role.fetch(attribute) }
+          return unless refusal
+
+          raise ConfigError, "DATABASE_URL usa um papel inadequado (#{refusal.last}); a CLI operacional exige o papel da aplicação"
+        rescue PG::ConnectionBad
+          raise
+        rescue PG::Error => e
+          # O libpq recusa a URL antes de conectar (ex.: esquema inválido) e pode repeti-la na
+          # mensagem; a saída mascara a senha.
+          raise ConfigError, "DATABASE_URL inválida: #{e.message.lines.first.to_s.strip}"
+        end
+
+        # Verificação prévia, sem conexão: DATABASE_URL igual à credencial de migrations (ou com o
+        # mesmo usuário) é recusada antes de conectar.
         def refuse_migration_credential!
           app = @env["DATABASE_URL"].to_s
           migration = @env["MIGRATION_DATABASE_URL"].to_s
@@ -131,7 +184,7 @@ module Locentra
         end
 
         def emit(result, json)
-          return @out.puts(JSON.pretty_generate(result.data)) if json
+          return @out.json(result.data) if json
 
           result.lines.each { |line| @out.puts(line) }
         end
@@ -144,8 +197,8 @@ module Locentra
           message = message_for(error, status)
           details = details_for(error)
           if json
-            @err.puts(JSON.generate("error" => { "code" => code, "message" => message, "details" => details, "exit_code" => status,
-                                                 "request_id" => @request_id }))
+            @err.json({ "error" => { "code" => code, "message" => message, "details" => details, "exit_code" => status,
+                                     "request_id" => @request_id } }, pretty: false)
           else
             @err.puts("erro: #{message}")
             detail_lines(details).each { |line| @err.puts("  #{line}") }

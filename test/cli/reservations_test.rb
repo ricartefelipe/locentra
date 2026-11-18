@@ -118,6 +118,48 @@ class CliReservationsTest < CliTest
                  "o JSON preserva o valor, com escape"
   end
 
+  # Sem customers.read, a listagem segue a regra de `show` e da API v1: nem o nome do cliente nem a
+  # busca pelo nome; a busca continua valendo para o código da reserva.
+  def test_list_without_customers_read_hides_customer_names_and_name_search
+    secret = create_customer(@actor, name: "Cliente Sigilosa", document: "39053344705")
+    hidden = reserve(@actor, secret, @org[:branch], period("2026-03-25T08:00:00Z", "2026-03-25T10:00:00Z"), [line(@chairs, 1)])
+    limited = cli_credential(@actor, scopes: %w[reservations.read], name: "Sem clientes")["token"]
+    json = cli("reservations", "list", "--json", "--ordem=code", token: limited)
+
+    assert_equal 0, json.status, json.err
+    rows = json.json["data"]
+
+    assert_equal([@confirmed.code, @held.code, hidden.code], rows.map { |row| row["code"] })
+    assert(rows.none? { |row| row.key?("customer_name") }, "sem a chave customer_name")
+    assert_equal([@alice.id, @bruna.id, secret.id], rows.map { |row| row["customer_id"] })
+    human = cli("reservations", "list", "--ordem=code", token: limited)
+
+    assert_equal 0, human.status, human.err
+    ["Cliente Sigilosa", "Cliente Teste", "Outra Cliente"].each { |name| refute_includes human.out, name }
+    assert_match(/^Código\s+Situação\s+Cliente \(id\)\s+Retirada\s+Devolução\s+Total$/, human.out.lines.first.rstrip)
+    assert_match(/^#{hidden.code}\s+Bloqueio temporário\s+#{secret.id}\s/, human.out)
+    assert_includes human.out, "Nomes de clientes omitidos: a credencial não tem customers.read."
+    by_name = cli("reservations", "list", "--json", "--busca", "sigilosa", token: limited)
+
+    assert_equal [0, [], 0], [by_name.status, codes(by_name), by_name.json["pagination"]["total"]], "a busca não considera o nome do cliente"
+    assert_equal [hidden.code], codes(cli("reservations", "list", "--json", "--busca", hidden.code.downcase, token: limited))
+    full = cli("reservations", "list", "--json", "--busca", "sigilosa")
+
+    assert_equal [[hidden.code], "Cliente Sigilosa"], [codes(full), full.json["data"].first["customer_name"]], "com customers.read nada muda"
+  end
+
+  # Valores gravados com aparência de segredo são redigidos sem quebrar o JSON.
+  def test_show_json_stays_valid_when_notes_look_like_a_password
+    noted = reserve(@actor, @alice, @org[:branch], period("2026-03-26T08:00:00Z", "2026-03-26T10:00:00Z"), [line(@chairs, 1)],
+                    notes: "portao: password=1234")
+    outcome = cli("reservations", "show", noted.code, "--json")
+
+    assert_equal 0, outcome.status, outcome.err
+    assert_equal "portao: password=[omitido]", outcome.json["reservation"]["notes"]
+    assert_equal noted.code, outcome.json["reservation"]["code"]
+    assert_includes cli("reservations", "show", noted.code).out, "Observações: portao: password=[omitido]"
+  end
+
   def test_show_not_found_and_tenant_isolation
     missing = cli("reservations", "show", "R-999999", "--json")
 
