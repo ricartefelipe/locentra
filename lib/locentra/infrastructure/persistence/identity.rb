@@ -120,7 +120,7 @@ module Locentra
           return nil unless credential_id
 
           tx.query_one(<<~SQL, [credential_id, now])
-            SELECT id, organization_id, scopes FROM api_credentials
+            SELECT id, organization_id, kind, scopes FROM api_credentials
              WHERE id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $2)
           SQL
         end

@@ -80,6 +80,10 @@ module Locentra
 
       # Autentica um token Bearer. A organização embutida no token define o contexto de tenant da
       # consulta; o segredo é verificado pelo hash, e validade e revogação são checadas.
+      #
+      # `kind` restringe o tipo aceito pela interface: a API aceita somente credenciais `api` e a
+      # CLI operacional somente `cli`. Credencial de outro tipo é tratada como inválida e não tem o
+      # último uso atualizado.
       class AuthenticateCredential
         def initialize(uow:, credentials:, clock:)
           @uow = uow
@@ -87,7 +91,7 @@ module Locentra
           @clock = clock
         end
 
-        def call(token, request_id: nil, ip: nil)
+        def call(token, kind: nil, request_id: nil, ip: nil)
           match = TOKEN_PATTERN.match(token.to_s)
           return nil unless match
 
@@ -96,6 +100,7 @@ module Locentra
           now = @clock.now
           row = @uow.anonymous(tenant_id: org_id) do |tx|
             found = @credentials.find_active(tx, Identity::Tokens.digest(token), now)
+            found = nil if found && kind && found["kind"] != kind
             @credentials.touch(tx, found["id"], now) if found
             found
           end

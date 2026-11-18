@@ -29,6 +29,17 @@ class ApiTest < HttpTest
     assert json_body["error"]["request_id"]
   end
 
+  def test_cli_credential_is_refused_by_the_api
+    cli = uc(:create_credential).call(@actor, name: "Rotina", scopes: %w[customers.read], kind: "cli", expires_in_days: 1)
+    get "/api/v1/customers", {}, auth(cli["token"])
+
+    assert_equal 401, last_response.status
+    assert_nil owner_query("SELECT last_used_at FROM api_credentials WHERE id = $1", [cli["id"]], tenant: @org[:organization_id]).first["last_used_at"]
+    get "/api/v1/customers", {}, auth
+
+    assert_equal 200, last_response.status
+  end
+
   def test_availability_and_listing
     get "/api/v1/availability", { "branch_id" => @org[:branch].id, "starts_at" => "2026-03-10T08:00:00Z", "ends_at" => "2026-03-10T10:00:00Z" }, auth
 
