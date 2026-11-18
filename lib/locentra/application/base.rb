@@ -94,9 +94,10 @@ module Locentra
         end
       end
 
-      # Transação sem ator de tenant (cadastro inicial, autenticação, aceite de convite).
-      def anonymous(tenant_id: nil, user_id: nil, &)
-        counting_conflicts { @transactor.call(tenant_id: tenant_id, user_id: user_id, &) }
+      # Transação sem ator de tenant (cadastro inicial, autenticação, aceite de convite). `request_id`
+      # é o da requisição de origem, quando houver, para correlacionar as tarefas enfileiradas.
+      def anonymous(tenant_id: nil, user_id: nil, request_id: nil, &)
+        counting_conflicts { @transactor.call(tenant_id: tenant_id, user_id: user_id, request_id: request_id, &) }
       end
 
       private

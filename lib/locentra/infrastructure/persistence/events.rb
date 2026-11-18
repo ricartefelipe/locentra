@@ -13,7 +13,7 @@ module Locentra
 
         def publish(tx, event_type, aggregate_type, aggregate_id, payload = {})
           id = @ids.uuid
-          correlation = tx.actor&.request_id
+          correlation = tx.request_id
           tx.execute(<<~SQL, [id, tx.tenant_id!, event_type, aggregate_type, aggregate_id, payload, correlation, @clock.now])
             INSERT INTO outbox_events (id, organization_id, event_type, aggregate_type, aggregate_id, payload, correlation_id, occurred_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

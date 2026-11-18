@@ -39,8 +39,12 @@ class ObservabilityTest < HttpTest
   def entries = @log.string.lines.filter_map { |line| JSON.parse(line) if line.start_with?("{") }
   def jobs_for(event) = entries.select { |e| e["event"] == "job.finished" && e["correlation_id"] == event }
 
+  # Pelo papel do worker, que lê tarefas de qualquer organização e também as sem organização.
   def correlated_jobs(kind, request_id)
-    owner_query("SELECT count(*) AS n FROM jobs WHERE kind = $1 AND correlation_id = $2", [kind, request_id]).first["n"].to_i
+    conn = PG.connect(TestDatabase.worker_url)
+    conn.exec_params("SELECT count(*) AS n FROM jobs WHERE kind = $1 AND correlation_id = $2", [kind, request_id]).first["n"].to_i
+  ensure
+    conn&.close
   end
 
   def submit_reservation(request_id, quantity: 2)
@@ -110,6 +114,30 @@ class ObservabilityTest < HttpTest
     assert_equal(["payments.process_webhook"], jobs_for("req-webhook-0001").map { |e| e["kind"] })
   end
 
+  # Fluxos sem ator autenticado (recuperação de senha e cadastro) também levam o request_id da
+  # requisição até a tarefa de e-mail, o log da tarefa e a auditoria.
+  def test_request_id_reaches_email_jobs_of_flows_without_actor
+    post "/recuperar-senha", { "email" => "dona@alfa.test" }, "HTTP_X_REQUEST_ID" => "req-senha-0001"
+
+    assert_equal 200, last_response.status
+    assert_equal 1, correlated_jobs("email.password_reset", "req-senha-0001")
+    post "/cadastro", { "nome" => "Nova Dona", "email" => "nova@beta.test", "senha" => "senha-muito-segura-1", "organizacao" => "Locadora Beta",
+                        "plano" => "profissional" }, "HTTP_X_REQUEST_ID" => "req-cadastro-0001"
+
+    assert_equal 303, last_response.status
+    assert_equal 1, correlated_jobs("email.confirmation", "req-cadastro-0001")
+    owner = @system.uow.anonymous { |tx| @system.repos[:users].find_by_email(tx, "nova@beta.test") }
+    organization_id = uc(:list_memberships).call(owner["id"]).first["organization_id"]
+    created = owner_query("SELECT request_id FROM audit_events WHERE action = 'organization.created'", tenant: organization_id)
+
+    assert_equal(["req-cadastro-0001"], created.map { |row| row["request_id"] })
+    drain
+
+    assert_equal(["email.password_reset"], jobs_for("req-senha-0001").map { |e| e["kind"] })
+    assert_equal(["email.confirmation"], jobs_for("req-cadastro-0001").map { |e| e["kind"] })
+    assert(jobs_for("req-senha-0001").concat(jobs_for("req-cadastro-0001")).all? { |e| e["outcome"] == "succeeded" })
+  end
+
   # Tráfego com identificadores nos caminhos, rota inexistente, conflito tratado pelo formulário,
   # conciliação no processo web, uma entrega de webhook recusada (retentativa), a confirmação de uma
   # reserva já cancelada (transição inválida) e uma tarefa sem handler (falha permanente); a rotina de
@@ -152,7 +180,7 @@ class ObservabilityTest < HttpTest
     assert_operator value.call("locentra_http_request_duration_seconds_count", route: "/reservas"), :>=, 1
     assert_operator value.call("locentra_db_pool_wait_seconds_count", pool: "web"), :>=, 1
     assert_operator value.call("locentra_domain_conflicts_total", code: "unavailable"), :>=, 1
-    assert_in_delta 1, value.call("locentra_domain_conflicts_total", code: "invalid_transition").to_f, "transição recusada contada uma vez"
+    assert_in_delta 1, value.call("locentra_domain_conflicts_total", code: "invalid_transition").to_f, 0.001, "transição recusada contada uma vez"
     assert_operator value.call("locentra_external_calls_total", provider: "simulator", kind: "list_charges", outcome: "ok"), :>=, 1
     assert_operator value.call("locentra_jobs_queue_size", queue: "default", status: "pending"), :>=, 1, "entrega reagendada"
     assert_in_delta 1, value.call("locentra_jobs_queue_size", queue: "default", status: "dead")

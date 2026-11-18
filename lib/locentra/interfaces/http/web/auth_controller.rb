@@ -55,7 +55,7 @@ module Locentra
           def signup(ctx)
             f = ctx.form
             result = uc(:sign_up).call(name: f["nome"], email: f["email"], password: f["senha"], organization_name: f["organizacao"],
-                                       plan_id: f["plano"].to_s, timezone: "America/Sao_Paulo")
+                                       plan_id: f["plano"].to_s, timezone: "America/Sao_Paulo", request_id: ctx.request_id)
             token, = @system.services[:sessions].create(user_id: result[:user_id], organization_id: result[:organization_id], ip: ctx.ip,
                                                         user_agent: ctx.user_agent)
             redirect(ctx, "/", notice: "Organização criada. Enviamos um e-mail para confirmar seu endereço.") { |r| session_cookie(r, token) }
@@ -78,7 +78,7 @@ module Locentra
           end
 
           def forgot(ctx)
-            uc(:request_password_reset).call(email: ctx.form["email"], ip: ctx.ip)
+            uc(:request_password_reset).call(email: ctx.form["email"], ip: ctx.ip, request_id: ctx.request_id)
             render(ctx, "auth/forgot", title: "Recuperar senha", layout: "layouts/public", sent: true)
           end
 

@@ -135,8 +135,10 @@ não são contados, pois não encerram a operação.
 ## Correlação de logs
 
 O `request_id` (cabeçalho `X-Request-Id` com 8 a 64 caracteres `[A-Za-z0-9._-]`, ou um UUID gerado) é
-devolvido em `x-request-id`, gravado no log `http.request` e levado pelo ator até a transação. A partir
-dele:
+devolvido em `x-request-id`, gravado no log `http.request` e levado pelo ator até a transação. Em
+fluxos sem ator autenticado (cadastro e recuperação de senha), o controlador o informa ao caso de uso,
+que o passa a `UnitOfWork#anonymous(request_id:)`; a transação expõe `Transaction#request_id` (o
+informado ou o do ator), lido pela fila de e-mails e pela outbox. A partir dele:
 
 ```
 requisição ── ator.request_id ──► audit_events.request_id
@@ -158,6 +160,7 @@ Lacunas encontradas e corrigidas:
 | Nova consulta e reenvio de pagamento (`ResolveSubmission`, `SubmitPayment`) | sem correlação | correlação da operação de origem |
 | Nova consulta de estorno (`ProcessRefund`) | sem correlação | correlação da operação de origem |
 | Convites e e-mails genéricos (`JobNotifier`) | sem correlação | request_id do ator da transação |
+| E-mails de confirmação de cadastro e de recuperação de senha (fluxos sem ator) | sem correlação | request_id da requisição, informado à `UnitOfWork#anonymous`; a auditoria `organization.created` também o registra |
 | Aviso de atraso (`DetectOverdue`) | sem correlação | correlação da rotina que o gerou |
 | Chamadas ao provedor de pagamento e entrega de webhook | sem log | `external.call` com serviço, operação, desfecho, duração, organização e correlação |
 
@@ -199,7 +202,7 @@ esperando duas linhas `skipped`).
 |---|---|
 | `test/unit/infrastructure/metrics_test.rb` | HELP/TYPE únicos por família, formato das amostras, histogramas cumulativos, descarte de rótulos, redação de identificadores, escape e truncamento, totais absolutos, substituição de famílias, método `OTHER` e request_id no middleware |
 | `test/unit/application/observability_test.rb` | `ExternalCalls` (sucesso, desfecho classificado, erro mapeado e propagado), provedores com e sem ator, conflitos e transições inválidas contados pela `UnitOfWork` (inclusive `anonymous` e conflito do coordenador), `CollectMetrics` com agregados da fila e totais |
-| `test/http/observability_test.rb` | Correlação de ponta a ponta (eventos, auditoria, tarefas, `job.finished`, `external.call` do webhook e do simulador, simulação e webhook público); `/metrics` válido no formato do Prometheus com todos os sinais (inclusive conflito e transição inválida tratados por formulário, retentativa e falha permanente agregadas) e nenhum rótulo com UUID ou identificador do tenant; token de métricas |
+| `test/http/observability_test.rb` | Correlação de ponta a ponta (eventos, auditoria, tarefas, `job.finished`, `external.call` do webhook e do simulador, simulação, webhook público e e-mails do cadastro e da recuperação de senha); `/metrics` válido no formato do Prometheus com todos os sinais (inclusive conflito e transição inválida tratados por formulário, retentativa e falha permanente agregadas) e nenhum rótulo com UUID ou identificador do tenant; token de métricas |
 | `test/integration/demo_flow_test.rb` | Roteiro completo |
 | `test/integration/seed_test.rb` | Seed idempotente, preparo completado em banco semeado antes e, ao repetir o seed, conta Asaas, conta desativada e vínculo revogado mantidos |
 | `test/browser/*` | Tabela da seção de testes de navegador |
@@ -215,8 +218,6 @@ esperando duas linhas `skipped`).
   falhas) são iguais em todos os processos.
 - Tarefas agendadas (`platform.fanout`, `organization.tick`, conciliação horária) não têm requisição
   de origem e ficam sem `correlation_id`; o log `job.finished` traz o `job_id`.
-- E-mails de confirmação de cadastro e de recuperação de senha são enfileirados em fluxos sem ator
-  (`uow.anonymous`) e ficam sem `correlation_id`.
 - A entrega de webhook não envia o request_id de origem ao destinatário (somente identificadores do
   evento e da entrega, já existentes).
 - A disputa simultânea pela última unidade na demonstração manual é feita em sequência; a disputa

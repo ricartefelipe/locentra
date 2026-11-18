@@ -4,7 +4,8 @@ module Locentra
   module Infrastructure
     # Notificações transacionais enfileiradas na transação do negócio. O worker monta e envia o
     # e-mail; tokens de uso único são emitidos no envio para não ficarem gravados na fila. A tarefa
-    # recebe o request_id do ator da transação (quando houver) como correlation_id.
+    # recebe o request_id da transação (do ator ou, em fluxos sem ator, o informado à unidade de
+    # trabalho) como correlation_id.
     class JobNotifier
       def initialize(queue:)
         @queue = queue
@@ -28,7 +29,7 @@ module Locentra
 
       private
 
-      def correlation(tx) = tx.actor&.request_id
+      def correlation(tx) = tx.request_id
     end
   end
 end
