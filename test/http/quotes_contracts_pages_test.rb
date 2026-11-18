@@ -135,6 +135,22 @@ class QuotesContractsPagesTest < HttpTest
     assert_includes last_response.body, "nenhuma alteração"
   end
 
+  # O formulário de aceite da equipe envia a versão exibida: um aditivo feito depois da abertura da
+  # página faz o aceite ser recusado sem gravação.
+  def test_staff_acceptance_refuses_a_document_version_created_after_the_page_was_opened
+    reservation = reserve(@actor, @customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
+    contract = uc(:issue_contract).call(@actor, reservation.id)
+
+    assert_includes get_ok("/contratos/#{contract.id}"), %(name="versao" value="1")
+    uc(:amend_contract).call(@actor, contract.id, ends_at: t("2026-03-12T08:00:00Z"))
+    post_form "/contratos/#{contract.id}/aceite", { "versao" => "1", "nome" => "Maria Compradora", "documento" => "52998224725", "declaracao" => "1" }
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "não é mais a vigente (versão vigente: 2)"
+    assert_includes last_response.body, %(name="versao" value="2")
+    assert_equal 0, owner_query("SELECT count(*) AS n FROM contract_documents WHERE accepted_at IS NOT NULL").first["n"].to_i
+  end
+
   def test_contract_screens_report_conflicts_and_versions
     reservation = reserve(@actor, @customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
     contract = uc(:issue_contract).call(@actor, reservation.id)

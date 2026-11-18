@@ -33,8 +33,8 @@ module Locentra
 
           def accept(ctx)
             f = ctx.form
-            uc(:accept_contract).call(ctx.actor, ctx.param(:id), name: f["nome"], document: f["documento"], user_agent: ctx.user_agent,
-                                                                 confirmed: f["declaracao"] == "1")
+            uc(:accept_contract).call(ctx.actor, ctx.param(:id), version: f["versao"], name: f["nome"], document: f["documento"],
+                                                                 user_agent: ctx.user_agent, confirmed: f["declaracao"] == "1")
             redirect(ctx, "/contratos/#{ctx.param(:id)}", notice: "Aceite eletrônico simples registrado.")
           rescue Domain::ValidationError, Domain::InvalidTransition, Domain::Conflict => e
             show(ctx, errors: errors_of(e), status: 422)

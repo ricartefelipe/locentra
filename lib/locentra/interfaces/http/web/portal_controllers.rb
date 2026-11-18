@@ -112,14 +112,18 @@ module Locentra
             render(ctx, "portal/contract", title: "Contrato #{data[:contract].code}", status: status, data: data, errors: errors)
           end
 
-          # Aceite eletrônico simples pelo próprio cliente (registrado com IP, navegador e instante).
+          # Aceite eletrônico simples pelo próprio cliente (registrado com IP, navegador e instante) da
+          # versão do documento exibida no formulário. Se um aditivo gerou versão nova nesse meio
+          # tempo, a página volta com a versão vigente (409) e nenhum aceite é gravado.
           def accept(ctx)
             f = ctx.form
-            uc(:accept_contract).call(ctx.actor, ctx.param(:id), name: f["nome"], document: f["documento"], user_agent: ctx.user_agent,
-                                                                 confirmed: f["declaracao"] == "1")
-            redirect(ctx, "/portal/contratos/#{ctx.param(:id)}", notice: "Aceite eletrônico simples registrado.")
+            contract = uc(:accept_contract).call(ctx.actor, ctx.param(:id), version: f["versao"], name: f["nome"], document: f["documento"],
+                                                                            user_agent: ctx.user_agent, confirmed: f["declaracao"] == "1")
+            redirect(ctx, "/portal/contratos/#{contract.id}",
+                     notice: "Aceite eletrônico simples registrado (versão #{contract.current_document_version} do documento).")
           rescue Domain::ValidationError, Domain::InvalidTransition, Domain::Conflict => e
-            show(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
+            show(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] },
+                      status: e.is_a?(Domain::Conflict) ? 409 : 422)
           end
 
           private

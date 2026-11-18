@@ -43,7 +43,7 @@ class PortalOperationsFlowTest < PortalFlowCase
     assert_equal([own_contract.id], uc(:list_contracts).call(alfa).items.map { |row| row[:contract].id })
     assert_raises(D::NotFound) { uc(:get_contract).call(alfa, other_contract.id) }
     assert_raises(D::NotFound) do
-      uc(:accept_contract).call(alfa, other_contract.id, name: "Intruso Silva", document: "52998224725", confirmed: true)
+      uc(:accept_contract).call(alfa, other_contract.id, version: 1, name: "Intruso Silva", document: "52998224725", confirmed: true)
     end
     row, bytes = uc(:download_attachment).call(alfa, document_of(@actor, own_contract))
 
@@ -59,6 +59,24 @@ class PortalOperationsFlowTest < PortalFlowCase
     assert_raises(D::NotFound) { uc(:get_reservation).call(alfa, beta_contract.reservation_id) }
     assert_raises(D::NotFound) { uc(:download_attachment).call(alfa, document_of(beta[:actor], beta_contract)) }
     assert_raises(D::AccessDenied) { uc(:portal_home).call(alfa.with(organization_id: beta[:organization_id])) }
+  end
+
+  # O aceite vale para a versão do documento exibida: a versão gerada por um aditivo depois disso é
+  # recusada como conflito, sem gravar aceite em nenhuma versão.
+  def test_contract_acceptance_is_tied_to_the_document_version_shown
+    alfa = portal_customer(@actor, @customer, email: "versao@cliente.test")
+    contract = contract_for(@actor, @customer, @branch, @camera, 10)
+    uc(:amend_contract).call(@actor, contract.id, ends_at: t("2026-03-12T08:00:00Z"))
+    accept = ->(actor, **extra) { uc(:accept_contract).call(actor, contract.id, name: "Paula Compras", document: "52998224725", confirmed: true, **extra) }
+    stale = assert_raises(D::Conflict) { accept.call(alfa, version: "1") }
+
+    assert_equal "stale_document_version", stale.code
+    assert_includes assert_raises(D::ValidationError) { accept.call(alfa) }.errors.fetch("versao").first, "versão"
+    assert_raises(D::ValidationError) { accept.call(alfa, version: "v2") }
+    assert_equal "stale_document_version", assert_raises(D::Conflict) { accept.call(@actor, version: 1) }.code, "a equipe também é verificada"
+    assert_equal 0, owner_query("SELECT count(*) AS n FROM contract_documents WHERE accepted_at IS NOT NULL").first["n"].to_i
+    assert_equal "active", accept.call(alfa, version: "2").status
+    assert_equal [%w[1 f], %w[2 t]], owner_query("SELECT version, accepted_at IS NOT NULL AS a FROM contract_documents ORDER BY version").map(&:values)
   end
 
   def test_non_contract_attachments_are_not_downloadable_by_customers

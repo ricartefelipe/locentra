@@ -85,6 +85,15 @@ module Locentra
           transition("active").with(activated_at: now)
         end
 
+        # O aceite vale para a versão do documento exibida a quem aceita: se um aditivo gerou versão
+        # nova depois disso, o aceite é recusado para que a versão vigente seja lida antes.
+        def acceptable_version!(number)
+          return number if number == current_document_version
+
+          raise Conflict.new("A versão #{number} do documento não é mais a vigente (versão vigente: #{current_document_version}). " \
+                             "Leia a versão vigente antes de registrar o aceite.", code: "stale_document_version")
+        end
+
         def amend(document_version)
           raise InvalidTransition.new("contrato", status, "aditivo") unless amendable?
           raise InvariantViolation, "versão de documento fora de sequência" unless document_version == current_document_version + 1

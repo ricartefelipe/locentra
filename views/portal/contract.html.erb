@@ -57,6 +57,7 @@
     <% if c.open? && current_doc && current_doc["accepted_at"].nil? %>
       <form method="post" action="/portal/contratos/<%= c.id %>/aceite" class="stack">
         <%= csrf_field %>
+        <input type="hidden" name="versao" value="<%= c.current_document_version %>">
         <h3>Aceitar a versão <%= c.current_document_version %></h3>
         <p>Leia o PDF da versão <%= c.current_document_version %> antes de registrar o aceite eletrônico simples.</p>
         <label for="aceite-nome">Nome completo de quem aceita</label>
