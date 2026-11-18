@@ -144,6 +144,9 @@ CREATE TABLE payments (
   review_reason text,
   failure_reason text,
   submission_attempts integer NOT NULL DEFAULT 0 CHECK (submission_attempts >= 0),
+  -- Início da última tentativa de envio. A tentativa é gravada (submission_unknown) antes da chamada
+  -- de rede; ausência da cobrança no provedor só é conclusiva após a janela máxima de uma tentativa.
+  submission_started_at timestamptz,
   notes text,
   paid_at timestamptz,
   confirmed_at timestamptz,
@@ -165,7 +168,8 @@ CREATE TABLE payments (
   CHECK (provider = 'manual' OR method IN ('pix', 'boleto', 'card')),
   CHECK (simulator_scenario IS NULL OR provider = 'simulator'),
   CHECK ((status = 'confirmed') = (confirmed_at IS NOT NULL)),
-  CHECK (requires_review = (review_reason IS NOT NULL))
+  CHECK (requires_review = (review_reason IS NOT NULL)),
+  CHECK ((submission_attempts = 0) = (submission_started_at IS NULL))
 );
 CREATE UNIQUE INDEX payments_provider_payment_key ON payments (organization_id, provider_account_id, provider_payment_id)
   WHERE provider_payment_id IS NOT NULL;
@@ -431,7 +435,7 @@ CREATE TABLE reconciliation_items (
   remote_status text,
   local_amount_cents bigint,
   remote_amount_cents bigint,
-  action text NOT NULL CHECK (action IN ('review', 'local_updated', 'resubmission_scheduled')),
+  action text NOT NULL CHECK (action IN ('review', 'local_updated', 'resubmission_scheduled', 'check_scheduled')),
   created_at timestamptz NOT NULL,
   UNIQUE (organization_id, id),
   FOREIGN KEY (organization_id, report_id) REFERENCES reconciliation_reports (organization_id, id),

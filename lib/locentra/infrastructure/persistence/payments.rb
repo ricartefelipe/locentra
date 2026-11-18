@@ -9,8 +9,8 @@ module Locentra
         F = Domain::Finance
         COLUMNS = "p.id, p.organization_id, p.purpose, p.receivable_id, p.deposit_id, p.reservation_id, p.customer_id, p.method, p.provider, " \
                   "p.provider_account_id, p.status, p.amount_cents, p.external_reference, p.provider_payment_id, p.invoice_url, p.due_on, " \
-                  "p.simulator_scenario, p.requires_review, p.review_reason, p.failure_reason, p.submission_attempts, p.notes, p.paid_at, " \
-                  "p.confirmed_at, p.created_at"
+                  "p.simulator_scenario, p.requires_review, p.review_reason, p.failure_reason, p.submission_attempts, " \
+                  "p.submission_started_at, p.notes, p.paid_at, p.confirmed_at, p.created_at"
         REFUND_COLUMNS = "f.id, f.organization_id, f.payment_id, f.amount_cents, f.reason, f.status, f.provider_reference, f.failure_reason, " \
                          "f.confirmed_at, f.created_at"
         LISTING_FROM = "FROM payments p JOIN customers c ON c.organization_id = p.organization_id AND c.id = p.customer_id " \
@@ -30,10 +30,10 @@ module Locentra
         def lock_by_provider_id(tx, provider_payment_id) = one(tx, "p.provider_payment_id = $2", provider_payment_id.to_s, lock: true)
 
         def update(tx, payment, from:, now:)
-          count = tx.execute(<<~SQL, [tx.tenant_id!, payment.id, payment.status, payment.provider_payment_id, payment.invoice_url, payment.requires_review, payment.review_reason, payment.failure_reason, payment.submission_attempts, payment.paid_at, payment.confirmed_at, now, from])
+          count = tx.execute(<<~SQL, [tx.tenant_id!, payment.id, payment.status, payment.provider_payment_id, payment.invoice_url, payment.requires_review, payment.review_reason, payment.failure_reason, payment.submission_attempts, payment.submission_started_at, payment.paid_at, payment.confirmed_at, now, from])
             UPDATE payments SET status = $3, provider_payment_id = $4, invoice_url = $5, requires_review = $6, review_reason = $7, failure_reason = $8,
-                                submission_attempts = $9, paid_at = $10, confirmed_at = $11, updated_at = $12
-             WHERE organization_id = $1 AND id = $2 AND status = $13
+                                submission_attempts = $9, submission_started_at = $10, paid_at = $11, confirmed_at = $12, updated_at = $13
+             WHERE organization_id = $1 AND id = $2 AND status = $14
           SQL
           raise Domain::Conflict.new("pagamento alterado por outra operação", code: "stale_payment") unless count == 1
 
@@ -48,6 +48,34 @@ module Locentra
         def for_reconciliation(tx, account_id, since)
           tx.query("SELECT #{COLUMNS} FROM payments p WHERE p.organization_id = $1 AND p.provider_account_id = $2 AND p.created_at >= $3 " \
                    "ORDER BY p.created_at, p.id", [tx.tenant_id!, account_id, since]).map { |row| self.class.map(row) }
+        end
+
+        # Pagamentos em aberto no provedor de contas desativadas (substituídas), para consulta individual.
+        def open_from_inactive_accounts(tx, since, limit)
+          tx.query(<<~SQL, [tx.tenant_id!, since, limit]).map { |row| self.class.map(row) }
+            SELECT #{COLUMNS} FROM payments p
+              JOIN payment_provider_accounts a ON a.organization_id = p.organization_id AND a.id = p.provider_account_id
+             WHERE p.organization_id = $1 AND NOT a.active AND p.status IN ('submission_unknown', 'pending') AND p.created_at >= $2
+             ORDER BY p.created_at, p.id LIMIT $3
+          SQL
+        end
+
+        # Referências externas, entre as informadas, que pertencem a algum pagamento da organização.
+        def existing_references(tx, references)
+          return [] if references.empty?
+
+          tx.query("SELECT external_reference FROM payments WHERE organization_id = $1 AND external_reference = ANY($2::text[])",
+                   [tx.tenant_id!, references]).map { |row| row["external_reference"] }
+        end
+
+        # Reembolsos pendentes e confirmados por pagamento.
+        def committed_refunds_by_payment(tx, payment_ids)
+          return {} if payment_ids.empty?
+
+          tx.query(<<~SQL, [tx.tenant_id!, payment_ids]).to_h { |row| [row["payment_id"], Domain::Money.new(row["cents"])] }
+            SELECT payment_id, sum(amount_cents)::bigint AS cents FROM refunds
+             WHERE organization_id = $1 AND payment_id = ANY($2::uuid[]) AND status IN ('pending', 'confirmed') GROUP BY payment_id
+          SQL
         end
 
         # Reembolsos que comprometem o valor do pagamento (pendentes e confirmados).
@@ -94,7 +122,7 @@ module Locentra
             external_reference: row["external_reference"], provider_payment_id: row["provider_payment_id"], invoice_url: row["invoice_url"],
             due_on: row["due_on"], simulator_scenario: row["simulator_scenario"], requires_review: row["requires_review"],
             review_reason: row["review_reason"], failure_reason: row["failure_reason"], submission_attempts: row["submission_attempts"],
-            notes: row["notes"], paid_at: row["paid_at"], confirmed_at: row["confirmed_at"]
+            submission_started_at: row["submission_started_at"], notes: row["notes"], paid_at: row["paid_at"], confirmed_at: row["confirmed_at"]
           )
         end
 

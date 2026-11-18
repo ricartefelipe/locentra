@@ -117,13 +117,11 @@ class FinanceDomainTest < UnitTest
     assert_raises(Domain::ValidationError) { online_payment(scenario: "explodir") }
     assert_raises(Domain::ValidationError) { online_payment(payment_method: "cash") }
     assert_raises(Domain::ValidationError) { online_payment(provider: "manual") }
-    unknown = payment.attempt.transition("submission_unknown")
-
-    assert_equal 1, unknown.submission_attempts
-    assert_equal "pending_submission", unknown.transition("pending_submission").status
+    unknown = payment.begin_submission(Time.utc(2026, 3, 2, 12))
     pending = unknown.adopt("sim_1", "https://pagar.example/1").transition("pending")
 
     assert_equal "sim_1", pending.adopt("sim_2", nil).provider_payment_id, "identificador do provedor não é substituído"
+    assert_equal "sim_2", pending.relink("sim_2").provider_payment_id, "pago por cobrança duplicada"
     confirmed = pending.confirm(Time.utc(2026, 3, 3), review_reason: "pagamento após expiração")
 
     assert_equal [true, Time.utc(2026, 3, 3)], [confirmed.requires_review, confirmed.paid_at]
@@ -131,7 +129,23 @@ class FinanceDomainTest < UnitTest
     assert_equal "recusado", pending.fail("").failure_reason
     assert_equal "cancelled", pending.cancel("removida").status
     assert_raises(Domain::InvalidTransition) { confirmed.cancel("tarde demais") }
-    assert_equal "confirmed", payment.confirm(Time.utc(2026, 3, 3)).status, "webhook antes da resposta do envio"
+    assert_raises(Domain::InvalidTransition) { confirmed.relink("sim_3") }
+    assert_equal "confirmed", payment.confirm(Time.utc(2026, 3, 3)).status, "evento do provedor para cobrança já existente"
+  end
+
+  def test_submission_attempt_is_recorded_before_the_call_and_settles_after_the_window
+    payment = online_payment
+    started_at = Time.utc(2026, 3, 2, 12)
+    unknown = payment.begin_submission(started_at)
+
+    assert_equal ["submission_unknown", 1, started_at], [unknown.status, unknown.submission_attempts, unknown.submission_started_at]
+    assert payment.submission_settled?(started_at), "sem tentativa, nada em andamento"
+    refute unknown.submission_settled?(started_at + F::SUBMISSION_WINDOW_SECONDS - 1), "tentativa ainda pode estar em andamento"
+    assert unknown.submission_settled?(unknown.settles_at)
+    assert_raises(Domain::InvalidTransition) { payment.transition("pending") }
+    assert_equal "pending_submission", unknown.transition("pending_submission").status
+    assert_equal "failed", unknown.fail("recusada").status, "recusa definitiva da tentativa em andamento"
+    assert_equal 2, unknown.transition("pending_submission").begin_submission(started_at + 10).submission_attempts
   end
 
   def test_review_findings
@@ -241,8 +255,9 @@ class FinanceDomainTest < UnitTest
   end
 
   def test_reconciliation_compare
-    local = lambda do |id, status, cents|
-      F::Reconciliation::Local.new(payment_id: id, external_reference: id, provider_payment_id: nil, status: status, amount: money(cents))
+    local = lambda do |id, status, cents, refunded = 0|
+      F::Reconciliation::Local.new(payment_id: id, external_reference: id, provider_payment_id: nil, status: status, amount: money(cents),
+                                   refunded: money(refunded))
     end
     remote = lambda do |ref, status, cents, id = "sim_#{ref}"|
       F::Reconciliation::Remote.new(provider_payment_id: id, external_reference: ref, status: status, amount: money(cents))
@@ -255,11 +270,21 @@ class FinanceDomainTest < UnitTest
     found = F::Reconciliation.compare(locals, remotes, known_references: locals.map(&:external_reference) + ["old"])
     kinds = found.map { |d| [d.payment_id || d.external_reference, d.kind] }.sort
 
-    assert_equal [%w[b status_mismatch], %w[c amount_mismatch], %w[d missing_remote], %w[f duplicate_remote], %w[zz missing_local]], kinds
+    assert_equal [%w[b status_mismatch], %w[c amount_mismatch], %w[d missing_remote], %w[f duplicate_remote], %w[g status_mismatch],
+                  %w[zz missing_local]], kinds, "estorno no provedor sem reembolso local diverge"
+    refunded = F::Reconciliation.compare([local.call("g", "confirmed", 700, 700)], [remote.call("g", "refunded", 700)])
+
+    assert_empty refunded, "estorno no provedor com reembolso registrado no Locentra"
+    assert_equal 0, F::Reconciliation::Local.new(payment_id: "x", external_reference: "x", provider_payment_id: nil, status: "pending",
+                                                 amount: money(1)).refunded.cents
     assert_equal "Valor divergente", found.find { |d| d.kind == "amount_mismatch" }.kind_label
     summary = F::Reconciliation.summary(found, checked: locals.size)
 
-    assert_equal [7, 5, 1], [summary["checked"], summary["discrepancies"], summary["by_kind"]["missing_local"]]
+    assert_equal [7, 6, 1], [summary["checked"], summary["discrepancies"], summary["by_kind"]["missing_local"]]
+    partial = F::Reconciliation.compare(locals, remotes, known_references: locals.map(&:external_reference) + ["old"], verified: [])
+
+    refute(partial.any? { |d| d.kind == "missing_remote" }, "listagem incompleta não prova ausência")
+    assert_equal ["missing_remote"], F::Reconciliation.compare([local.call("d", "confirmed", 400)], [], verified: ["d"]).map(&:kind)
     assert_equal ["status_mismatch"], F::Reconciliation.compare([local.call("e", "submission_unknown", 1)], [remote.call("e", "pending", 1)]).map(&:kind)
   end
 

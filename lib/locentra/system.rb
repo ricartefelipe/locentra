@@ -224,6 +224,8 @@ module Locentra
       settlement = fn::Settlement.new(payments: r[:payments], deposits: r[:deposits], reservations: r[:reservations], ledger: ledger,
                                       alert_book: alert_book, audit: audit, events: s[:events], clock: clock, ids: ids)
       remote = fn::RemoteSync.new(payments: r[:payments], settlement: settlement, clock: clock)
+      s[:payment_remote_sync] = remote
+      s[:finance_alert_book] = alert_book
       target = fn::PaymentTarget.new(receivables: r[:receivables], deposits: r[:deposits])
       accounts = { accounts: r[:payment_accounts] }
       money = { ledger: ledger, audit: audit, clock: clock, ids: ids }
@@ -241,7 +243,7 @@ module Locentra
                                                     queue: queue, audit: audit, clock: clock, ids: ids)
       uc[:request_refund] = fn::RequestRefund.new(uow: uow, payments: r[:payments], queue: queue, events: s[:events], **money)
       uc[:submit_payment] = fn::SubmitPayment.new(uow: uow, payments: r[:payments], **accounts, customers: r[:customers], reservations: r[:reservations],
-                                                  providers: providers, remote: remote, resolver: resolver, queue: queue, audit: audit, clock: clock)
+                                                  providers: providers, remote: remote, resolver: resolver, alert_book: alert_book, audit: audit, clock: clock)
       uc[:resolve_submission] = resolver
       uc[:process_refund] = fn::ProcessRefund.new(uow: uow, payments: r[:payments], **accounts, providers: providers, ledger: ledger, audit: audit,
                                                   events: s[:events], clock: clock)

@@ -8,6 +8,12 @@
 <% if report["status"] == "failed" %>
   <div class="notice notice-danger" role="alert">A consulta ao provedor falhou: <%= report["error"] %>. Nenhuma alteração foi feita; a próxima execução tenta novamente.</div>
 <% end %>
+<% if report["status"] == "completed" && report["summary"]["complete"] == false %>
+  <div class="notice" role="status">A listagem do provedor veio incompleta (limite de páginas por execução). Ausências no provedor foram avaliadas somente para os pagamentos consultados um a um pela referência externa.</div>
+<% end %>
+<% if report["status"] == "completed" && report["summary"]["legacy_failures"].to_i.positive? %>
+  <div class="notice notice-danger" role="alert"><%= report["summary"]["legacy_failures"] %> pagamento(s) de contas de provedor desativadas não puderam ser consultados (credencial recusada ou provedor indisponível). Verifique-os no provedor.</div>
+<% end %>
 <% if report["status"] == "completed" %>
   <section class="cards" aria-label="Resumo da conciliação">
     <div class="card"><span class="card-value"><%= report["summary"]["checked"] %></span><span class="card-label">Pagamentos verificados</span></div>

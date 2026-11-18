@@ -119,6 +119,12 @@ class PaymentProviderTest < DatabaseTest
     requested = request_online(@rental, 10_000, scenario: "timeout_after_success")
     drain
     owner_query("DELETE FROM payment_simulator_charges")
+    early = uc(:finance).report(@actor, uc(:reconcile_payments).call(@actor))
+
+    assert_equal [%w[missing_remote check_scheduled]], early[:items].map { |i| i.values_at("kind", "action") },
+                 "ausência dentro da janela da tentativa não é conclusiva"
+    assert_equal "submission_unknown", payment(requested.id).status
+    @clock.advance(FN::SubmitPayment::RECHECK_DELAY)
     data = uc(:finance).report(@actor, uc(:reconcile_payments).call(@actor))
 
     assert_equal([%w[missing_remote resubmission_scheduled]], data[:items].map { |i| i.values_at("kind", "action") })

@@ -19,16 +19,25 @@ module Locentra
       }.freeze
 
       # Máquina de estados do pagamento. Confirmado, falho e cancelado são finais e imutáveis.
-      # - pending_submission → confirmed cobre o webhook que chega antes da resposta do envio.
-      # - submission_unknown só sai do estado após consulta ao provedor pela referência externa:
-      #   encontrada → pending/confirmed/cancelled; não encontrada → pending_submission (novo envio
-      #   com a mesma referência).
+      # - pending_submission → submission_unknown é gravado ANTES da chamada de rede: enquanto a
+      #   tentativa está em andamento (ou se o processo cair no meio dela), o resultado é desconhecido.
+      # - submission_unknown sai do estado pela resposta da própria tentativa (cobrança criada →
+      #   pending/confirmed/cancelled; recusa definitiva → failed; requisição não enviada →
+      #   pending_submission) ou pela consulta ao provedor pela referência externa (encontrada →
+      #   situação remota; ausente após a janela da tentativa → pending_submission, novo envio com a
+      #   mesma referência).
+      # - pending_submission → confirmed/cancelled cobre eventos do provedor para cobrança já existente.
       PAYMENT_TRANSITIONS = {
-        "pending_submission" => %w[pending submission_unknown confirmed failed cancelled],
-        "submission_unknown" => %w[pending_submission pending confirmed cancelled],
+        "pending_submission" => %w[submission_unknown confirmed failed cancelled],
+        "submission_unknown" => %w[pending_submission pending confirmed failed cancelled],
         "pending" => %w[confirmed failed cancelled],
         "confirmed" => [], "failed" => [], "cancelled" => []
       }.freeze
+
+      # Duração máxima de uma tentativa de envio (todas as requisições de uma cobrança, com os tempos
+      # limite do cliente HTTP). Antes disso, a ausência da cobrança no provedor não prova nada: a
+      # requisição pode estar em andamento.
+      SUBMISSION_WINDOW_SECONDS = 300
 
       SIMULATOR_SCENARIOS = {
         "success" => "Sucesso", "fail" => "Recusa pelo provedor", "timeout_after_success" => "Tempo esgotado após registrar a cobrança"
@@ -37,7 +46,7 @@ module Locentra
       Payment = Data.define(:id, :organization_id, :purpose, :receivable_id, :deposit_id, :reservation_id, :customer_id, :payment_method,
                             :provider, :provider_account_id, :status, :amount, :external_reference, :provider_payment_id, :invoice_url,
                             :due_on, :simulator_scenario, :requires_review, :review_reason, :failure_reason, :submission_attempts,
-                            :notes, :paid_at, :confirmed_at) do
+                            :submission_started_at, :notes, :paid_at, :confirmed_at) do
         # Pagamento recebido fora do provedor e registrado pela equipe: nasce confirmado.
         def self.manual(id:, organization_id:, purpose:, target_id:, reservation_id:, customer_id:, payment_method:, amount:, paid_at:,
                         review_reason: nil, notes: nil)
@@ -73,7 +82,8 @@ module Locentra
               deposit_id: purpose == "deposit" ? target_id : nil, reservation_id: reservation_id, customer_id: customer_id, payment_method: payment_method,
               provider: nil, provider_account_id: nil, status: nil, amount: Amount.positive!(amount), external_reference: id,
               provider_payment_id: nil, invoice_url: nil, due_on: nil, simulator_scenario: nil, requires_review: false, review_reason: nil,
-              failure_reason: nil, submission_attempts: 0, notes: Organizations::Text.optional(notes, max: 500), paid_at: nil, confirmed_at: nil)
+              failure_reason: nil, submission_attempts: 0, submission_started_at: nil, notes: Organizations::Text.optional(notes, max: 500),
+              paid_at: nil, confirmed_at: nil)
         end
         private_class_method :base
 
@@ -93,11 +103,27 @@ module Locentra
           with(status: target)
         end
 
-        def attempt = with(submission_attempts: submission_attempts + 1)
+        # Nova tentativa de envio, registrada antes da chamada ao provedor.
+        def begin_submission(at)
+          transition("submission_unknown").with(submission_attempts: submission_attempts + 1, submission_started_at: at)
+        end
+
+        # A ausência da cobrança numa consulta feita em `at` é conclusiva somente depois da janela da
+        # última tentativa (nenhuma requisição dessa tentativa pode estar em andamento).
+        def submission_settled?(at) = submission_started_at.nil? || at >= settles_at
+        def settles_at = submission_started_at && (submission_started_at + SUBMISSION_WINDOW_SECONDS)
 
         # Identificadores devolvidos pelo provedor (preenchidos uma vez; a situação é tratada separadamente).
         def adopt(provider_payment_id, invoice_url)
           with(provider_payment_id: self.provider_payment_id || provider_payment_id, invoice_url: self.invoice_url || invoice_url)
+        end
+
+        # Pagamento quitado por outra cobrança com a mesma referência (duplicada no provedor): passa a
+        # apontar para a cobrança efetivamente paga.
+        def relink(provider_payment_id)
+          raise InvalidTransition.new("pagamento", status, "outra cobrança") if final?
+
+          with(provider_payment_id: provider_payment_id)
         end
 
         def fail(reason) = transition("failed").with(failure_reason: Organizations::Text.optional(reason, max: 500) || "recusado")

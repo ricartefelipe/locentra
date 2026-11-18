@@ -10,7 +10,7 @@ module Locentra
       # Porta de provedores de pagamento. Adaptadores (simulador, Asaas) implementam:
       #   create_charge(account, ChargeRequest) -> ProviderCharge
       #   find_by_external_reference(account, referencia) -> [ProviderCharge]
-      #   list_charges(account, since:) -> [ProviderCharge]
+      #   list_charges(account, since:) -> ChargeListing (cobranças criadas a partir de `since`, ou antes)
       #   refunds(account, provider_payment_id) -> [ProviderRefund]
       #   refund(account, provider_payment_id, amount:, description:) -> ProviderRefund
       #   parse_webhook(texto_json) -> ProviderEvent
@@ -29,6 +29,19 @@ module Locentra
       ChargeRequest = Data.define(:external_reference, :amount, :payment_method, :due_on, :description, :customer, :scenario)
       ProviderCharge = Data.define(:provider_payment_id, :external_reference, :status, :amount, :invoice_url)
       ProviderRefund = Data.define(:reference, :description, :amount, :status)
+      # `complete` falso: o provedor tem mais cobranças do que as devolvidas (limite de páginas); a
+      # ausência de uma cobrança na listagem não prova nada.
+      ChargeListing = Data.define(:charges, :complete)
+      # Consulta pela referência externa de um pagamento: instante em que começou e tentativa de envio
+      # observada antes dela (a conclusão só vale se nenhuma tentativa nova começou depois).
+      Lookup = Data.define(:charges, :at, :attempt) do
+        # Consulta ao provedor, fora de transação.
+        def self.perform(providers, account, payment, clock)
+          at = clock.now
+          charges = providers.for(account["provider"]).find_by_external_reference(account, payment.external_reference)
+          new(charges: charges, at: at, attempt: payment.submission_attempts)
+        end
+      end
       # action: "confirm" (pago), "cancel" (removido), "ignore" (informativo).
       ProviderEvent = Data.define(:event_id, :event_type, :action, :provider_payment_id, :external_reference, :status, :amount)
 

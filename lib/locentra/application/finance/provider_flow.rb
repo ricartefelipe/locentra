@@ -3,10 +3,17 @@
 module Locentra
   module Application
     module Finance
-      # Consulta ao provedor de um pagamento com envio sem confirmação (tempo esgotado). Nenhum novo
-      # envio acontece sem antes procurar a cobrança pela referência externa: encontrada, a situação
-      # remota é adotada; ausente, o pagamento volta para envio com a mesma referência.
+      # Consulta ao provedor de um pagamento com envio sem confirmação. Nenhum novo envio acontece sem
+      # antes procurar a cobrança pela referência externa: encontrada, a situação remota é adotada;
+      # ausente numa consulta feita depois da janela da última tentativa, o pagamento volta para envio
+      # com a mesma referência. Antes da janela, a consulta não é conclusiva (a requisição da tentativa
+      # pode estar em andamento) e uma nova consulta é agendada para o fim da janela.
       class ResolveSubmission
+        OUTCOME_ACTIONS = { resolved: "local_updated", resubmission_scheduled: "resubmission_scheduled", awaiting_settlement: "check_scheduled" }.freeze
+        # Entre cobranças com a mesma referência, a associada é a que recebeu o dinheiro ou ainda pode
+        # recebê-lo; uma cobrança removida só é adotada se não houver outra.
+        ADOPTION_ORDER = %w[confirmed refunded disputed pending cancelled].freeze
+
         def initialize(uow:, payments:, accounts:, providers:, remote:, alert_book:, queue:, audit:, clock:)
           @uow = uow
           @clock = clock
@@ -29,47 +36,68 @@ module Locentra
           end
           return prepared unless prepared.is_a?(Hash)
 
-          found = @providers.for(prepared[:account]["provider"]).find_by_external_reference(prepared[:account], prepared[:payment].external_reference)
+          found = Lookup.perform(@providers, prepared[:account], prepared[:payment], @clock)
           @uow.run(actor, "finance.write") { |tx, current| resolve(tx, current, id, found) }
         end
 
-        # Também usado pela conciliação, dentro da transação dela.
-        def resolve(tx, actor, id, found)
+        # Aplica o resultado de uma consulta (também dentro da transação da conciliação).
+        def resolve(tx, actor, id, lookup)
           payment = @payments.lock(tx, id)
           return :"already_#{payment.status}" unless payment.status == "submission_unknown"
+          # Uma tentativa nova começou depois da consulta: o resultado dela decide.
+          return :superseded unless payment.submission_attempts == lookup.attempt
+          return adopt(tx, actor, payment, lookup.charges) unless lookup.charges.empty?
+          return await(tx, actor, payment) unless payment.submission_settled?(lookup.at)
 
-          if found.empty?
-            @payments.update(tx, payment.transition("pending_submission"), from: payment.status, now: @clock.now)
-            @queue.enqueue(tx, "payments.submit", { "payment_id" => id }, priority: 30)
-            @audit.record(tx, actor, "payment.resubmission_scheduled", "payment", id, "external_reference" => payment.external_reference)
-            return :resubmission_scheduled
-          end
+          @payments.update(tx, payment.transition("pending_submission"), from: payment.status, now: @clock.now)
+          @queue.enqueue(tx, "payments.submit", { "payment_id" => id }, priority: 30)
+          @audit.record(tx, actor, "payment.resubmission_scheduled", "payment", id, "external_reference" => payment.external_reference)
+          :resubmission_scheduled
+        end
 
-          flag_duplicates(tx, payment, found)
-          @remote.apply(tx, actor, payment, found.first)
-          @audit.record(tx, actor, "payment.submission_resolved", "payment", id,
-                        "provider_payment_id" => found.first.provider_payment_id, "remote_status" => found.first.status)
-          :resolved
+        # Nova consulta ao fim da janela da tentativa atual (uma por tentativa).
+        def schedule_check(tx, payment)
+          @queue.enqueue(tx, "payments.submit", { "payment_id" => payment.id }, run_at: payment.settles_at, priority: 30,
+                                                                                unique_key: "payment-check:#{payment.id}:#{payment.submission_attempts}")
         end
 
         private
 
-        def flag_duplicates(tx, payment, found)
+        def adopt(tx, actor, payment, found)
+          chosen = found.min_by { |charge| ADOPTION_ORDER.index(charge.status) || ADOPTION_ORDER.size }
+          flag_duplicates(tx, payment, found, chosen)
+          @remote.apply(tx, actor, payment, chosen)
+          @audit.record(tx, actor, "payment.submission_resolved", "payment", payment.id,
+                        "provider_payment_id" => chosen.provider_payment_id, "remote_status" => chosen.status)
+          :resolved
+        end
+
+        def await(tx, actor, payment)
+          schedule_check(tx, payment)
+          @audit.record(tx, actor, "payment.submission_check_scheduled", "payment", payment.id, "run_at" => payment.settles_at.utc.iso8601)
+          :awaiting_settlement
+        end
+
+        def flag_duplicates(tx, payment, found, chosen)
           return if found.size < 2
 
           @alert_book.raise_alert(tx, kind: "duplicate_provider_charge", dedupe_key: "duplicate_charge:#{payment.id}",
                                       reservation_id: payment.reservation_id, payment_id: payment.id,
                                       message: "O provedor tem #{found.size} cobranças com a referência #{payment.external_reference}; " \
-                                               "a primeira foi associada ao pagamento e as demais precisam ser canceladas no provedor.")
+                                               "a cobrança #{chosen.provider_payment_id} foi associada ao pagamento e as demais precisam " \
+                                               "ser canceladas no provedor.")
         end
       end
 
-      # Envio de uma cobrança ao provedor, executado pelo worker. Transação curta para preparar,
-      # chamada de rede sem transação aberta, transação curta para registrar o resultado.
+      # Envio de uma cobrança ao provedor, executado pelo worker. Transação curta para registrar a
+      # tentativa (submission_unknown) ANTES da chamada de rede, chamada sem transação aberta e
+      # transação curta para registrar o resultado. Uma reexecução da tarefa (queda do processo, lease
+      # vencido, erro ao registrar) ou uma segunda tarefa do mesmo pagamento encontra o pagamento em
+      # submission_unknown e passa pela consulta ao provedor, nunca por um novo envio às cegas.
       class SubmitPayment
-        RECHECK_DELAY = 60
+        RECHECK_DELAY = F::SUBMISSION_WINDOW_SECONDS
 
-        def initialize(uow:, payments:, accounts:, customers:, reservations:, providers:, remote:, resolver:, queue:, audit:, clock:)
+        def initialize(uow:, payments:, accounts:, customers:, reservations:, providers:, remote:, resolver:, alert_book:, audit:, clock:)
           @uow = uow
           @payments = payments
           @accounts = accounts
@@ -78,7 +106,7 @@ module Locentra
           @providers = providers
           @remote = remote
           @resolver = resolver
-          @queue = queue
+          @alert_book = alert_book
           @audit = audit
           @clock = clock
         end
@@ -90,7 +118,11 @@ module Locentra
           return prepared unless prepared.is_a?(Hash)
 
           outcome = submit(prepared)
-          @uow.run(actor, "finance.write") { |tx, current| record(tx, current, id, outcome) }
+          result = @uow.run(actor, "finance.write") { |tx, current| record(tx, current, id, prepared[:attempt], outcome) }
+          # Requisição não enviada: a fila reagenda a tarefa com espera crescente.
+          raise outcome.last if result == :not_sent
+
+          result
         end
 
         private
@@ -103,8 +135,9 @@ module Locentra
           account = @accounts.find(tx, payment.provider_account_id)
           return reject(tx, actor, payment, "conta do provedor desativada antes do envio") unless account && account["active"]
 
-          @payments.update(tx, payment.attempt, from: payment.status, now: @clock.now)
-          { account: account, request: request_for(tx, payment) }
+          started = payment.begin_submission(@clock.now)
+          @payments.update(tx, started, from: payment.status, now: @clock.now)
+          { account: account, request: request_for(tx, payment), attempt: started.submission_attempts }
         end
 
         def request_for(tx, payment)
@@ -117,20 +150,25 @@ module Locentra
                             scenario: payment.simulator_scenario)
         end
 
-        # ProviderUnavailable não é tratado aqui: a requisição não saiu, o pagamento continua aguardando
-        # envio e a tarefa é reagendada pela fila.
+        # Qualquer outra exceção deixa o pagamento em submission_unknown (já gravado): a nova execução
+        # da tarefa consulta o provedor antes de decidir.
         def submit(prepared)
           [:created, @providers.for(prepared[:account]["provider"]).create_charge(prepared[:account], prepared[:request])]
         rescue ProviderTimeout => e
           [:unknown, e.message]
         rescue ProviderRejected => e
           [:rejected, e.message]
+        rescue ProviderUnavailable => e
+          [:not_sent, e]
         end
 
-        def record(tx, actor, id, outcome)
+        def record(tx, actor, id, attempt, outcome)
           kind, value = outcome
           payment = @payments.lock(tx, id)
-          return :"already_#{payment.status}" unless payment.status == "pending_submission"
+          unless payment.status == "submission_unknown" && payment.submission_attempts == attempt
+            stray(tx, payment, value) if kind == :created
+            return :"already_#{payment.status}"
+          end
 
           case kind
           when :created
@@ -138,13 +176,27 @@ module Locentra
             @audit.record(tx, actor, "payment.submitted", "payment", id, "provider_payment_id" => value.provider_payment_id)
             :submitted
           when :unknown
-            @payments.update(tx, payment.transition("submission_unknown"), from: payment.status, now: @clock.now)
-            @queue.enqueue(tx, "payments.submit", { "payment_id" => id }, run_at: @clock.now + RECHECK_DELAY, priority: 30)
+            @resolver.schedule_check(tx, payment)
             @audit.record(tx, actor, "payment.submission_unknown", "payment", id, "error" => value.to_s[0, 300])
             :submission_unknown
+          when :not_sent
+            @payments.update(tx, payment.transition("pending_submission"), from: payment.status, now: @clock.now)
+            @audit.record(tx, actor, "payment.submission_not_sent", "payment", id, "error" => value.message.to_s[0, 300])
+            :not_sent
           else
             reject(tx, actor, payment, value)
           end
+        end
+
+        # Resposta de uma tentativa que chegou depois de o pagamento seguir adiante (por outra tentativa,
+        # pela consulta ou por webhook). Uma cobrança diferente da associada é duplicada.
+        def stray(tx, payment, charge)
+          return if charge.provider_payment_id == payment.provider_payment_id
+
+          @alert_book.raise_alert(tx, kind: "duplicate_provider_charge", dedupe_key: "duplicate_charge:#{payment.id}:#{charge.provider_payment_id}",
+                                      reservation_id: payment.reservation_id, payment_id: payment.id,
+                                      message: "A tentativa de envio criou a cobrança #{charge.provider_payment_id} depois de o pagamento ser " \
+                                               "resolvido por outra via; cancele-a no provedor se não for a cobrança associada.")
         end
 
         def reject(tx, actor, payment, reason)

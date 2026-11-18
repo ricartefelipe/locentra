@@ -103,10 +103,10 @@ class AsaasAdapterTest < UnitTest
     assert_equal([%w[pay_123 confirmed]], found.map { |c| [c.provider_payment_id, c.status] })
     listed = gateway.list_charges(account, since: Time.utc(2026, 2, 1, 12))
 
-    assert_equal 2, listed.size, "paginação até hasMore=false"
+    assert_equal [2, true], [listed.charges.size, listed.complete], "paginação até hasMore=false"
     urls = gateway.instance_variable_get(:@http).requests.map(&:url)
 
-    assert_includes urls[1], "dateCreated%5Bge%5D=2026-02-01"
+    assert_includes urls[1], "dateCreated%5Bge%5D=2026-01-31", "um dia de margem: dateCreated é a data local do provedor"
     assert_includes urls[2], "offset=100"
     refunds = gateway.refunds(account, "pay_abc")
 
@@ -123,6 +123,15 @@ class AsaasAdapterTest < UnitTest
     refund = gateway.refund(account, "pay_9", amount: Domain::Money.new(100), description: "Locentra reembolso f9")
 
     assert_equal %w[pay_9 REFUND_REQUESTED], [refund.reference, refund.status]
+  end
+
+  def test_listing_beyond_the_page_limit_is_marked_incomplete
+    page = %({"object":"list","hasMore":true,"data":[#{payment_json}]})
+    gateway = adapter({ %i[get /payments] => Array.new(I::Asaas::MAX_PAGES) { { body: page } } })
+    listed = gateway.list_charges(account, since: Time.utc(2026, 2, 1))
+
+    assert_equal [I::Asaas::MAX_PAGES, false], [listed.charges.size, listed.complete]
+    assert_raises(Domain::ValidationError) { adapter({ %i[get /payments] => { body: "[1, 2]" } }).list_charges(account, since: Time.now) }
   end
 
   def test_out_of_range_amounts_are_rejected_before_expansion

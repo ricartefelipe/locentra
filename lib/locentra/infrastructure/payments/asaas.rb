@@ -36,7 +36,7 @@ module Locentra
           Response.new(status: response.code.to_i, body: response.body.to_s.byteslice(0, MAX_BODY))
         rescue Net::OpenTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ENETUNREACH, SocketError => e
           raise FN::ProviderUnavailable, "conexão com o provedor não estabelecida (#{e.class.name})"
-        rescue Net::ReadTimeout, Net::WriteTimeout, Errno::ECONNRESET, EOFError, OpenSSL::SSL::SSLError => e
+        rescue Net::ReadTimeout, Net::WriteTimeout, Errno::ECONNRESET, Errno::ETIMEDOUT, Errno::EPIPE, IOError, OpenSSL::SSL::SSLError => e
           raise FN::ProviderTimeout, "sem resposta conclusiva do provedor (#{e.class.name})"
         end
       end
@@ -46,6 +46,7 @@ module Locentra
       # - autenticação pelo cabeçalho `access_token` e `User-Agent` obrigatório;
       # - POST /customers (cliente por externalReference), POST /payments com externalReference;
       # - GET /payments?externalReference= para localizar uma cobrança após tempo esgotado;
+      # - GET /payments?dateCreated[ge]= paginado (limit/offset/hasMore) para a conciliação;
       # - POST /payments/{id}/refund para estorno (total ou parcial, `value` e `description`);
       # - webhooks com o token no cabeçalho `asaas-access-token` e `id` do evento para deduplicação.
       # A integração real não foi exercitada: os testes usam cliente HTTP falso.
@@ -77,14 +78,18 @@ module Locentra
           page(account, "/payments", "externalReference" => reference.to_s).map { |data| AsaasFormat.charge(data) }
         end
 
+        # `dateCreated` do Asaas é a data local do provedor: a consulta começa um dia antes de `since`
+        # para que a listagem cubra toda a janela local. Depois de MAX_PAGES páginas com `hasMore`, a
+        # listagem é marcada como incompleta (nunca usada como prova de ausência).
         def list_charges(account, since:)
           results = []
+          from = (since - 86_400).utc.strftime("%Y-%m-%d")
           MAX_PAGES.times do |index|
-            body = call(account, :get, "/payments", query: { "dateCreated[ge]" => since.utc.strftime("%Y-%m-%d"), "limit" => PAGE, "offset" => index * PAGE })
+            body = call(account, :get, "/payments", query: { "dateCreated[ge]" => from, "limit" => PAGE, "offset" => index * PAGE })
             results.concat(Array(body["data"]).map { |data| AsaasFormat.charge(data) })
-            break unless body["hasMore"] == true
+            return FN::ChargeListing.new(charges: results, complete: true) unless body["hasMore"] == true
           end
-          results
+          FN::ChargeListing.new(charges: results, complete: false)
         end
 
         def refunds(account, provider_payment_id)
@@ -124,7 +129,7 @@ module Locentra
 
         def handle(verb, response)
           case response.status
-          when 200..299 then AsaasFormat.parse_json(response.body)
+          when 200..299 then object!(AsaasFormat.parse_json(response.body))
           when 401, 403 then raise FN::ProviderRejected, "credencial recusada pelo Asaas (HTTP #{response.status})"
           when 400, 404, 409, 422 then raise FN::ProviderRejected, error_message(response)
           when 429 then raise FN::ProviderUnavailable, "limite de requisições do Asaas atingido"
@@ -134,6 +139,12 @@ module Locentra
 
             raise FN::ProviderUnavailable, "Asaas indisponível (HTTP #{response.status})"
           end
+        end
+
+        def object!(data)
+          raise Domain::ValidationError.field("corpo", "resposta inesperada do provedor") unless data.is_a?(Hash)
+
+          data
         end
 
         def error_message(response)

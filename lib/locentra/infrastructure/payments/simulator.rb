@@ -52,7 +52,7 @@ module Locentra
             tx.query("SELECT #{COLUMNS} FROM payment_simulator_charges WHERE organization_id = $1 AND account_id = $2 AND created_at >= $3 " \
                      "ORDER BY created_at, id", [tx.tenant_id!, account["id"], since])
           end
-          rows.map { |row| to_charge(row) }
+          FN::ChargeListing.new(charges: rows.map { |row| to_charge(row) }, complete: true)
         end
 
         def refunds(account, provider_payment_id)

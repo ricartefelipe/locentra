@@ -10,7 +10,7 @@
   <div class="notice notice-danger" role="alert"><strong>Revisão necessária.</strong> <%= payment.review_reason %></div>
 <% end %>
 <% if payment.status == "submission_unknown" %>
-  <div class="notice" role="status">O provedor não confirmou o envio (tempo esgotado). Antes de qualquer nova tentativa, a cobrança é procurada no provedor pela referência <code><%= payment.external_reference %></code>.</div>
+  <div class="notice" role="status">Envio ao provedor em andamento ou sem confirmação (tempo esgotado ou interrupção). Antes de qualquer nova tentativa, a cobrança é procurada no provedor pela referência <code><%= payment.external_reference %></code>; a ausência só é conclusiva após <%= datetime(payment.settles_at) %>.</div>
 <% end %>
 <div class="grid-2">
   <section class="panel" aria-labelledby="titulo-detalhes">
@@ -23,7 +23,7 @@
       <% if payment.invoice_url %><dt>Página de pagamento</dt><dd><a href="<%= payment.invoice_url %>" rel="noopener noreferrer">abrir no provedor</a></dd><% end %>
       <% if payment.simulator_scenario %><dt>Cenário do simulador</dt><dd><%= fin::SIMULATOR_SCENARIOS.fetch(payment.simulator_scenario) %></dd><% end %>
       <dt>Vencimento</dt><dd><%= date(payment.due_on) %></dd>
-      <dt>Envios ao provedor</dt><dd><%= payment.submission_attempts %></dd>
+      <dt>Envios ao provedor</dt><dd><%= payment.submission_attempts %><% if payment.submission_started_at %> (último em <%= datetime(payment.submission_started_at) %>)<% end %></dd>
       <dt>Pago em</dt><dd><%= datetime(payment.paid_at) %></dd>
       <dt>Confirmado em</dt><dd><%= datetime(payment.confirmed_at) %></dd>
       <% if payment.failure_reason %><dt>Motivo</dt><dd><%= payment.failure_reason %></dd><% end %>
