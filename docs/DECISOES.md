@@ -161,3 +161,25 @@ atualizado.
   (PDF, PNG, JPEG, WebP); download apenas por rota autenticada com `Content-Security-Policy: sandbox`
   e `nosniff`; remoção lógica respeitando retenção. O adaptador local pode ser substituído por object
   storage privado implementando `put/get/delete/exist?`.
+
+## ADR-023 — Decisões dos módulos de orçamentos, contratos, operação e financeiro
+
+As decisões detalhadas de cada módulo estão registradas na seção "Decisões" do respectivo documento:
+
+- [`modulos/orcamentos-contratos.md`](modulos/orcamentos-contratos.md): versões imutáveis com controle de envio
+  por versão; bloqueio de orçamento confirmado apenas pela conversão; conversão idempotente com lock e índice
+  único; aceite eletrônico simples sem equivalência a assinatura certificada; aditivo de extensão na mesma
+  transação; cancelamento recusado após a retirada.
+- [`modulos/retirada-devolucao-manutencao.md`](modulos/retirada-devolucao-manutencao.md): entrega somente do
+  conferido; locks de estoque em ordem de id; inspeção como bloqueio sem fim definido; evidência protegida
+  após aprovação da cobrança; transferência com saída atômica frente a novas reservas.
+- [`modulos/financeiro.md`](modulos/financeiro.md): sincronização idempotente de cobranças por origem;
+  `submission_unknown` resolvido por consulta antes de reenvio; caução como passivo; diário balanceado
+  somente inserção; webhooks vinculados à conta e à cobrança do provedor.
+
+## ADR-024 — Backup com papel dedicado e restauração por administrador
+
+- **Contexto:** a RLS é forçada também para o proprietário; um dump feito sem bypass sairia vazio.
+- **Decisão:** papel `locentra_backup` somente leitura (`pg_read_all_data`) com `BYPASSRLS`, usado apenas por
+  `pg_dump`; restauração executada por superusuário em banco novo, preservando proprietários e políticas.
+  Procedimento exercitado e registrado em `RUNBOOKS.md`.
