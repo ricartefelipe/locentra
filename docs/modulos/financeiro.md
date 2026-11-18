@@ -28,7 +28,7 @@ compostas para tabelas do mesmo tenant e RLS habilitada e forçada (`app_enable_
 | `payment_provider_accounts` | Conta do provedor por organização (uma ativa): provedor, ambiente, chave de API cifrada (SecretBox, AES-256-GCM), SHA-256 do token dos webhooks | DELETE revogado |
 | `receivables` | Contas a receber: tipo, reserva, cliente, origem única `(source_type, source_id)`, valor, vencimento | trigger recusa UPDATE; DELETE revogado |
 | `receivable_cancellations` | Cancelamento compensatório (um por cobrança, com motivo) | somente inserção |
-| `payments` | Pagamentos parciais: finalidade (cobrança ou caução), método, provedor, situação, referência externa (= id), identificador no provedor, revisão | trigger recusa UPDATE de pagamento confirmado, falho ou cancelado e de dados de origem; DELETE revogado |
+| `payments` | Pagamentos parciais: finalidade (cobrança ou caução), método, provedor, situação, referência externa (= id), identificador no provedor, revisão, tentativas de envio e início da última (`submission_started_at`) | trigger recusa UPDATE de pagamento confirmado, falho ou cancelado e de dados de origem; DELETE revogado |
 | `refunds` | Reembolsos de pagamentos de cobrança | trigger recusa UPDATE após conclusão; trigger de INSERT bloqueia o pagamento e limita a soma |
 | `deposits` | Caução da reserva (uma por reserva), tipo e valor previsto | trigger recusa UPDATE; DELETE revogado |
 | `deposit_entries` | Movimentos de caução: recebimento (por pagamento), aplicação a cobrança, devolução | somente inserção; trigger limita saídas ao saldo |
@@ -39,7 +39,8 @@ compostas para tabelas do mesmo tenant e RLS habilitada e forçada (`app_enable_
 | `invoices` | Faturas comerciais numeradas (`FAT-000001`), retrato das cobranças | somente inserção |
 
 `inbound_webhooks` (migration 0007) guarda os eventos recebidos, únicos por
-`(organization_id, provider, event_id)`.
+`(organization_id, provider, event_id)`. A migration 0010 acrescenta `provider_account_id` (chave
+estrangeira composta para `payment_provider_accounts`): a conta que recebeu o evento.
 
 O webhook público chega sem tenant. A política `webhook_account_lookup` permite ler somente a conta
 cujo id foi definido em `app.payment_account_id` na transação; após verificar o token, a transação
@@ -64,18 +65,22 @@ Caução: `saldo = recebido − aplicado − devolvido`; situação `awaiting`, 
 Pagamento (`Domain::Finance::PAYMENT_TRANSITIONS`):
 
 ```
-pending_submission → pending | submission_unknown | confirmed | failed | cancelled
-submission_unknown → pending_submission | pending | confirmed | cancelled
+pending_submission → submission_unknown | confirmed | failed | cancelled
+submission_unknown → pending_submission | pending | confirmed | failed | cancelled
 pending            → confirmed | failed | cancelled
 confirmed, failed, cancelled: finais (imutáveis)
 ```
 
 - Pagamentos manuais nascem `confirmed` (provedor `manual`).
-- `pending_submission → confirmed` cobre o webhook que chega antes da resposta do envio.
-- `submission_unknown` só muda após consulta ao provedor pela referência externa.
+- `pending_submission → submission_unknown` é gravado **antes** da chamada de rede (tentativa em
+  andamento = resultado desconhecido), com `submission_attempts + 1` e `submission_started_at`.
+- `submission_unknown` sai do estado pela resposta da própria tentativa (cobrança criada →
+  `pending`/`confirmed`/`cancelled`; recusa definitiva → `failed`; requisição não enviada →
+  `pending_submission`) ou pela consulta ao provedor pela referência externa.
+- `pending_submission → confirmed | cancelled` cobre eventos do provedor para cobrança já existente.
 
 Reembolso: `pending → confirmed | failed`. Reembolso de pagamento manual é confirmado na hora;
-de pagamento de provedor fica pendente até a tarefa `payments.refund`.
+de pagamento de provedor fica pendente até o provedor informar o estorno como concluído.
 
 ## Regras
 
@@ -84,7 +89,10 @@ de pagamento de provedor fica pendente até a tarefa `payments.refund`.
   positivo (`extension`, `late_fee`, `damage`, `missing`, `cancellation_fee`; `amendment` vira `other`).
   `INSERT ... ON CONFLICT DO NOTHING` na origem única torna a operação idempotente. Bloqueio temporário
   só é cobrado com pedido explícito de cobrança antecipada (botão "Emitir cobrança antecipada").
-  Reserva cancelada ou expirada com saldo em aberto gera o alerta `reservation_closed_with_charges`.
+  Numa reserva cancelada, a locação não é cobrada, mas ajustes `cancellation_fee` com valor positivo
+  viram cobrança (os demais ajustes pressupõem a locação e são ignorados). Reserva cancelada ou
+  expirada com saldo em aberto gera o alerta `reservation_closed_with_charges`; a multa de
+  cancelamento em aberto é esperada e não gera o alerta.
 - **Acionamento automático**: `Webhooks::DispatchEvent` aceita assinantes (`subscribers:`); o assinante
   financeiro enfileira `finance.sync_reservation` para eventos `reservation.*`, na mesma transação que
   marca o evento como despachado. A sincronização também está disponível por botão.
@@ -96,6 +104,12 @@ de pagamento de provedor fica pendente até a tarefa `payments.refund`.
   `requires_review` com motivo e é criado o alerta `payment_after_expiration` ou
   `payment_after_cancellation`. A reserva nunca é alterada; a decisão (reembolso, nova reserva, sem
   ação) é registrada no alerta. Valor divergente informado pelo provedor também gera revisão.
+- **Recebimentos inesperados no provedor** (webhook): pagamento em aberto quitado por outra cobrança
+  com a mesma referência (duplicada) é confirmado, passa a apontar para a cobrança paga, recebe
+  revisão e alerta `duplicate_provider_charge` para cancelar a outra. Recebimento para pagamento já
+  confirmado por outra cobrança, cancelado ou falho não é lançado (o registro é imutável): gera
+  alerta (`duplicate_provider_charge` ou `unmatched_provider_receipt`, um por cobrança) com a
+  cobrança e o valor, para decisão entre reembolso no provedor e registro manual.
 - **Reembolsos**: o pagamento é bloqueado (`FOR UPDATE`) antes de somar reembolsos pendentes e
   confirmados; a soma nunca excede o valor confirmado (`409 refund_exceeds_eligible`). O trigger
   `refunds_within_payment` repete a verificação com lock no banco. Cauções não são reembolsadas por
@@ -158,12 +172,19 @@ consultada durante o desenvolvimento):
   `description` e `externalReference` (id do pagamento);
 - `GET /payments?externalReference=` para localizar a cobrança depois de tempo esgotado;
   `GET /payments?dateCreated[ge]=` paginado (`limit`/`offset`/`hasMore`) para a conciliação;
-- `POST /payments/{id}/refund` com `value` e `description`; `GET /payments/{id}` para ler `refunds`;
+- `POST /payments/{id}/refund` com `value` e `description`; `GET /payments/{id}/refunds` para a
+  situação dos estornos (`PENDING`, `AWAITING_CRITICAL_ACTION_AUTHORIZATION`,
+  `AWAITING_CUSTOMER_EXTERNAL_AUTHORIZATION`, `CANCELLED`, `DONE`; só `DONE` é concluído);
 - webhooks com o token no cabeçalho `asaas-access-token` e `id` do evento para deduplicação; eventos
   `PAYMENT_CONFIRMED`/`PAYMENT_RECEIVED` confirmam, `PAYMENT_DELETED` cancela, demais são informativos.
 
 Valores decimais são escritos como número exato (`150.50`) e lidos como `BigDecimal`; nenhum Float.
-Erros 5xx em POST são tratados como resultado desconhecido.
+Expoente e número de dígitos são verificados antes de qualquer conversão (teto de `Domain::Money`):
+um corpo pequeno com `1e99999999` é recusado sem expandir o número. Erros 5xx em POST, tempo
+esgotado de leitura/escrita, conexão encerrada (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`, `IOError`) são
+tratados como resultado desconhecido. A listagem consulta `dateCreated[ge]` um dia antes do início da
+janela (a data do Asaas é a data local do provedor) e é marcada como incompleta quando `hasMore`
+continua verdadeiro após 10 páginas de 100.
 
 **A integração real com o Asaas não foi exercitada**: os testes usam cliente HTTP falso, sem
 credenciais reais (`test/unit/infrastructure/asaas_adapter_test.rb`).
@@ -171,35 +192,71 @@ credenciais reais (`test/unit/infrastructure/asaas_adapter_test.rb`).
 ## Submissão e resolução sem cobrança duplicada
 
 1. `RequestPayment` grava o pagamento `pending_submission` e enfileira `payments.submit`.
-2. O worker (`SubmitPayment`) prepara em transação curta, chama o provedor sem transação aberta e
-   registra o resultado em nova transação curta.
-3. Tempo esgotado → `submission_unknown` e nova tarefa `payments.submit` em 60 s. Nessa tarefa (ou na
-   conciliação), `ResolveSubmission` consulta o provedor pela referência externa **antes de qualquer
-   nova tentativa**: encontrada, a situação remota é adotada; ausente, o pagamento volta a
-   `pending_submission` e é reenviado com a mesma referência. Várias cobranças com a mesma referência
-   geram o alerta `duplicate_provider_charge`.
-4. Conexão não estabelecida (`ProviderUnavailable`) mantém o pagamento aguardando envio e a fila
-   reagenda a tarefa.
+2. O worker (`SubmitPayment`) grava a tentativa (`submission_unknown`, tentativa `n`, início `t`) em
+   transação curta **antes** da chamada de rede, chama o provedor sem transação aberta e registra o
+   resultado em nova transação curta, somente se o pagamento ainda estiver na tentativa `n`.
+3. Qualquer reexecução da tarefa (queda do processo, lease vencido, erro não classificado ou erro ao
+   registrar) ou segunda tarefa do mesmo pagamento encontra `submission_unknown` e vai para
+   `ResolveSubmission`, nunca para um novo envio às cegas.
+4. `ResolveSubmission` consulta o provedor pela referência externa: encontrada, a situação remota é
+   adotada; ausente numa consulta iniciada **depois da janela da tentativa**
+   (`SUBMISSION_WINDOW_SECONDS` = 300 s, acima da duração máxima das requisições de um envio com os
+   tempos limite do cliente HTTP), o pagamento volta a `pending_submission` e é reenviado com a mesma
+   referência. Antes da janela, a ausência não é conclusiva (a requisição pode estar em andamento) e
+   uma consulta é agendada para o fim dela (`payments.submit` com chave única por tentativa). Se uma
+   tentativa nova começou depois da consulta, o resultado da consulta é descartado.
+5. Tempo esgotado → o pagamento fica em `submission_unknown` e a consulta é agendada para o fim da
+   janela. Várias cobranças com a mesma referência geram o alerta `duplicate_provider_charge` (a
+   associada é a paga ou ainda pagável; uma removida só é adotada se não houver outra), assim como a
+   resposta tardia de uma tentativa que criou cobrança depois de o pagamento ter seguido adiante.
+6. Requisição não enviada (`ProviderUnavailable`: conexão recusada, limite de taxa) devolve o
+   pagamento a `pending_submission` e a fila reagenda a tarefa com espera crescente.
 
 Reembolsos de provedor seguem o mesmo princípio: antes de pedir o estorno, os reembolsos já
-registrados no provedor são procurados pela descrição estável `Locentra reembolso <id>`.
+registrados no provedor são procurados pela descrição estável `Locentra reembolso <id>`. A situação
+informada decide: concluído (`DONE`) confirma; em andamento (pendente ou aguardando autorização)
+mantém o reembolso pendente (valor comprometido) e agenda nova consulta em 30 minutos; cancelado no
+provedor falha o reembolso, com estorno contábil, sem novo pedido automático.
 
 ## Webhooks recebidos
 
 `POST /webhooks/pagamentos/:conta_id` (público, sem CSRF): o token do cabeçalho `asaas-access-token` é
 comparado em tempo constante com o SHA-256 armazenado; conta inexistente ou inativa resulta em `401`
-sem distinção. O evento é persistido em `inbound_webhooks` antes do processamento e a resposta é
-`200 {"status":"accepted"}` ou `{"status":"duplicate"}`. A tarefa `payments.process_webhook` bloqueia o
-registro e só o trata enquanto `received`; confirmar pagamento já confirmado não tem efeito.
+sem distinção. O evento é persistido em `inbound_webhooks`, com a conta que o recebeu, antes do
+processamento, e a resposta é `200 {"status":"accepted"}` ou `{"status":"duplicate"}`. A tarefa
+`payments.process_webhook` bloqueia o registro e só o trata enquanto `received`:
+
+- o evento só altera pagamentos da conta que o recebeu (evento recebido por outra conta, mesmo com
+  token válido dessa outra conta, é ignorado com o motivo registrado);
+- a busca pelo identificador da cobrança também é restrita à conta;
+- remoção (`PAYMENT_DELETED`) de cobrança diferente da associada ao pagamento não o cancela;
+- confirmação repetida da cobrança associada não tem efeito; confirmações por outra cobrança seguem
+  a regra de recebimentos inesperados (acima).
 
 ## Conciliação
 
 `Reconcile` compara os pagamentos locais da conta ativa (últimos 30 dias) com as cobranças do provedor
 e grava o relatório: `missing_remote`, `missing_local`, `status_mismatch`, `amount_mismatch`,
-`duplicate_remote`. Correções seguras são aplicadas no ato (envio sem confirmação encontrado ou
-ausente, pagamento confirmado no provedor e pendente no Locentra); as demais ficam para revisão.
-Executada pelo botão "Conciliar agora" e a cada hora por organização (tarefa `finance.reconcile`
-agendada pelo `organization.tick` com chave única por hora).
+`duplicate_remote`.
+
+- Envio sem confirmação ausente da listagem é consultado pela referência externa, um a um, antes de
+  qualquer decisão; o novo envio segue as regras de `ResolveSubmission` (ação "Novo envio agendado"
+  ou, dentro da janela da tentativa, "Nova consulta agendada").
+- Listagem incompleta (limite de páginas) não prova ausência: `missing_remote` só é apontado para
+  pagamentos consultados pela referência, e o relatório indica a listagem incompleta.
+- Pagamentos em aberto (`pending`, `submission_unknown`) de contas desativadas (substituídas) são
+  consultados com as credenciais da própria conta (até 50 por execução); falhas dessas consultas
+  (credencial revogada) não interrompem a conciliação e aparecem no relatório.
+- Cobrança remota só é `missing_local` se a referência não for de nenhum pagamento da organização.
+- Cobrança estornada no provedor só é compatível com pagamento confirmado que tenha reembolso no
+  Locentra; estorno feito direto no painel do provedor aparece como `status_mismatch`.
+- Resposta inválida do provedor (valor ausente, JSON inesperado, campo obrigatório ausente) marca o
+  relatório como falho com a mensagem; nenhum relatório fica "em execução".
+
+Correções seguras são aplicadas no ato (envio sem confirmação resolvido, pagamento confirmado no
+provedor e pendente no Locentra pela cobrança associada); as demais ficam para revisão. Executada pelo
+botão "Conciliar agora" e a cada hora por organização (tarefa `finance.reconcile` agendada pelo
+`organization.tick` com chave única por hora).
 
 ## Faturas comerciais
 
@@ -229,6 +286,14 @@ Permissões existentes: `finance.read`, `finance.write`, `finance.refund`, `depo
   e balanceamento no COMMIT).
 - Referência externa igual ao id do pagamento: estável entre tentativas, reenvios e conciliação.
 - Alertas financeiros em tabela própria (`finance_alerts`), independente de outros módulos.
+- Tentativa de envio gravada antes da chamada de rede, com janela de conclusão: o estado
+  `submission_unknown` cobre "em andamento" e "sem resposta", e a ausência remota só é aceita depois
+  da janela. Não foi criado um estado novo: a especificação fixa os estados do pagamento.
+- Webhook vinculado à conta que o recebeu: a troca de conta (nova chave ou token) não permite que um
+  token de outra conta altere pagamentos; os pagamentos da conta anterior são resolvidos pela
+  conciliação com as credenciais dela.
+- Recebimento para pagamento concluído não é lançado automaticamente (registro imutável e sem
+  pagamento em aberto para recebê-lo); o alerta guarda cobrança e valor para a decisão.
 
 ## Limitações
 
@@ -240,8 +305,17 @@ Permissões existentes: `finance.read`, `finance.write`, `finance.refund`, `depo
 - Cancelamento de cobrança é sempre integral; descontos parciais usam reembolso ou nova cobrança.
 - Cobranças pendentes no provedor não reservam saldo: se duas cobranças da mesma conta forem pagas, o
   excedente aparece como "Crédito do cliente" (ou caução acima do previsto) e deve ser reembolsado.
-- A conciliação considera os últimos 30 dias e apenas a conta ativa; cobranças remotas criadas fora do
-  Locentra aparecem como `missing_local`.
+- A conciliação exige conta ativa e considera os últimos 30 dias; pagamentos de contas desativadas
+  são consultados um a um (até 50 por execução). Sem conta ativa, pagamentos em aberto de contas
+  desativadas não são conciliados. Cobranças remotas criadas fora do Locentra aparecem como
+  `missing_local`.
+- Depois da troca de conta, eventos de pagamentos da conta anterior que chegarem pela URL da nova
+  conta são ignorados; esses pagamentos são atualizados pela conciliação (se as credenciais antigas
+  ainda forem aceitas pelo provedor).
+- Pagamento que esgota as tentativas da fila em `pending_submission` (provedor indisponível por muito
+  tempo) não é reenviado automaticamente; precisa de nova cobrança.
+- A janela de conclusão do envio (300 s) pressupõe os tempos limite do cliente HTTP; uma requisição
+  que ultrapasse a janela pode gerar cobrança duplicada, que é sinalizada por alerta.
 - Webhooks recebidos não têm limitação de taxa própria além do limite de corpo da aplicação.
 - NFS-e fora do escopo.
 
@@ -252,7 +326,9 @@ docker compose run --rm dev bundle exec ruby -Ilib -Itest test/unit/domain/finan
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/unit/infrastructure/asaas_adapter_test.rb
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/finance_flow_test.rb
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/payment_provider_test.rb
+docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/payment_resilience_test.rb
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/concurrency/refund_race_test.rb
+docker compose run --rm dev bundle exec ruby -Ilib -Itest test/concurrency/payment_submission_race_test.rb
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/http/finance_pages_test.rb
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/http/finance_api_test.rb
 ```
@@ -266,7 +342,7 @@ tela do pagamento ou "Conciliar agora" na tela do financeiro.
 |---|---|
 | Caução e reembolso | `test_deposit_is_received_applied_to_damage_and_returned_without_touching_revenue`, `test_refunds_respect_the_confirmed_amount_and_reopen_the_balance` |
 | Reembolsos concorrentes acima do saldo | `RefundRaceTest` (Barrier e PausingProxy; inclui a verificação do trigger) |
-| Tempo esgotado após sucesso sem segunda cobrança | `test_timeout_after_success_is_resolved_without_a_second_charge`, `test_reconciliation_resolves_unknown_submission_before_any_retry` |
+| Tempo esgotado após sucesso sem segunda cobrança | `test_timeout_after_success_is_resolved_without_a_second_charge`, `test_reconciliation_resolves_unknown_submission_before_any_retry`, `PaymentResilienceTest#test_job_reexecution_after_remote_creation_never_charges_twice`, `PaymentSubmissionRaceTest` (segunda tarefa durante a chamada de rede) |
 | Webhook repetido | `test_repeated_webhooks_do_not_duplicate_effects`, `test_public_webhook_endpoint_authenticates_and_deduplicates` |
 | Pagamento após expiração não reativa | `test_payment_after_hold_expiration_does_not_reactivate_reservation` |
 | Imutabilidade | `test_confirmed_and_financial_records_are_immutable_in_the_database` |
@@ -274,3 +350,7 @@ tela do pagamento ou "Conciliar agora" na tela do financeiro.
 | Isolamento entre organizações | `test_organizations_are_isolated`, `FinanceApiTest#test_scopes_and_tenant_isolation` |
 | Idempotência da API | `FinanceApiTest` |
 | Telas renderizam | `FinancePagesTest#test_every_finance_page_renders_with_real_data` (Rack::Lint) |
+| Conciliação com listagem incompleta e conta substituída | `PaymentResilienceTest#test_reconciliation_looks_up_unknown_submissions_missing_from_an_incomplete_listing`, `#test_reconciliation_covers_open_payments_of_a_replaced_account` |
+| Situação dos estornos no provedor | `PaymentResilienceTest#test_provider_refund_status_decides_the_local_refund` |
+| Webhook de outra conta ou cobrança | `PaymentResilienceTest#test_webhook_received_by_another_account_does_not_change_the_payment`, `#test_payment_through_a_duplicate_charge_is_confirmed_relinked_and_flagged`, `#test_receipt_for_a_cancelled_payment_raises_an_alert` |
+| Multa de cancelamento | `FinanceFlowTest#test_cancellation_fee_of_cancelled_reservation_becomes_a_charge` |
