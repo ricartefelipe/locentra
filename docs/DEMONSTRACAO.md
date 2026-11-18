@@ -175,7 +175,8 @@ a cobrança de locação **Parcialmente paga**, com saldo de **R$ 100,00**. Clic
 ### 13. Repetir uma operação com a mesma chave de idempotência
 
 1. **Usuários e permissões → Credenciais de integração**: nome **Demonstração**, tipo **API**, escopos
-   `finance.read` e `finance.write` → **Criar credencial**. Copie o token exibido (aparece uma vez).
+   `finance.read` e `finance.write` (pagamentos deste passo) e `customers.read` (consulta de clientes
+   do passo 14) → **Criar credencial**. Copie o token exibido (aparece uma vez).
 2. Com o identificador da cobrança de locação (parte final do endereço `/financeiro/cobrancas/<id>`),
    envie o mesmo pagamento duas vezes:
 
@@ -202,12 +203,15 @@ done
 2. Veja **Clientes**, **Reservas** e **Produtos e kits**: somente os dados da Beta (Casamentos
    Primavera ME, gerador, cadeiras e mesas).
 3. Abra o endereço de uma reserva da Alfa (copiado no passo 5).
-4. Com o token da Alfa, `curl -s http://localhost:9292/api/v1/customers -H "Authorization: Bearer $TOKEN"`.
+4. Com o token da Alfa (passo 13), `curl -s http://localhost:9292/api/v1/customers -H "Authorization: Bearer $TOKEN"`.
 
 **Esperado:** nenhum dado da Alfa aparece na Beta; o endereço da reserva da Alfa responde **Página não
-encontrada** (404, sem revelar que o registro existe); a API da credencial da Alfa lista somente
-clientes da Alfa. O mesmo vale entrando como `paulo@beta.demo`. No banco, as políticas de RLS
-impedem a leitura de linhas de outra organização mesmo com SQL incorreto.
+encontrada** (404, sem revelar que o registro existe). A API responde `200` e o campo `data` traz
+somente os clientes da Alfa (Joana Prado, Marina Souza e Produtora Horizonte Ltda.), sem Casamentos
+Primavera ME: a credencial pertence à Alfa, independentemente da organização ativa no navegador. Uma
+credencial sem o escopo `customers.read` recebe `403` (`forbidden`) nessa chamada. O mesmo isolamento
+vale entrando como `paulo@beta.demo`. No banco, as políticas de RLS impedem a leitura de linhas de
+outra organização mesmo com SQL incorreto.
 
 ## Observabilidade durante o roteiro
 

@@ -174,7 +174,10 @@ devolução parcial com avaria; tripé encaminhado para inspeção, avaria cobra
 inspeções aprovada e reprovada (ordem de manutenção); devolução final, caução aplicada e devolvida;
 pagamento pelo simulador confirmado pelo worker; pagamento repetido pela API com a mesma
 `Idempotency-Key` (um único registro, conteúdo diferente recusado com 409); e, na organização B,
-404 na tela, `NotFound` nos casos de uso e nenhuma linha da organização A pela RLS.
+404 na tela, a API da credencial da Alfa listando somente clientes da Alfa (e 404 para o cliente da
+Beta), `NotFound` nos casos de uso e nenhuma linha da organização A pela RLS. A credencial do teste
+tem os mesmos escopos do roteiro manual (`finance.read`, `finance.write` e `customers.read`), de modo
+que um passo do documento que dependa de outro escopo falha no teste.
 
 O seed ganhou o preparo da demonstração manual, idempotente também em bancos semeados antes:
 `ana@alfa.demo` passa a ser gerente da Beta Eventos e a Alfa recebe a conta ativa do simulador. O

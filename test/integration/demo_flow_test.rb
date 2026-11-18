@@ -14,6 +14,7 @@ class DemoFlowTest < DatabaseTest
   include WorkerHelpers
 
   PASSWORD = "senha-muito-segura-1"
+  SCOPES = %w[finance.read finance.write customers.read].freeze
   UUID = /\h{8}-\h{4}-\h{4}-\h{4}-\h{12}/
 
   def app = @app ||= Rack::Lint.new(Locentra::Interfaces::HTTP::App.build(@system))
@@ -203,24 +204,27 @@ class DemoFlowTest < DatabaseTest
     assert_equal ["partial", 10_000], [balance(@rental).status, balance(@rental).outstanding.cents]
   end
 
-  # (13) O mesmo pagamento enviado duas vezes pela API com a mesma chave é registrado uma única vez.
+  # (13) O mesmo pagamento enviado duas vezes pela API com a mesma chave é registrado uma única vez. A
+  # credencial tem os escopos do roteiro manual: financeiro e leitura de clientes (usada no passo 14).
   def repeat_with_idempotency_key
-    token = uc(:create_credential).call(@actor, name: "ERP da Alfa", scopes: %w[finance.read finance.write], expires_in_days: 30)["token"]
+    @token = uc(:create_credential).call(@actor, name: "ERP da Alfa", scopes: SCOPES, expires_in_days: 30)["token"]
     payload = { "receivable_id" => @rental.id, "method" => "pix", "amount_cents" => 10_000, "notes" => "Pix do saldo" }
-    first = api_payment(token, payload, "demo-saldo-0001")
-    second = api_payment(token, payload, "demo-saldo-0001")
+    first = api_payment(@token, payload, "demo-saldo-0001")
+    second = api_payment(@token, payload, "demo-saldo-0001")
 
     assert_equal [201, 201], [first.status, second.status]
     assert_equal "true", second.headers["idempotent-replayed"]
     assert_equal JSON.parse(first.body)["id"], JSON.parse(second.body)["id"]
-    assert_equal 409, api_payment(token, payload.merge("amount_cents" => 1), "demo-saldo-0001").status
+    assert_equal 409, api_payment(@token, payload.merge("amount_cents" => 1), "demo-saldo-0001").status
     assert_equal 1, owner_query("SELECT count(*) AS n FROM payments WHERE receivable_id = $1 AND provider = 'manual'", [@rental.id]).first["n"].to_i
     assert_equal "paid", balance(@rental).status
     assert_empty @system.transactor.call(tenant_id: @alfa[:organization_id]) { |tx| @system.repos[:ledger_entries].unbalanced_transactions(tx) }
   end
 
-  # (14) Na organização B, nada da organização A é visível: telas, casos de uso e banco (RLS).
+  # (14) Na organização B, nada da organização A é visível: telas, API, casos de uso e banco (RLS). A
+  # credencial da Alfa continua presa à Alfa mesmo com a sessão web na Beta.
   def enter_organization_b_and_check_isolation
+    beta_customer = uc(:create_customer).call(@beta[:actor], { kind: "company", name: "Casamentos Primavera ME", document: "45723174000110" })
     sign_in_and_choose(@beta)
 
     assert_includes last_response.body, "Beta Eventos"
@@ -229,7 +233,15 @@ class DemoFlowTest < DatabaseTest
     assert_equal 404, last_response.status
     get "/clientes"
 
+    assert_includes last_response.body, "Casamentos Primavera ME"
     refute_includes last_response.body, "Marina Souza"
+    api_get("/api/v1/customers")
+
+    assert_equal 200, last_response.status, last_response.body
+    assert_equal ["Marina Souza", "Produtora Horizonte Ltda."], JSON.parse(last_response.body)["data"].map { |c| c["name"] }.sort
+    api_get("/api/v1/customers/#{beta_customer.id}")
+
+    assert_equal 404, last_response.status
     beta = A::Actor.user(user_id: @alfa[:user_id], organization_id: @beta[:organization_id], role: "manager")
 
     assert_raises(D::NotFound) { uc(:get_reservation).call(beta, @reservation.id) }
@@ -294,6 +306,8 @@ class DemoFlowTest < DatabaseTest
     count.times { gate << :go }
     threads.map(&:value)
   end
+
+  def api_get(path) = get(path, {}, { "HTTP_AUTHORIZATION" => "Bearer #{@token}" })
 
   def api_payment(token, payload, key)
     post "/api/v1/payments", JSON.generate(payload), { "HTTP_AUTHORIZATION" => "Bearer #{token}", "CONTENT_TYPE" => "application/json",
