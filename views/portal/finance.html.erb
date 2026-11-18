@@ -1,0 +1,68 @@
+<% totals = @data[:totals] %>
+<header class="page-header">
+  <h1>Cobranças e saldos</h1>
+  <p class="muted">Saldos calculados a partir dos pagamentos confirmados, reembolsos e cauções aplicadas. Pagamentos em processamento aparecem depois da confirmação.</p>
+</header>
+<section class="cards" aria-label="Totais">
+  <div class="card<%= totals[:open].positive? ? " card-alert" : "" %>">
+    <span class="card-value"><%= money(totals[:open]) %></span>
+    <span class="card-label">Em aberto (<%= totals[:open_count] %> cobranças)</span>
+  </div>
+  <div class="card">
+    <span class="card-value"><%= money(totals[:credit]) %></span>
+    <span class="card-label">Crédito a seu favor</span>
+  </div>
+</section>
+<section class="panel" aria-labelledby="cobrancas-titulo">
+  <h2 id="cobrancas-titulo">Cobranças</h2>
+  <% if @data[:receivables].empty? %>
+    <p class="empty">Nenhuma cobrança registrada.</p>
+  <% else %>
+    <table class="table">
+      <caption class="sr-only">Cobranças com valor, valor quitado e saldo</caption>
+      <thead><tr><th scope="col">Descrição</th><th scope="col">Reserva</th><th scope="col">Vencimento</th><th scope="col">Situação</th><th scope="col" class="num">Valor</th><th scope="col" class="num">Quitado</th><th scope="col" class="num">Saldo</th></tr></thead>
+      <tbody>
+        <% @data[:receivables].each do |row| %>
+          <% rec = row[:receivable] %>
+          <% bal = row[:balance] %>
+          <tr>
+            <td><%= rec.description %><br><span class="muted"><%= rec.kind_label %></span></td>
+            <td><a href="/portal/reservas/<%= rec.reservation_id %>"><%= row[:reservation_code] %></a></td>
+            <td><%= date(rec.due_on) %></td>
+            <td><%= finance_badge(bal.status, bal.status_label) %></td>
+            <td class="num"><%= money(rec.amount) %></td>
+            <td class="num"><%= money(bal.settled) %></td>
+            <td class="num"><strong><%= money(bal.status == "cancelled" ? Locentra::Domain::Money.zero : bal.open_amount) %></strong></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>
+<section class="panel" aria-labelledby="caucoes-titulo">
+  <h2 id="caucoes-titulo">Cauções</h2>
+  <% if @data[:deposits].empty? %>
+    <p class="empty">Nenhuma caução registrada.</p>
+  <% else %>
+    <table class="table">
+      <thead><tr><th scope="col">Reserva</th><th scope="col">Tipo</th><th scope="col">Situação</th><th scope="col" class="num">Prevista</th><th scope="col" class="num">Recebida</th><th scope="col" class="num">Aplicada</th><th scope="col" class="num">Devolvida</th><th scope="col" class="num">Retida</th></tr></thead>
+      <tbody>
+        <% @data[:deposits].each do |row| %>
+          <% dep = row[:deposit] %>
+          <% led = row[:ledger] %>
+          <tr>
+            <td><a href="/portal/reservas/<%= dep.reservation_id %>"><%= row[:reservation_code] %></a></td>
+            <td><%= dep.kind_label %></td>
+            <td><%= finance_badge(led.status, led.status_label) %></td>
+            <td class="num"><%= money(dep.expected) %></td>
+            <td class="num"><%= money(led.received) %></td>
+            <td class="num"><%= money(led.applied) %></td>
+            <td class="num"><%= money(led.returned) %></td>
+            <td class="num"><strong><%= money(led.balance) %></strong></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+    <p class="muted">A caução é separada das cobranças: o saldo retido é devolvido após a conferência da devolução, deduzidos os valores aplicados.</p>
+  <% end %>
+</section>
