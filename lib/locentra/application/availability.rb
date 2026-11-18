@@ -175,19 +175,20 @@ module Locentra
           @clock = clock
         end
 
-        # Com `tx:`, compõe a consulta na transação do chamador, que já verificou a permissão do ator
-        # revalidado (por exemplo, a consulta do portal do cliente).
-        def call(actor, branch_id:, period:, product_ids: nil, tx: nil)
-          return check(tx, branch_id, period, product_ids) if tx
+        # `product_ids` e `skus` são filtros opcionais e cumulativos; sem nenhum deles, todos os
+        # produtos ativos. SKU inexistente é erro de validação. Com `tx:`, compõe a consulta na
+        # transação do chamador, que já verificou a permissão do ator revalidado (por exemplo, o portal).
+        def call(actor, branch_id:, period:, product_ids: nil, skus: nil, tx: nil)
+          return check(tx, branch_id, period, product_ids, skus) if tx
 
-          @uow.run(actor, "availability.read") { |t, _current| check(t, branch_id, period, product_ids) }
+          @uow.run(actor, "availability.read") { |t, _current| check(t, branch_id, period, product_ids, skus) }
         end
 
         private
 
-        def check(tx, branch_id, period, product_ids)
+        def check(tx, branch_id, period, product_ids, skus)
           branch = Domain::Identifier.parse(branch_id, "filial")
-          ids = product_ids&.map { |id| Domain::Identifier.parse(id, "produto") } || @repository.active_product_ids(tx)
+          ids = requested_products(tx, product_ids, skus)
           products = @allocator.products_for(tx, ids)
           now = @clock.now
           physical = products.values.reject { |p| p[:product].kit? }.to_h do |p|
@@ -198,13 +199,21 @@ module Locentra
             next unless entry
 
             product = entry[:product]
-            result = if product.kit?
-                       kit_units(entry[:spec], physical)
-                     else
-                       physical.fetch(id)
-                     end
+            result = product.kit? ? kit_units(entry[:spec], physical) : physical.fetch(id)
             { "product" => product, "available" => result[:available], "total" => result[:total] }
           end
+        end
+
+        def requested_products(tx, product_ids, skus)
+          return @repository.active_product_ids(tx) if product_ids.nil? && skus.nil?
+
+          ids = Array(product_ids).map { |id| Domain::Identifier.parse(id, "produto") }
+          wanted = Array(skus).map { |sku| sku.to_s.strip.upcase }.uniq
+          found = wanted.empty? ? {} : @repository.product_ids_by_sku(tx, wanted)
+          missing = wanted - found.keys
+          raise Domain::ValidationError.field("produto", "SKU não encontrado: #{missing.join(", ")}") unless missing.empty?
+
+          (ids + wanted.map { |sku| found.fetch(sku) }).uniq
         end
 
         def units(tx, product, branch_id, period, now)
@@ -214,8 +223,7 @@ module Locentra
             return { available: 0, total: 0 } unless pool
 
             ledger = AV::StockLedger.new(capacity: pool["total_quantity"],
-                                         occupancies: @repository.stock_occupancies(tx,
-                                                                                    pool["id"], window, now))
+                                         occupancies: @repository.stock_occupancies(tx, pool["id"], window, now))
             { available: ledger.available(window), total: pool["total_quantity"] }
           else
             schedules = @repository.asset_schedules(tx, product.id, branch_id, window, now)

@@ -505,10 +505,18 @@ module Locentra
 
           @uow.run(actor, actor.customer? ? "portal.access" : "reservations.read") do |tx, current|
             customer = current.customer? ? current.customer_id : (customer_id && Domain::Identifier.parse(customer_id, "cliente"))
+            names = self.class.customer_names?(current)
             items, total = @reservations.search(tx, status: status, customer_id: customer, search: search.to_s.strip[0, 40],
-                                                    from: from, to: to, sort: sort, limit: lim, offset: off)
+                                                    from: from, to: to, sort: sort, limit: lim, offset: off, customer_names: names)
             Page.new(items: items, limit: lim, offset: off, total: total)
           end
+        end
+
+        # O nome do cliente (na listagem e na busca) exige `customers.read`, como nos detalhes do
+        # cliente; o portal lista somente as reservas do próprio cliente. Sem o escopo, `customer_name`
+        # vem nil e a busca considera apenas o código da reserva.
+        def self.customer_names?(actor)
+          actor.customer? || Authorizer.allowed?(actor, "customers.read")
         end
       end
 
@@ -519,8 +527,22 @@ module Locentra
         end
 
         def call(actor, reservation_id)
+          details(actor) { |tx| @reservations.find(tx, Domain::Identifier.parse(reservation_id)) }
+        end
+
+        # Reserva pelo código (R-000001) ou pelo identificador, com as mesmas permissões.
+        def by_reference(actor, reference)
+          text = reference.to_s.strip
+          raise Domain::ValidationError.field("reserva", "informe o código ou o identificador") if text.empty?
+
+          details(actor) { |tx| Domain::Identifier.valid?(text) ? @reservations.find(tx, text.downcase) : @reservations.find_by_code(tx, text) }
+        end
+
+        private
+
+        def details(actor)
           @uow.run(actor, actor.customer? ? "portal.access" : "reservations.read") do |tx, current|
-            reservation = @reservations.find(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
+            reservation = yield(tx) || raise(Domain::NotFound, "reserva")
             raise Domain::NotFound, "reserva" if current.customer? && reservation.customer_id != current.customer_id
 
             { reservation: reservation, items: @reservations.items(tx, reservation.id), allocations: @reservations.allocation_details(tx, reservation.id),

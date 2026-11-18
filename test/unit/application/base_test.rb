@@ -55,8 +55,8 @@ class ApplicationBaseTest < UnitTest
   end
 
   def test_credentials_use_scopes_and_must_belong_to_tenant
-    access = FakeAccess.new(credentials: { "c1" => { "organization_id" => "o1", "scopes" => ["customers.read"] },
-                                           "c2" => { "organization_id" => "o2", "scopes" => ["customers.read"] } })
+    access = FakeAccess.new(credentials: { "c1" => { "organization_id" => "o1", "kind" => "api", "scopes" => ["customers.read"] },
+                                           "c2" => { "organization_id" => "o2", "kind" => "api", "scopes" => ["customers.read"] } })
     api = A::Actor.credential(kind: "api", credential_id: "c1", organization_id: "o1", scopes: ["reservations.write"])
 
     assert_equal :ok, uow(access).run(api, "customers.read") { :ok }, "escopos são recarregados do banco"
@@ -64,6 +64,15 @@ class ApplicationBaseTest < UnitTest
     forged = A::Actor.credential(kind: "api", credential_id: "c2", organization_id: "o1", scopes: ["customers.read"])
 
     assert_raises(Locentra::Domain::AccessDenied) { uow(access).run(forged, "customers.read") { :ok } }
+  end
+
+  def test_credential_kind_must_match_the_actor_kind
+    access = FakeAccess.new(credentials: { "c1" => { "organization_id" => "o1", "kind" => "api", "scopes" => ["jobs.manage"] },
+                                           "c2" => { "organization_id" => "o1", "kind" => "cli", "scopes" => ["jobs.manage"] } })
+    as_cli = A::Actor.credential(kind: "cli", credential_id: "c1", organization_id: "o1", scopes: ["jobs.manage"])
+
+    assert_raises(Locentra::Domain::AccessDenied) { uow(access).run(as_cli, "jobs.manage") { :ok } }
+    assert_equal "cli", uow(access).run(as_cli.with(credential_id: "c2"), "jobs.manage") { |_tx, current| current.kind }
   end
 
   def test_customer_actor_is_restricted_to_portal_permission

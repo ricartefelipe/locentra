@@ -87,7 +87,9 @@ module Locentra
           token = header[/\ABearer\s+(\S+)\z/, 1]
           raise Unauthenticated, "credencial ausente ou malformada" unless token
 
-          actor = @system.use_cases[:authenticate_credential].call(token, request_id: ctx.request_id, ip: ctx.ip)
+          # Credenciais da CLI operacional (kind "cli") não são aceitas na API: o recurso "api" do
+          # plano é exigido apenas na criação de credenciais "api".
+          actor = @system.use_cases[:authenticate_credential].call(token, kind: "api", request_id: ctx.request_id, ip: ctx.ip)
           raise Unauthenticated, "credencial inválida" unless actor
 
           ctx.env["locentra.auth_method"] = "bearer"

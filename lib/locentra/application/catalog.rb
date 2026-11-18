@@ -326,10 +326,25 @@ module Locentra
         end
 
         def call(actor, asset_id)
+          details(actor) { |tx| @catalog.find_asset(tx, Domain::Identifier.parse(asset_id)) }
+        end
+
+        # Ativo pelo patrimônio ou pelo identificador, com as mesmas permissões.
+        def by_reference(actor, reference)
+          text = reference.to_s.strip
+          raise Domain::ValidationError.field("ativo", "informe o patrimônio ou o identificador") if text.empty?
+
+          details(actor) { |tx| Domain::Identifier.valid?(text) ? @catalog.find_asset(tx, text.downcase) : @catalog.find_asset_by_tag(tx, text) }
+        end
+
+        private
+
+        # `hold`: inspeção pendente ou ordem de manutenção ativa que controla a situação física.
+        def details(actor)
           @uow.run(actor, "catalog.read") do |tx, _|
-            asset = @catalog.find_asset(tx, Domain::Identifier.parse(asset_id)) || raise(Domain::NotFound, "ativo")
+            asset = yield(tx) || raise(Domain::NotFound, "ativo")
             { asset: asset, product: @catalog.find_product(tx, asset.product_id), events: @catalog.asset_events(tx, asset.id),
-              allocations: @availability.asset_allocations(tx, asset.id) }
+              allocations: @availability.asset_allocations(tx, asset.id), hold: @catalog.operational_hold(tx, asset.id) }
           end
         end
       end

@@ -108,6 +108,7 @@ module Locentra
       build_operations_use_cases(uc)
       build_quote_use_cases(uc)
       build_contract_use_cases(uc)
+      build_cli_use_cases(uc)
       build_portal_use_cases(uc)
       @use_cases = UseCases.new(uc)
     end
@@ -434,6 +435,16 @@ module Locentra
       uc[:finance] = fn::Queries.new(uow: uow, receivables: r[:receivables], payments: r[:payments], deposits: r[:deposits], alerts: r[:finance_alerts],
                                      **accounts, reports: r[:reconciliation], invoices: r[:invoices], ledger_entries: r[:ledger_entries],
                                      reservations: r[:reservations])
+    end
+
+    # CLI operacional (bin/locentra): identidade autenticada e tarefas mortas da fila. Os demais
+    # comandos usam os casos de uso já montados (disponibilidade, reservas, ativos, conciliação).
+    def build_cli_use_cases(cases)
+      uc = cases
+      r = repos
+      uc[:whoami] = A::Integrations::WhoAmI.new(uow: uow, credentials: r[:credentials], organizations: r[:organizations])
+      uc[:list_failed_jobs] = A::Jobs::ListFailures.new(uow: uow, queue: queue)
+      uc[:retry_job] = A::Jobs::RetryJob.new(uow: uow, queue: queue, audit: services[:audit])
     end
 
     # Acesso explícito aos casos de uso por nome, com erro claro para nomes inexistentes.
