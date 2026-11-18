@@ -121,7 +121,7 @@ module Locentra
 
         def to_refund(entry)
           FN::ProviderRefund.new(reference: entry["reference"], description: entry["description"], amount: Domain::Money.new(entry["value_cents"]),
-                                 status: entry["status"])
+                                 status: AsaasFormat.refund_status(entry["status"]))
         end
       end
     end

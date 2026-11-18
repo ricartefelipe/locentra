@@ -47,7 +47,8 @@ module Locentra
       # - POST /customers (cliente por externalReference), POST /payments com externalReference;
       # - GET /payments?externalReference= para localizar uma cobrança após tempo esgotado;
       # - GET /payments?dateCreated[ge]= paginado (limit/offset/hasMore) para a conciliação;
-      # - POST /payments/{id}/refund para estorno (total ou parcial, `value` e `description`);
+      # - POST /payments/{id}/refund para estorno (total ou parcial, `value` e `description`) e
+      #   GET /payments/{id}/refunds para a situação dos estornos (PENDING, AWAITING_*, CANCELLED, DONE);
       # - webhooks com o token no cabeçalho `asaas-access-token` e `id` do evento para deduplicação.
       # A integração real não foi exercitada: os testes usam cliente HTTP falso.
       class Asaas
@@ -93,14 +94,16 @@ module Locentra
         end
 
         def refunds(account, provider_payment_id)
-          Array(call(account, :get, "/payments/#{segment(provider_payment_id)}")["refunds"]).map { |item| refund_of(item) }
+          page(account, "/payments/#{segment(provider_payment_id)}/refunds", {}).map { |item| refund_of(item) }
         end
 
+        # A resposta é a cobrança com a lista `refunds`; sem o item do pedido, a situação fica em
+        # andamento e é confirmada por consulta posterior.
         def refund(account, provider_payment_id, amount:, description:)
           data = call(account, :post, "/payments/#{segment(provider_payment_id)}/refund",
                       body: { "value" => AsaasFormat.decimal(amount), "description" => description })
-          item = Array(data["refunds"]).rfind { |r| r["description"].to_s.include?(description) }
-          item ? refund_of(item) : FN::ProviderRefund.new(reference: data["id"].to_s, description: description, amount: amount, status: data["status"].to_s)
+          item = Array(data["refunds"]).rfind { |r| r.is_a?(Hash) && r["description"].to_s.include?(description) }
+          item ? refund_of(item) : FN::ProviderRefund.new(reference: data["id"].to_s, description: description, amount: amount, status: "pending")
         end
 
         def parse_webhook(text) = AsaasFormat.parse_event(text)
@@ -166,7 +169,8 @@ module Locentra
 
         def refund_of(item)
           FN::ProviderRefund.new(reference: (item["endToEndIdentifier"] || item["transactionReceiptUrl"] || item["dateCreated"]).to_s,
-                                 description: item["description"].to_s, amount: AsaasFormat.cents(item["value"]), status: item["status"].to_s)
+                                 description: item["description"].to_s, amount: AsaasFormat.cents(item["value"]),
+                                 status: AsaasFormat.refund_status(item["status"]))
         end
       end
     end

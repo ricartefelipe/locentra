@@ -296,7 +296,7 @@ class PaymentProviderTest < DatabaseTest
     assert_equal "pending", refund.status
     flaky = FlakyRefunds.new(worker_system.services[:payment_providers].for("simulator"))
     processor = FN::ProcessRefund.new(uow: worker_system.uow, payments: worker_system.repos[:payments], accounts: worker_system.repos[:payment_accounts],
-                                      providers: FN::Providers.new("simulator" => flaky), ledger: ledger_for(worker_system),
+                                      providers: FN::Providers.new("simulator" => flaky), ledger: ledger_for(worker_system), queue: worker_system.queue,
                                       audit: worker_system.services[:audit], events: worker_system.services[:events], clock: @clock)
     system_actor = A::Actor.system(organization_id: @org[:organization_id])
 
@@ -332,7 +332,7 @@ class PaymentProviderTest < DatabaseTest
     drain
     refund = uc(:request_refund).call(@actor, paid.id, amount: money(1_000), reason: "Teste de recusa")
     processor = FN::ProcessRefund.new(uow: @system.uow, payments: @system.repos[:payments], accounts: @system.repos[:payment_accounts],
-                                      providers: FN::Providers.new("simulator" => rejecting), ledger: ledger_for(@system),
+                                      providers: FN::Providers.new("simulator" => rejecting), ledger: ledger_for(@system), queue: @system.queue,
                                       audit: @system.services[:audit], events: @system.services[:events], clock: @clock)
 
     assert_equal :failed, processor.call(@actor, refund.id)

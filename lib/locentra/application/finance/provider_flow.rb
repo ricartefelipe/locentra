@@ -208,14 +208,19 @@ module Locentra
 
       # Execução de reembolso no provedor. Antes de pedir o estorno, os reembolsos já registrados no
       # provedor são consultados pela descrição estável: uma nova tentativa após tempo esgotado não
-      # estorna duas vezes.
+      # estorna duas vezes. A situação devolvida pelo provedor decide: concluído confirma; em andamento
+      # (pendente ou aguardando autorização) mantém o reembolso pendente com nova consulta agendada;
+      # cancelado no provedor falha (sem novo pedido automático: a decisão foi tomada no provedor).
       class ProcessRefund
-        def initialize(uow:, payments:, accounts:, providers:, ledger:, audit:, events:, clock:)
+        RECHECK_DELAY = 1800
+
+        def initialize(uow:, payments:, accounts:, providers:, ledger:, queue:, audit:, events:, clock:)
           @uow = uow
           @payments = payments
           @accounts = accounts
           @providers = providers
           @ledger = ledger
+          @queue = queue
           @audit = audit
           @events = events
           @clock = clock
@@ -241,14 +246,22 @@ module Locentra
         def execute(prepared)
           provider = @providers.for(prepared[:account]["provider"])
           account = prepared[:account]
-          payment = prepared[:payment]
+          charge = prepared[:payment].provider_payment_id
           refund = prepared[:refund]
-          existing = provider.refunds(account, payment.provider_payment_id).find { |r| r.description.to_s.include?(refund.id) }
-          return [:confirmed, existing.reference] if existing
+          previous = provider.refunds(account, charge).select { |r| r.description.to_s.include?(refund.id) }
+          return outcome_of(previous) unless previous.empty?
 
-          [:confirmed, provider.refund(account, payment.provider_payment_id, amount: refund.amount, description: refund.provider_description).reference]
+          outcome_of([provider.refund(account, charge, amount: refund.amount, description: refund.provider_description)])
         rescue ProviderRejected => e
           [:failed, e.message]
+        end
+
+        def outcome_of(items)
+          done = items.find(&:done?)
+          return [:confirmed, done.reference] if done
+          return [:pending, nil] unless items.all?(&:cancelled?)
+
+          [:failed, "estorno cancelado no provedor"]
         end
 
         def record(tx, actor, id, outcome)
@@ -256,16 +269,28 @@ module Locentra
           refund = @payments.lock_refund(tx, id)
           return :"already_#{refund.status}" unless refund.pending?
 
-          if kind == :confirmed
+          case kind
+          when :confirmed
             done = refund.confirm(@clock.now, value)
             @payments.update_refund(tx, done, from: refund.status, now: @clock.now)
             RefundCompletion.confirmed(tx, actor, done, ledger: @ledger, audit: @audit, events: @events)
+          when :pending
+            return recheck(tx, refund)
           else
             done = refund.fail(value)
             @payments.update_refund(tx, done, from: refund.status, now: @clock.now)
             RefundCompletion.failed(tx, actor, done, ledger: @ledger, audit: @audit)
           end
           done.status.to_sym
+        end
+
+        # Estorno em andamento no provedor: o reembolso continua pendente (o valor segue comprometido)
+        # e a situação é consultada de novo, uma tarefa por janela.
+        def recheck(tx, refund)
+          run_at = @clock.now + RECHECK_DELAY
+          @queue.enqueue(tx, "payments.refund", { "refund_id" => refund.id }, run_at: run_at, priority: 40,
+                                                                              unique_key: "refund-check:#{refund.id}:#{run_at.to_i / RECHECK_DELAY}")
+          :pending
         end
       end
     end

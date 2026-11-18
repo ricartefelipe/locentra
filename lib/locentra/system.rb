@@ -245,8 +245,8 @@ module Locentra
       uc[:submit_payment] = fn::SubmitPayment.new(uow: uow, payments: r[:payments], **accounts, customers: r[:customers], reservations: r[:reservations],
                                                   providers: providers, remote: remote, resolver: resolver, alert_book: alert_book, audit: audit, clock: clock)
       uc[:resolve_submission] = resolver
-      uc[:process_refund] = fn::ProcessRefund.new(uow: uow, payments: r[:payments], **accounts, providers: providers, ledger: ledger, audit: audit,
-                                                  events: s[:events], clock: clock)
+      uc[:process_refund] = fn::ProcessRefund.new(uow: uow, payments: r[:payments], **accounts, providers: providers, ledger: ledger, queue: queue,
+                                                  audit: audit, events: s[:events], clock: clock)
       uc[:ingest_payment_webhook] = ingest
       uc[:process_payment_webhook] = fn::ProcessWebhook.new(uow: uow, inbound: r[:inbound_webhooks], payments: r[:payments], providers: providers,
                                                             settlement: settlement, clock: clock)

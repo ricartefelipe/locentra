@@ -94,10 +94,14 @@ class AsaasAdapterTest < UnitTest
 
   def test_lookup_by_external_reference_listing_and_refunds
     list = %({"object":"list","hasMore":false,"data":[#{payment_json(status: "RECEIVED")}]})
-    done = '{"id":"pay_abc","refunds":[{"value":40.0,"description":"Locentra reembolso f1","status":"DONE","endToEndIdentifier":"E1"}]}'
+    statuses = %w[DONE PENDING AWAITING_CRITICAL_ACTION_AUTHORIZATION AWAITING_CUSTOMER_EXTERNAL_AUTHORIZATION CANCELLED]
+    items = statuses.each_with_index.map do |status, i|
+      %({"value":40.0,"description":"Locentra reembolso f#{i}","status":"#{status}","endToEndIdentifier":"E#{i}"})
+    end
+    listed_refunds = %({"object":"list","hasMore":false,"data":[#{items.join(",")}]})
     refunded = '{"id":"pay_abc","status":"REFUNDED","refunds":[{"value":40,"description":"Locentra reembolso f2","status":"PENDING"}]}'
     gateway = adapter({ %i[get /payments] => [{ body: list }, { body: %({"hasMore":true,"data":[#{payment_json}]}) }, { body: list }],
-                        %i[get /payments/pay_abc] => { body: done }, %i[post /payments/pay_abc/refund] => { body: refunded } })
+                        %i[get /payments/pay_abc/refunds] => { body: listed_refunds }, %i[post /payments/pay_abc/refund] => { body: refunded } })
     found = gateway.find_by_external_reference(account, "0190a1b2-0000-7000-8000-000000000001")
 
     assert_equal([%w[pay_123 confirmed]], found.map { |c| [c.provider_payment_id, c.status] })
@@ -110,10 +114,14 @@ class AsaasAdapterTest < UnitTest
     assert_includes urls[2], "offset=100"
     refunds = gateway.refunds(account, "pay_abc")
 
-    assert_equal([["E1", 4_000, "Locentra reembolso f1"]], refunds.map { |r| [r.reference, r.amount.cents, r.description] })
+    assert_equal "https://api-sandbox.asaas.com/v3/payments/pay_abc/refunds?limit=100&offset=0", gateway.instance_variable_get(:@http).requests.last.url
+    assert_equal([["E0", 4_000, "Locentra reembolso f0", "done"], ["E1", 4_000, "Locentra reembolso f1", "pending"]],
+                 refunds.first(2).map { |r| [r.reference, r.amount.cents, r.description, r.status] })
+    assert_equal %w[done pending pending pending cancelled], refunds.map(&:status), "somente DONE conclui o estorno"
+    assert_equal [true, false, true], [refunds.first.done?, refunds.first.cancelled?, refunds.last.cancelled?]
     refund = gateway.refund(account, "pay_abc", amount: Domain::Money.new(4_000), description: "Locentra reembolso f2")
 
-    assert_equal [4_000, "PENDING"], [refund.amount.cents, refund.status]
+    assert_equal [4_000, "pending"], [refund.amount.cents, refund.status]
     assert_includes gateway.instance_variable_get(:@http).requests.last.body, %("value":40.00)
     assert_raises(FN::ProviderRejected) { gateway.refunds(account, "../../customers") }
   end
@@ -122,7 +130,7 @@ class AsaasAdapterTest < UnitTest
     gateway = adapter({ %i[post /payments/pay_9/refund] => { body: '{"id":"pay_9","status":"REFUND_REQUESTED"}' } })
     refund = gateway.refund(account, "pay_9", amount: Domain::Money.new(100), description: "Locentra reembolso f9")
 
-    assert_equal %w[pay_9 REFUND_REQUESTED], [refund.reference, refund.status]
+    assert_equal %w[pay_9 pending], [refund.reference, refund.status], "sem o item do estorno, a situação é consultada depois"
   end
 
   def test_listing_beyond_the_page_limit_is_marked_incomplete

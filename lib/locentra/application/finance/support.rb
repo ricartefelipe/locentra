@@ -14,7 +14,8 @@ module Locentra
       #   refunds(account, provider_payment_id) -> [ProviderRefund]
       #   refund(account, provider_payment_id, amount:, description:) -> ProviderRefund
       #   parse_webhook(texto_json) -> ProviderEvent
-      # Toda chamada ocorre fora de transação de banco.
+      # Toda chamada ocorre fora de transação de banco. Situação de reembolso normalizada pelo
+      # adaptador: "done" (concluído), "pending" (em andamento ou aguardando autorização) ou "cancelled".
       class ProviderError < StandardError; end
       # Resultado desconhecido: a requisição pode ter sido processada (tempo esgotado após o envio).
       class ProviderTimeout < ProviderError; end
@@ -28,7 +29,10 @@ module Locentra
       CustomerRef = Data.define(:id, :name, :document, :email)
       ChargeRequest = Data.define(:external_reference, :amount, :payment_method, :due_on, :description, :customer, :scenario)
       ProviderCharge = Data.define(:provider_payment_id, :external_reference, :status, :amount, :invoice_url)
-      ProviderRefund = Data.define(:reference, :description, :amount, :status)
+      ProviderRefund = Data.define(:reference, :description, :amount, :status) do
+        def done? = status == "done"
+        def cancelled? = status == "cancelled"
+      end
       # `complete` falso: o provedor tem mais cobranças do que as devolvidas (limite de páginas); a
       # ausência de uma cobrança na listagem não prova nada.
       ChargeListing = Data.define(:charges, :complete)

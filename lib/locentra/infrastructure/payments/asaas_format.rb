@@ -21,6 +21,9 @@ module Locentra
         }.freeze
         CONFIRM_EVENTS = %w[PAYMENT_CONFIRMED PAYMENT_RECEIVED].freeze
         CANCEL_EVENTS = %w[PAYMENT_DELETED].freeze
+        # Situações de estorno (refunds[].status): só DONE é concluído; PENDING e AWAITING_* estão em
+        # andamento; CANCELLED não será feito.
+        REFUND_STATUSES = { "DONE" => "done", "CANCELLED" => "cancelled" }.freeze
         # Teto de Domain::Money (R$ 9.999.999.999,99: 10 dígitos inteiros, 2 decimais), verificado antes
         # de qualquer conversão: expoentes enormes ("1e99999999") não chegam a ser expandidos.
         MAX_EXPONENT = 10
@@ -57,6 +60,8 @@ module Locentra
         end
 
         def out_of_range! = raise(Domain::ValidationError.field("valor", "valor fora do limite permitido"))
+
+        def refund_status(remote) = REFUND_STATUSES.fetch(remote.to_s, "pending")
 
         # Número decimal exato para o corpo JSON ("150.50").
         def decimal(money) = JSON::Fragment.new(money.to_decimal_string)
