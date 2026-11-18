@@ -181,6 +181,23 @@ class FinanceFlowTest < DatabaseTest
     assert_equal(["reservation_closed_with_charges"], uc(:finance).overview(@actor)[:alerts].map { |a| a["kind"] })
   end
 
+  def test_finance_tables_follow_the_tenant_conventions
+    tables = %w[payment_provider_accounts receivables receivable_cancellations deposits payments refunds deposit_entries financial_entries
+                finance_alerts payment_simulator_charges reconciliation_reports reconciliation_items invoices]
+    rows = owner_query(<<~SQL, ["{#{tables.join(",")}}"])
+      SELECT c.relname,
+             c.relrowsecurity AND c.relforcerowsecurity AS rls,
+             EXISTS (SELECT 1 FROM pg_constraint k
+                      WHERE k.conrelid = c.oid AND k.contype IN ('u', 'p')
+                        AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+                              WHERE a.attrelid = c.oid AND a.attnum = ANY(k.conkey)) = ARRAY['id', 'organization_id']) AS tenant_key
+        FROM pg_class c WHERE c.relname = ANY($1::text[]) ORDER BY c.relname
+    SQL
+
+    assert_equal(tables.sort, rows.map { |r| r["relname"] })
+    assert_empty(rows.reject { |r| r["rls"] == "t" && r["tenant_key"] == "t" }, "RLS forçada e UNIQUE (organization_id, id) em toda tabela")
+  end
+
   def test_confirmed_and_financial_records_are_immutable_in_the_database
     rental = rental_of(booking.tap { |r| sync(r) })
     paid = pay(rental, 10_000)

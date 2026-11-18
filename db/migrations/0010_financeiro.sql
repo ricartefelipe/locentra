@@ -394,6 +394,7 @@ CREATE TABLE payment_simulator_charges (
   refunds jsonb NOT NULL DEFAULT '[]',
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL,
+  UNIQUE (organization_id, id),
   FOREIGN KEY (organization_id, account_id) REFERENCES payment_provider_accounts (organization_id, id)
 );
 CREATE INDEX payment_simulator_charges_reference_idx ON payment_simulator_charges (organization_id, account_id, external_reference);
