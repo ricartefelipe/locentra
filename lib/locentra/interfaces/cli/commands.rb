@@ -100,21 +100,30 @@ module Locentra
           page = uc(:list_reservations).call(@actor, status: options[:status], customer_id: options[:customer], search: options[:search],
                                                      from: from, to: to, sort: options[:sort] || "-starts_at", limit: options[:limit],
                                                      offset: options[:offset])
-          data = { "data" => page.items.map { |row| S.reservation(row[:reservation]).merge("customer_name" => row[:customer_name]) },
+          names = Application::Reservations::ListReservations.customer_names?(@actor)
+          data = { "data" => page.items.map { |row| reservation_row(row, names) },
                    "pagination" => { "limit" => page.limit, "offset" => page.offset, "total" => page.total, "next_offset" => page.next_offset } }
-          Result.ok(data, reservation_lines(page))
+          Result.ok(data, reservation_lines(page, names))
         end
 
-        def reservation_lines(page)
+        # Sem `customers.read`, a chave `customer_name` é omitida (como `customer.name` em `show`).
+        def reservation_row(row, names)
+          base = S.reservation(row[:reservation])
+          names ? base.merge("customer_name" => row[:customer_name]) : base
+        end
+
+        def reservation_lines(page, names)
           return ["Nenhuma reserva encontrada."] if page.items.empty?
 
           rows = page.items.map do |row|
             r = row[:reservation]
-            [r.code, r.status_label, row[:customer_name], F.time(r.period.starts_at, zone), F.time(r.period.ends_at, zone), r.total.format_brl]
+            [r.code, r.status_label, names ? row[:customer_name] : r.customer_id, F.time(r.period.starts_at, zone), F.time(r.period.ends_at, zone),
+             r.total.format_brl]
           end
           shown = "Exibindo #{page.offset + 1}–#{page.offset + page.items.size} de #{page.total} (horários em #{zone.identifier})."
           shown += " Próxima página: --deslocamento #{page.next_offset}." if page.next_offset
-          [*F.table(%w[Código Situação Cliente Retirada Devolução Total], rows), "", shown]
+          lines = [*F.table(["Código", "Situação", names ? "Cliente" : "Cliente (id)", "Retirada", "Devolução", "Total"], rows), "", shown]
+          names ? lines : lines + ["Nomes de clientes omitidos: a credencial não tem customers.read."]
         end
 
         def reservations_show(reference)

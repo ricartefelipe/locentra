@@ -68,7 +68,7 @@ module Locentra
         products: ["--produto SKU|ID", "Produto; repita a opção ou separe por vírgulas (padrão: todos os produtos ativos)"],
         status: ["--situacao SITUAÇÃO", "Situação da reserva: #{Domain::Reservations::STATUSES.keys.join(", ")}"],
         customer: ["--cliente ID", "Identificador do cliente"],
-        search: ["--busca TEXTO", "Trecho do código da reserva ou do nome do cliente"],
+        search: ["--busca TEXTO", "Trecho do código da reserva ou do nome do cliente (o nome exige customers.read)"],
         from: ["--de INSTANTE", "Reservas que terminam depois do instante (aceita data AAAA-MM-DD, início do dia local)"],
         to: ["--ate INSTANTE", "Reservas que começam antes do instante (aceita data AAAA-MM-DD, início do dia local)"],
         sort: ["--ordem=ORDEM", "Ordenação: #{Application::Reservations::ListReservations::SORTS.join(", ")} (padrão -starts_at)"],

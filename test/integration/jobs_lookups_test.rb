@@ -61,6 +61,23 @@ class JobsLookupsTest < DatabaseTest
     assert_includes error.message, "SKU não encontrado: NADA"
   end
 
+  # ListReservations: sem customers.read (credenciais com escopos), o nome do cliente não é devolvido
+  # nem usado na busca; equipe e portal continuam recebendo o nome.
+  def test_reservation_listing_respects_customers_read
+    camera = create_product(@actor, sku: "CAM-LST", tracking: "serialized")
+    register_assets(@actor, camera, @org[:branch], 1)
+    customer = create_customer(@actor, name: "Cliente Reservada")
+    reservation = reserve(@actor, customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-10T10:00:00Z"), [line(camera, 1)])
+    narrow = uc(:create_credential).call(@actor, name: "Leitura", scopes: %w[reservations.read], kind: "api", expires_in_days: 1)
+    api = uc(:authenticate_credential).call(narrow["token"], kind: "api")
+    page = uc(:list_reservations).call(api)
+
+    assert_equal([[reservation.id, nil]], page.items.map { |row| [row[:reservation].id, row[:customer_name]] })
+    assert_equal 0, uc(:list_reservations).call(api, search: "reservada").total
+    assert_equal 1, uc(:list_reservations).call(api, search: reservation.code).total
+    assert_equal(["Cliente Reservada"], uc(:list_reservations).call(@actor, search: "reservada").items.map { |row| row[:customer_name] })
+  end
+
   def test_failed_jobs_listing_and_retry_by_staff
     id = dead_job
     redacted = dead_job(last_error: "Erro: https://api.example.test/hook?chave=1 token=abc")
