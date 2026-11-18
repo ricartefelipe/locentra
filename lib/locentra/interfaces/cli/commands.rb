@@ -97,7 +97,7 @@ module Locentra
           to = options[:to] && instant(options[:to], "ate")
           raise Domain::ValidationError.field("ate", "deve ser posterior a --de") if from && to && to <= from
 
-          page =uc(:list_reservations).call(@actor, status: options[:status], customer_id: options[:customer], search: options[:search],
+          page = uc(:list_reservations).call(@actor, status: options[:status], customer_id: options[:customer], search: options[:search],
                                                      from: from, to: to, sort: options[:sort] || "-starts_at", limit: options[:limit],
                                                      offset: options[:offset])
           data = { "data" => page.items.map { |row| S.reservation(row[:reservation]).merge("customer_name" => row[:customer_name]) },

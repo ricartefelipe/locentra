@@ -55,7 +55,7 @@ class JobsLookupsTest < DatabaseTest
     window = period("2026-03-10T08:00:00Z", "2026-03-10T10:00:00Z")
     rows = uc(:check_availability).call(@actor, branch_id: @org[:branch].id, period: window, product_ids: [camera.id], skus: %w[cam-sku CAM-SKU])
 
-    assert_equal [[camera.id, 2]], rows.map { |row| [row["product"].id, row["available"]] }
+    assert_equal([[camera.id, 2]], rows.map { |row| [row["product"].id, row["available"]] })
     error = assert_raises(D::ValidationError) { uc(:check_availability).call(@actor, branch_id: @org[:branch].id, period: window, skus: %w[NADA]) }
 
     assert_includes error.message, "SKU não encontrado: NADA"
