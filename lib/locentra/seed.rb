@@ -5,7 +5,8 @@ module Locentra
   # casos de uso da aplicação (papel de aplicação, RLS e auditoria ativos). Uma organização já
   # existente (identificada pelo e-mail do proprietário) não é recriada. Depois das organizações, o
   # preparo da demonstração manual (vínculo da proprietária da Alfa com a Beta e conta do simulador
-  # de pagamentos da Alfa) é verificado e completado, sem alterar o resumo devolvido.
+  # de pagamentos da Alfa) é completado somente com o que nunca existiu, sem desfazer alterações
+  # feitas depois do seed e sem alterar o resumo devolvido.
   class Seed
     PASSWORD = "locentra-local-demo"
     D = Domain
@@ -52,8 +53,9 @@ module Locentra
 
     def uc(name) = @system.use_cases[name]
 
-    # Idempotente também em bancos semeados antes da demonstração: cada item é verificado antes de ser
-    # criado (vínculo ativo; conta do simulador ativa).
+    # Idempotente também em bancos semeados antes da demonstração e não destrutivo: cada item só é
+    # criado quando nunca existiu. Um vínculo revogado, uma conta desativada ou outro provedor
+    # configurado depois do seed são decisões de quem usa o ambiente e não são revertidos.
     def prepare_demonstration
       owners = ORGANIZATIONS.to_h { |spec| [spec[:name], owner_actor(spec)] }
       return if owners.values.any?(&:nil?)
@@ -68,17 +70,20 @@ module Locentra
       membership && Application::Actor.user(user_id: user["id"], organization_id: membership["organization_id"], role: "owner")
     end
 
+    # Qualquer vínculo do usuário com a organização, ativo ou revogado, encerra o preparo.
     def ensure_membership(inviter, email, role)
       user = @system.uow.anonymous { |tx| @system.repos[:users].find_by_email(tx, email) }
       return unless user
-      return if uc(:list_memberships).call(user["id"]).any? { |m| m["organization_id"] == inviter.organization_id }
+      return if uc(:list_members).call(inviter)[:members].any? { |member| member["user_id"] == user["id"] }
 
       token = invite_with_known_token(inviter, email, role)
       uc(:accept_invitation).call(token: token, user_id: user["id"])
     end
 
+    # Configurar uma conta desativa a anterior; por isso o simulador só entra numa organização que
+    # nunca teve conta de provedor (ativa ou desativada).
     def ensure_simulator(actor)
-      return if uc(:finance).accounts(actor).any? { |account| account["active"] && account["provider"] == "simulator" }
+      return unless uc(:finance).accounts(actor).empty?
 
       uc(:configure_payment_account).call(actor, provider: "simulator", name: DEMO_SIMULATOR[:name])
     end

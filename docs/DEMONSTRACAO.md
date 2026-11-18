@@ -14,7 +14,10 @@ docker compose up -d web worker # se o ambiente já existia
 
 O seed é idempotente (`ruby bin/locentra-admin db:seed` pode ser repetido) e, além das duas
 organizações, garante os dados usados neste roteiro: a proprietária da Alfa também é gerente da Beta
-e a Alfa tem a conta do simulador de pagamentos ativa.
+e a Alfa tem a conta do simulador de pagamentos ativa. Esses dois itens só são criados quando nunca
+existiram: repetir o seed não substitui outro provedor configurado na Alfa, não reativa uma conta
+desativada e não devolve um acesso revogado. Nesses casos, configure o simulador em **Financeiro →
+Provedor de pagamentos** antes do passo 12 e use `paulo@beta.demo` no passo 14.
 
 | Endereço | Uso |
 |---|---|

@@ -178,8 +178,12 @@ pagamento pelo simulador confirmado pelo worker; pagamento repetido pela API com
 
 O seed ganhou o preparo da demonstração manual, idempotente também em bancos semeados antes:
 `ana@alfa.demo` passa a ser gerente da Beta Eventos e a Alfa recebe a conta ativa do simulador. O
-resumo devolvido pelo seed continua com as duas organizações (o job "Reconstrução do banco e seed"
-segue esperando duas linhas `skipped`).
+preparo não é destrutivo: cada item só é criado quando nunca existiu. Qualquer vínculo da Ana com a
+Beta (ativo ou revogado) e qualquer conta de provedor da Alfa (ativa ou desativada) encerram o
+preparo. Isso importa porque configurar uma conta desativa a anterior: repetir o seed, por exemplo
+pelo `bin/setup`, não pode trocar o Asaas configurado pelo desenvolvedor pelo simulador. O resumo
+devolvido pelo seed continua com as duas organizações (o job "Reconstrução do banco e seed" segue
+esperando duas linhas `skipped`).
 
 ## Testes
 
@@ -189,7 +193,7 @@ segue esperando duas linhas `skipped`).
 | `test/unit/application/observability_test.rb` | `ExternalCalls` (sucesso, desfecho classificado, erro mapeado e propagado), provedores com e sem ator, conflitos contados pela `UnitOfWork` (inclusive `anonymous` e conflito do coordenador), `CollectMetrics` com agregados da fila e totais |
 | `test/http/observability_test.rb` | Correlação de ponta a ponta (eventos, auditoria, tarefas, `job.finished`, `external.call` do webhook e do simulador, simulação e webhook público); `/metrics` válido no formato do Prometheus com todos os sinais (inclusive conflito tratado por formulário, retentativa e falha permanente agregadas) e nenhum rótulo com UUID ou identificador do tenant; token de métricas |
 | `test/integration/demo_flow_test.rb` | Roteiro completo |
-| `test/integration/seed_test.rb` | Seed idempotente e preparo completado em banco semeado antes |
+| `test/integration/seed_test.rb` | Seed idempotente, preparo completado em banco semeado antes e, ao repetir o seed, conta Asaas, conta desativada e vínculo revogado mantidos |
 | `test/browser/*` | Tabela da seção de testes de navegador |
 
 ## Limitações
