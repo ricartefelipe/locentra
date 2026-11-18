@@ -519,8 +519,22 @@ module Locentra
         end
 
         def call(actor, reservation_id)
+          details(actor) { |tx| @reservations.find(tx, Domain::Identifier.parse(reservation_id)) }
+        end
+
+        # Reserva pelo código (R-000001) ou pelo identificador, com as mesmas permissões.
+        def by_reference(actor, reference)
+          text = reference.to_s.strip
+          raise Domain::ValidationError.field("reserva", "informe o código ou o identificador") if text.empty?
+
+          details(actor) { |tx| Domain::Identifier.valid?(text) ? @reservations.find(tx, text.downcase) : @reservations.find_by_code(tx, text) }
+        end
+
+        private
+
+        def details(actor)
           @uow.run(actor, actor.customer? ? "portal.access" : "reservations.read") do |tx, current|
-            reservation = @reservations.find(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
+            reservation = yield(tx) || raise(Domain::NotFound, "reserva")
             raise Domain::NotFound, "reserva" if current.customer? && reservation.customer_id != current.customer_id
 
             { reservation: reservation, items: @reservations.items(tx, reservation.id), allocations: @reservations.allocation_details(tx, reservation.id),

@@ -175,10 +175,12 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, branch_id:, period:, product_ids: nil)
+        # `product_ids` e `skus` são filtros opcionais e cumulativos; sem nenhum deles, todos os
+        # produtos ativos. SKU inexistente é erro de validação.
+        def call(actor, branch_id:, period:, product_ids: nil, skus: nil)
           @uow.run(actor, "availability.read") do |tx, _current|
             branch = Domain::Identifier.parse(branch_id, "filial")
-            ids = product_ids&.map { |id| Domain::Identifier.parse(id, "produto") } || @repository.active_product_ids(tx)
+            ids = requested_products(tx, product_ids, skus)
             products = @allocator.products_for(tx, ids)
             now = @clock.now
             physical = products.values.reject { |p| p[:product].kit? }.to_h do |p|
@@ -200,6 +202,18 @@ module Locentra
         end
 
         private
+
+        def requested_products(tx, product_ids, skus)
+          return @repository.active_product_ids(tx) if product_ids.nil? && skus.nil?
+
+          ids = Array(product_ids).map { |id| Domain::Identifier.parse(id, "produto") }
+          wanted = Array(skus).map { |sku| sku.to_s.strip.upcase }.uniq
+          found = wanted.empty? ? {} : @repository.product_ids_by_sku(tx, wanted)
+          missing = wanted - found.keys
+          raise Domain::ValidationError.field("produto", "SKU não encontrado: #{missing.join(", ")}") unless missing.empty?
+
+          (ids + wanted.map { |sku| found.fetch(sku) }).uniq
+        end
 
         def units(tx, product, branch_id, period, now)
           window = product.blocked_period(period)
