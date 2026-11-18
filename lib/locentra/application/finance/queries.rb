@@ -3,7 +3,8 @@
 module Locentra
   module Application
     module Finance
-      # Consultas do financeiro (somente leitura, permissão finance.read).
+      # Consultas do financeiro (somente leitura, permissão finance.read; o extrato do cliente também
+      # atende o portal).
       class Queries
         RECEIVABLE_FILTERS = F::RECEIVABLE_STATUSES.keys.freeze
 
@@ -81,6 +82,23 @@ module Locentra
         def invoice(actor, invoice_id)
           read(actor) do |tx|
             @invoices.find(tx, Domain::Identifier.parse(invoice_id, "fatura")) || raise(Domain::NotFound, "fatura")
+          end
+        end
+
+        # Extrato de um cliente: cobranças com saldo derivado, totais em aberto e cauções. O cliente do
+        # portal consulta somente o próprio extrato (`portal.access`, cliente do acesso); a equipe usa
+        # `finance.read`. Diário contábil, alertas, conciliação e dados do provedor não fazem parte dele.
+        # Cobranças e cauções são páginas independentes (Page); os totais consideram todas as cobranças.
+        def customer_statement(actor, customer_id: nil, limit: nil, offset: nil, deposits_limit: nil, deposits_offset: nil)
+          lim, off = Page.params(limit: limit, offset: offset)
+          deposits_lim, deposits_off = Page.params(limit: deposits_limit, offset: deposits_offset)
+          @uow.run(actor, actor.customer? ? "portal.access" : "finance.read") do |tx, current|
+            id = current.customer? ? current.customer_id : Domain::Identifier.parse(customer_id, "cliente")
+            receivables, receivables_total = @receivables.for_customer(tx, id, limit: lim, offset: off)
+            deposits, deposits_total = @deposits.for_customer(tx, id, limit: deposits_lim, offset: deposits_off)
+            { receivables: Page.new(items: receivables, limit: lim, offset: off, total: receivables_total),
+              totals: @receivables.customer_totals(tx, id),
+              deposits: Page.new(items: deposits, limit: deposits_lim, offset: deposits_off, total: deposits_total) }
           end
         end
 

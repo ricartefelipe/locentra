@@ -95,7 +95,8 @@ module Locentra
       end
 
       # Download autenticado: o anexo é buscado pelo id dentro do tenant e a permissão depende do dono.
-      # Clientes do portal só acessam anexos de contratos próprios.
+      # Clientes do portal só acessam o que o escopo do portal permitir (`customer_owns?(tx,
+      # customer_id, anexo)`): documentos de contratos próprios. Qualquer outro caso é "não encontrado".
       class Download
         def initialize(uow:, attachments:, storage:, portal_scope:)
           @uow = uow
@@ -119,7 +120,7 @@ module Locentra
 
         def authorize!(tx, actor, row)
           if actor.customer?
-            raise Domain::NotFound, "anexo" unless @portal_scope.customer_owns?(tx, actor.customer_id, row["owner_type"], row["owner_id"])
+            raise Domain::NotFound, "anexo" unless @portal_scope.customer_owns?(tx, actor.customer_id, row)
           else
             Authorizer.authorize!(actor, PERMISSIONS.fetch(row["owner_type"]).first)
           end

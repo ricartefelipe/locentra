@@ -128,6 +128,10 @@ module Locentra
 
       # Registro do aceite eletrônico simples da versão atual do documento, pela equipe (presencial)
       # ou pelo próprio cliente (ator `customer`). O primeiro aceite torna o contrato vigente.
+      #
+      # `version` é a versão do documento exibida a quem aceita: se um aditivo gerou versão nova
+      # depois disso, o aceite é recusado (`stale_document_version`). O cliente sempre informa a
+      # versão; para a equipe ela é opcional (sem versão, vale a vigente).
       class AcceptContract
         def initialize(uow:, contracts:, audit:, events:, clock:)
           @uow = uow
@@ -137,7 +141,8 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, contract_id, name:, document:, user_agent: nil, confirmed: false)
+        def call(actor, contract_id, name:, document:, version: nil, user_agent: nil, confirmed: false)
+          number = parse_version(version, required: actor.customer?)
           raise Domain::ValidationError.field("declaracao", "confirme a declaração de aceite") unless confirmed
 
           @uow.run(actor, actor.customer? ? "portal.access" : "contracts.write") do |tx, current|
@@ -145,6 +150,7 @@ module Locentra
             contract = Scope.lock!(@contracts, tx, current, contract_id)
             raise Domain::InvalidTransition.new("contrato", contract.status, "aceite") unless contract.open?
 
+            contract.acceptable_version!(number) if number
             doc = @contracts.lock_document(tx, contract.id, contract.current_document_version) || raise(Domain::NotFound, "documento")
             raise Domain::Conflict.new("A versão #{doc["version"]} do documento já possui aceite registrado", code: "already_accepted") if doc["accepted_at"]
 
@@ -159,6 +165,16 @@ module Locentra
             @events.publish(tx, "contract.accepted", "contract", contract.id, "code" => contract.code, "document_version" => doc["version"])
             accepted
           end
+        end
+
+        private
+
+        def parse_version(value, required:)
+          return nil if value.to_s.empty? && !required
+
+          Integer(value.to_s, 10)
+        rescue ArgumentError
+          raise Domain::ValidationError.field("versao", "informe a versão do documento aceita")
         end
       end
 

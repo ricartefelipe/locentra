@@ -292,11 +292,11 @@ class ContractsFlowTest < DatabaseTest
 
     assert_raises(D::NotFound) { uc(:get_contract).call(stranger, contract.id) }
     assert_raises(D::NotFound) do
-      uc(:accept_contract).call(stranger, contract.id, name: "Outro Cliente", document: "11144477735", confirmed: true)
+      uc(:accept_contract).call(stranger, contract.id, version: 1, name: "Outro Cliente", document: "11144477735", confirmed: true)
     end
     owner_query("UPDATE portal_accesses SET customer_id = $1 WHERE user_id = $2", [@customer.id, user_id])
     owner = A::Actor.customer(user_id: user_id, organization_id: @org[:organization_id], customer_id: @customer.id, ip: "203.0.113.5")
-    accepted = uc(:accept_contract).call(owner, contract.id, name: "Joana Locatária", document: "52998224725", confirmed: true)
+    accepted = uc(:accept_contract).call(owner, contract.id, version: 1, name: "Joana Locatária", document: "52998224725", confirmed: true)
 
     assert_equal "active", accepted.status
     assert_equal "portal", uc(:get_contract).call(@actor, contract.id)[:documents].first["accepted_via"]

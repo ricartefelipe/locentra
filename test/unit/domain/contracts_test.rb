@@ -58,6 +58,17 @@ class ContractsDomainTest < UnitTest
     assert_equal "Encerrado", closed.status_label
   end
 
+  def test_acceptance_is_bound_to_the_current_document_version
+    amended = issued.amend(2)
+
+    assert_equal 2, amended.acceptable_version!(2)
+    stale = assert_raises(Domain::Conflict) { amended.acceptable_version!(1) }
+
+    assert_equal "stale_document_version", stale.code
+    assert_includes stale.message, "A versão 1 do documento não é mais a vigente (versão vigente: 2)"
+    assert_raises(Domain::Conflict) { issued.acceptable_version!(2) }
+  end
+
   def test_cancellation_records_reason_and_fee
     cancelled = issued.cancel(now: now, reason: " Evento   adiado ", fee: Domain::Money.new(6_000), reservation: reservation)
 

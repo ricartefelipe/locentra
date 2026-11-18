@@ -21,6 +21,7 @@ module Locentra
             "email.confirmation" => method(:email_confirmation),
             "email.password_reset" => method(:email_password_reset),
             "email.invitation" => method(:email_invitation),
+            "email.portal_invitation" => method(:email_portal_invitation),
             "email.send" => method(:email_send),
             "platform.fanout" => method(:platform_fanout),
             "platform.housekeeping" => method(:platform_housekeeping),
@@ -92,6 +93,25 @@ module Locentra
 
           send_template("invitation", invitation["email"], "organization" => org.name,
                                                            "role" => Domain::Identity.role_label(invitation["role"]), "link" => link("/convites", token))
+        end
+
+        # Convite do portal do cliente: como no convite da equipe, o token é emitido no envio e a fila
+        # guarda somente o identificador. Convite aceito, cancelado ou vencido não gera e-mail.
+        def email_portal_invitation(job)
+          delivery = tenant(job) do |tx|
+            portal = @system.repos[:portal]
+            invitation = portal.lock_deliverable_invitation(tx, job.payload.fetch("invitation_id"), @system.clock.now)
+            next nil unless invitation
+
+            secret = "#{tx.tenant_id!}.#{@system.ids.token(32)}"
+            portal.assign_token(tx, invitation.id, Application::Identity::Tokens.digest(secret))
+            [invitation, @system.repos[:organizations].find(tx, tx.tenant_id!), @system.repos[:customers].find(tx, invitation.customer_id), secret]
+          end
+          return :invitation_closed unless delivery
+
+          invitation, org, customer, token = delivery
+          send_template("portal_invitation", invitation.email,
+                        "organization" => org.name, "customer" => customer.name, "link" => link("/portal/convite", token))
         end
 
         def email_send(job)

@@ -37,8 +37,9 @@ module Locentra
             attachments = @system.uow.run(ctx.actor, "customers.read") do |tx, _|
               @system.repos[:attachments].for_owner(tx, "customer", data[:customer].id)
             end
+            portal = uc(:list_portal_accesses).call(ctx.actor, data[:customer].id)
             render(ctx, "customers/show", title: data[:customer].name, status: status, data: data, reservations: reservations, errors: errors,
-                                          attachments: attachments)
+                                          attachments: attachments, portal: portal)
           end
 
           def update(ctx)

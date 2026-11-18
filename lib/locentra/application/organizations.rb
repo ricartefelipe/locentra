@@ -38,6 +38,14 @@ module Locentra
           false
         end
 
+        # Consulta sem lock para telas; gravações continuam usando `feature!`, que bloqueia a assinatura.
+        def includes?(tx, feature)
+          subscription = @subscriptions.current(tx)
+          return false if subscription.nil? || INACTIVE.include?(subscription["status"])
+
+          (Array(subscription["features"]) + Array(subscription["extra_features"])).include?(feature)
+        end
+
         private
 
         def active_subscription!(tx)

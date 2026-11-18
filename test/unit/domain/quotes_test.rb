@@ -135,6 +135,19 @@ class QuotesDomainTest < UnitTest
     assert_raises(Domain::InvalidTransition) { approved.revise(branch_id: "b1", hold_policy: "none", hold_minutes: nil) }
   end
 
+  def test_rejection_of_a_given_version_requires_it_to_be_current
+    resent = sent.revise(branch_id: "b1", hold_policy: "none", hold_minutes: nil).send_version(version(number: 2), now)
+    stale = assert_raises(Domain::Conflict) { resent.reject("Preço alto", now, version: 1) }
+
+    assert_equal "stale_quote_version", stale.code
+    assert_includes stale.message, "versão atual: 2"
+    assert_raises(Domain::InvalidTransition, "situação é verificada antes da versão") { draft.reject("Preço alto", now, version: 7) }
+    rejected = resent.reject("Preço alto", now, version: 2)
+
+    assert_equal ["rejected", "Preço alto"], [rejected.status, rejected.rejection_reason]
+    assert_equal "rejected", resent.reject("Sem versão informada", now).status
+  end
+
   def test_rejection_conversion_and_final_states
     assert_raises(Domain::ValidationError) { sent.reject("", now) }
     assert_raises(Domain::InvalidTransition) { draft.reject("motivo", now) }

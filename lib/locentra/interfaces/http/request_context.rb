@@ -12,6 +12,17 @@ module Locentra
       class Unauthenticated < StandardError; end
       class CsrfFailure < StandardError; end
 
+      # Sessão válida usada na área de outro tipo de acesso (portal do cliente x equipe). `home` é o
+      # início da área da sessão; páginas redirecionam para ele e as demais requisições recebem 403.
+      class WrongArea < StandardError
+        attr_reader :home
+
+        def initialize(home)
+          @home = home
+          super("Esta área não está disponível para a sessão atual")
+        end
+      end
+
       # Contexto de uma requisição: parâmetros (via parsers do Rack), sessão, ator e CSRF.
       class RequestContext
         JSON_MAX_NESTING = 10
