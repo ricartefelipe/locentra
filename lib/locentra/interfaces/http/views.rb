@@ -143,8 +143,11 @@ module Locentra
           "confirmed" => "success", "in_progress" => "info", "held" => "warning", "requested" => "neutral", "completed" => "muted",
           "cancelled" => "danger", "expired" => "muted", "available" => "success", "checked_out" => "info", "in_inspection" => "warning",
           "in_maintenance" => "warning", "in_transit" => "info", "lost" => "danger", "retired" => "muted", "active" => "success",
-          "blocked" => "danger", "inactive" => "muted", "revoked" => "muted", "draft" => "neutral", "sent" => "info", "approved" => "success",
-          "rejected" => "danger", "converted" => "muted", "issued" => "warning", "closed" => "muted"
+          "blocked" => "danger", "inactive" => "muted", "revoked" => "muted", "picking" => "warning", "delivered" => "success",
+          "partial" => "info", "not_delivered" => "muted", "pending" => "warning", "checked" => "info", "approved" => "success",
+          "rejected" => "danger", "open" => "warning", "dismissed" => "muted", "received" => "success", "resolved" => "muted",
+          "overdue" => "danger", "affected_by_overdue" => "warning", "asset_unavailable" => "danger", "draft" => "neutral",
+          "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted"
         }.freeze
 
         def status_badge(status, label)
@@ -176,6 +179,12 @@ module Locentra
           raw(%( aria-invalid="true" aria-describedby="erro-#{h(field)}"))
         end
 
+        # Valor reenviado de um campo indexado (nome[chave]); ignora formatos inesperados.
+        def keyed_value(values, group, key)
+          bucket = values.is_a?(Hash) ? values[group] : nil
+          bucket.is_a?(Hash) ? bucket[key] : nil
+        end
+
         # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.
         def open_if(errors, *fields) = raw(fields.any? { |field| errors&.key?(field.to_s) } ? " open" : "")
 
@@ -198,6 +207,8 @@ module Locentra
           ["Clientes", "/clientes", "customers.read"],
           ["Produtos e kits", "/produtos", "catalog.read"],
           ["Ativos", "/ativos", "catalog.read"],
+          ["Retiradas e devoluções", "/operacao", "fulfillment.write"],
+          ["Manutenção", "/manutencao", "maintenance.write"],
           ["Usuários e permissões", "/usuarios", "members.read"],
           ["Integrações", "/integracoes", "integrations.manage"],
           ["Organização", "/organizacao", "organization.manage"],

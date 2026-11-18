@@ -1,0 +1,12 @@
+<header class="page-header">
+  <h1>Avarias e faltas</h1>
+  <p>A cobrança é lançada na reserva somente após aprovação, com ao menos uma evidência anexada.</p>
+</header>
+<section class="panel" aria-labelledby="h-abertas">
+  <h2 id="h-abertas">Aguardando aprovação</h2>
+  <%= partial("operations/damage_table", rows: @open, empty: "Nenhum registro aguardando aprovação.") %>
+</section>
+<section class="panel" aria-labelledby="h-decididas">
+  <h2 id="h-decididas">Decididos</h2>
+  <%= partial("operations/damage_table", rows: @decided, empty: "Nenhum registro decidido.") %>
+</section>

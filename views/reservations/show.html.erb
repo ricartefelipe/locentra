@@ -112,6 +112,7 @@
     <p class="muted">Preços congelados em <%= pricing["priced_at"] ? datetime(Time.iso8601(pricing["priced_at"])) : "—" %>; alterações de catálogo não afetam esta reserva.</p>
   </section>
 </div>
+<%= partial("operations/reservation_summary", reservation: r, operations: @operations) %>
 <section class="panel">
   <h2>Itens e alocações</h2>
   <table class="table">

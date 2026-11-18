@@ -216,9 +216,11 @@ module Locentra
             history = @system.uow.run(ctx.actor, "reservations.read") do |tx, _|
               @system.repos[:audit].for_resource(tx, "reservation", data[:reservation].id)
             end
+            operations = uc(:reservation_operations).call(ctx.actor, data[:reservation].id)
             links = uc(:reservation_links).call(ctx.actor, data[:reservation].id)
             render(ctx, "reservations/show", title: "Reserva #{data[:reservation].code}", status: status, data: data, customer: customer,
-                                             history: history, errors: errors, shortages: shortages, now: @system.clock.now, links: links)
+                                             history: history, errors: errors, shortages: shortages, now: @system.clock.now,
+                                             operations: operations, links: links)
           end
 
           def confirm(ctx)

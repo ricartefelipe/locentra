@@ -1,0 +1,62 @@
+<% r = @reservation %>
+<% ops = @operations %>
+<% open_pickup = ops[:pickups].find(&:picking?) %>
+<% delivered = ops[:pickups].find(&:delivered?) %>
+<section class="panel" aria-labelledby="h-operacao">
+  <h2 id="h-operacao">Retirada e devolução</h2>
+  <% if can?("fulfillment.write") %>
+    <div class="action-row">
+      <% if r.status == "confirmed" && open_pickup %>
+        <a class="button primary" href="/operacao/retiradas/<%= open_pickup.id %>">Continuar retirada</a>
+      <% elsif r.status == "confirmed" %>
+        <form method="post" action="/operacao/reservas/<%= r.id %>/retirada"><%= csrf_field %><button type="submit" class="primary">Iniciar retirada</button></form>
+      <% elsif r.status == "in_progress" %>
+        <a class="button primary" href="/operacao/reservas/<%= r.id %>/devolucao">Registrar devolução</a>
+      <% end %>
+    </div>
+  <% end %>
+  <% if delivered %>
+    <p>Retirada em <a href="/operacao/retiradas/<%= delivered.id %>"><%= datetime(delivered.delivered_at) %></a> por <strong><%= delivered.picker.name %></strong>
+      (<%= delivered.picker.kind_label %>, CPF <%= delivered.picker.formatted_document %>).</p>
+  <% elsif ops[:pickups].empty? %>
+    <p class="empty">Nenhuma retirada registrada.</p>
+  <% end %>
+  <% unless ops[:returns].empty? %>
+    <h3>Devoluções</h3>
+    <ul class="row-list">
+      <% ops[:returns].each do |ret| %>
+        <li><a href="/operacao/devolucoes/<%= ret["id"] %>"><%= datetime(ret["returned_at"]) %></a> · <%= ret["lines"] %> item(ns)
+          <% if ret["late_fee_cents"].positive? %> · multa <%= money(ret["late_fee_cents"]) %><% end %>
+          <% if ret["completes_reservation"] %> <%= badge("concluiu a reserva", "success") %><% end %></li>
+      <% end %>
+    </ul>
+  <% end %>
+  <% unless ops[:damage_reports].empty? %>
+    <h3>Avarias e faltas</h3>
+    <ul class="row-list">
+      <% ops[:damage_reports].each do |d| %>
+        <li><a href="/operacao/avarias/<%= d["id"] %>"><%= d["code"] %></a> · <%= d["product_name"] %> <%= d["tag"] %>
+          <%= status_badge(d["status"], Locentra::Domain::Maintenance::DAMAGE_STATUSES.fetch(d["status"])) %></li>
+      <% end %>
+    </ul>
+  <% end %>
+  <% unless ops[:alerts].empty? %>
+    <h3>Alertas abertos</h3>
+    <ul class="row-list">
+      <% ops[:alerts].each do |a| %>
+        <li><%= status_badge(a["kind"], Locentra::Domain::Alerts::KINDS.fetch(a["kind"])) %>
+          <% if a["related_reservation_id"] && a["related_reservation_id"] != r.id %>· origem <a href="/reservas/<%= a["related_reservation_id"] %>"><%= a["related_code"] %></a><% end %>
+          <% if a["reservation_id"] != r.id %>· afeta <a href="/reservas/<%= a["reservation_id"] %>"><%= a["reservation_code"] %></a><% end %>
+          <% if can?("fulfillment.write") %>
+            <form method="post" action="/operacao/alertas/<%= a["id"] %>/resolver" class="inline">
+              <%= csrf_field %>
+              <input type="hidden" name="voltar" value="/reservas/<%= r.id %>">
+              <label for="decisao-<%= a["id"] %>" class="sr-only">Decisão tomada para o alerta</label>
+              <input id="decisao-<%= a["id"] %>" name="decisao" required minlength="3" maxlength="1000" placeholder="Decisão tomada">
+              <button type="submit">Resolver</button>
+            </form>
+          <% end %></li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>
