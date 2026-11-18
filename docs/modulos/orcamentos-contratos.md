@@ -246,9 +246,8 @@ A tela do cliente tem o atalho "Novo orçamento". Os formulários têm labels, m
 
 - Não há endpoints de API v1 para orçamentos e contratos; as operações estão disponíveis na interface
   web e nos casos de uso.
-- O portal do cliente não existe ainda: os casos de uso de aprovação, rejeição, leitura e aceite já
-  aceitam ator `customer`, mas não há telas de portal, e o download de PDFs por clientes continua
-  bloqueado pelo escopo de portal padrão (`NoPortalScope`).
+- As telas do cliente (aprovação, rejeição, leitura, aceite e download dos PDFs) estão no módulo do
+  portal do cliente (`docs/modulos/portal-cliente.md`).
 - O único tipo de aditivo é a extensão de prazo. Antecipação, troca de itens ou de condições exigem
   cancelamento e novo contrato.
 - O encerramento depende da conclusão da reserva, que será registrada pelo módulo de retirada e
