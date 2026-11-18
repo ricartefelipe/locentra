@@ -101,6 +101,28 @@ class WorkerTest < DatabaseTest
     assert_equal "pending", jobs("kind = 'webhooks.deliver'").first["status"]
   end
 
+  # Após o reprocessamento, as tentativas da tarefa recomeçam (orçamento de max_attempts), mas a
+  # numeração em job_attempts continua: encerrar a nova tentativa não altera tentativas anteriores,
+  # e tentativas abandonadas (lease vencido sem retorno do worker) são encerradas no reprocessamento.
+  def test_requeue_keeps_attempt_history_and_never_overwrites_previous_attempts
+    id = wtx { |tx| queue.enqueue(tx, "email.send", { "template" => "nao_existe" }, max_attempts: 2) }
+    abandoned = worker_system.transactor.call { |tx| queue.claim(tx, worker: "a", limit: 1).first }
+    @clock.advance(121)
+    second = worker_system.transactor.call { |tx| queue.claim(tx, worker: "b", limit: 1).first }
+
+    assert(worker_system.transactor.call { |tx| queue.kill(tx, second, "falha definitiva") })
+    uc(:retry_job).call(@org[:actor], id)
+    third = worker_system.transactor.call { |tx| queue.claim(tx, worker: "c", limit: 1).first }
+
+    assert_equal [id, 1], [third.id, third.attempts], "o orçamento de tentativas recomeça"
+    assert(worker_system.transactor.call { |tx| queue.complete(tx, third) })
+    refute(worker_system.transactor.call { |tx| queue.complete(tx, abandoned) }, "o worker antigo não finaliza")
+    history = wtx { |tx| queue.attempts(tx, id) }.map { |row| row.values_at("attempt", "worker", "outcome", "error") }
+
+    assert_equal [[1, "a", "lease_lost", nil], [2, "b", "dead", "falha definitiva"], [3, "c", "succeeded", nil]], history
+    assert(wtx { |tx| queue.attempts(tx, id) }.all? { |row| row["finished_at"] })
+  end
+
   def test_unknown_job_kind_fails_permanently
     wtx { |tx| queue.enqueue(tx, "desconhecido.tipo", {}) }
     drain

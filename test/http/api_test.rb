@@ -29,6 +29,17 @@ class ApiTest < HttpTest
     assert json_body["error"]["request_id"]
   end
 
+  def test_cli_credential_is_refused_by_the_api
+    cli = uc(:create_credential).call(@actor, name: "Rotina", scopes: %w[customers.read], kind: "cli", expires_in_days: 1)
+    get "/api/v1/customers", {}, auth(cli["token"])
+
+    assert_equal 401, last_response.status
+    assert_nil owner_query("SELECT last_used_at FROM api_credentials WHERE id = $1", [cli["id"]], tenant: @org[:organization_id]).first["last_used_at"]
+    get "/api/v1/customers", {}, auth
+
+    assert_equal 200, last_response.status
+  end
+
   def test_availability_and_listing
     get "/api/v1/availability", { "branch_id" => @org[:branch].id, "starts_at" => "2026-03-10T08:00:00Z", "ends_at" => "2026-03-10T10:00:00Z" }, auth
 
@@ -37,6 +48,29 @@ class ApiTest < HttpTest
     get "/api/v1/customers", { "limit" => "500" }, auth
 
     assert_equal 422, last_response.status
+  end
+
+  def test_reservation_detail_includes_items_allocations_and_frozen_pricing
+    post "/api/v1/reservations", JSON.generate(reservation_payload), auth.merge("HTTP_IDEMPOTENCY_KEY" => "pedido-detalhe-1")
+    id = json_body["id"]
+    get "/api/v1/reservations/#{id}", {}, auth
+
+    assert_equal 200, last_response.status, last_response.body
+    body = json_body
+
+    assert_equal id, body["id"]
+    assert_equal([@camera.id], body["items"].map { |i| i["product_id"] })
+    assert_equal 1, body["allocations"]["assets"].size
+    assert body["pricing"].key?("total_cents")
+    assert_kind_of Array, body["adjustments"]
+    other = create_organization(name: "Outra Locadora", email: "outra@example.test")
+    chairs = create_product(other[:actor], sku: "CAD-OUT", tracking: "bulk")
+    stock(other[:actor], chairs, other[:branch], 2)
+    foreign = reserve(other[:actor], create_customer(other[:actor]), other[:branch],
+                      period("2026-03-12T08:00:00Z", "2026-03-12T10:00:00Z"), [line(chairs, 1)])
+    get "/api/v1/reservations/#{foreign.id}", {}, auth
+
+    assert_equal 404, last_response.status, "reserva de outra organização não é revelada"
   end
 
   def test_idempotent_reservation_creation_replays_and_detects_reuse
@@ -120,6 +154,17 @@ class ApiTest < HttpTest
     get "/api/v1/customers", {}, auth
 
     assert_equal 401, last_response.status
+  end
+
+  def test_credentials_of_a_suspended_organization_stop_working
+    owner_query("UPDATE organizations SET status = 'suspended' WHERE id = $1", [@org[:organization_id]], tenant: @org[:organization_id])
+    get "/api/v1/customers", {}, auth
+
+    assert_equal 401, last_response.status
+    owner_query("UPDATE organizations SET status = 'active' WHERE id = $1", [@org[:organization_id]], tenant: @org[:organization_id])
+    get "/api/v1/customers", {}, auth
+
+    assert_equal 200, last_response.status
   end
 
   def test_malformed_json_and_depth_limit

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= @title %> · Portal do cliente · Locentra</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body class="portal">
+  <a class="skip-link" href="#conteudo">Ir para o conteúdo</a>
+  <header class="topbar">
+    <a class="brand" href="/portal">Portal do cliente</a>
+    <% if request.organization %>
+      <span class="org-name" title="Locadora"><%= request.organization.name %></span>
+    <% end %>
+    <nav class="topbar-actions" aria-label="Conta">
+      <% if session_user_name %><span><%= session_user_name %></span><% end %>
+      <a href="/organizacoes">Trocar acesso</a>
+      <form method="post" action="/sair" class="inline">
+        <%= csrf_field %>
+        <button type="submit" class="link-button">Sair</button>
+      </form>
+    </nav>
+  </header>
+  <div class="shell">
+    <nav class="sidebar" aria-label="Navegação do portal">
+      <ul>
+        <% portal_navigation.each do |label, path| %>
+          <li><a href="<%= path %>"<%= portal_nav_class(path) %>><%= label %></a></li>
+        <% end %>
+      </ul>
+    </nav>
+    <main id="conteudo" class="content" tabindex="-1">
+      <%= partial("shared/flash") %>
+      <%= @content %>
+    </main>
+  </div>
+</body>
+</html>

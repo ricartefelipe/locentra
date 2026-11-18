@@ -187,13 +187,18 @@ module Locentra
       end
 
       class SubscriptionRepository
+        CURRENT = <<~SQL
+          SELECT s.id, s.status, s.extra_features, p.name AS plan_name, p.max_assets, p.max_branches, p.max_users, p.features
+            FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+           WHERE s.organization_id = $1
+        SQL
+
         def lock_current(tx)
-          tx.query_one(<<~SQL, [tx.tenant_id!])
-            SELECT s.id, s.status, s.extra_features, p.name AS plan_name, p.max_assets, p.max_branches, p.max_users, p.features
-              FROM subscriptions s JOIN plans p ON p.id = s.plan_id
-             WHERE s.organization_id = $1
-               FOR UPDATE OF s
-          SQL
+          tx.query_one("#{CURRENT} FOR UPDATE OF s", [tx.tenant_id!])
+        end
+
+        def current(tx)
+          tx.query_one(CURRENT, [tx.tenant_id!])
         end
 
         def usage(tx, kind)

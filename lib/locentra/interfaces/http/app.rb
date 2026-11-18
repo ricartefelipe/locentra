@@ -29,6 +29,7 @@ module Locentra
           [Application::Identity::AuthenticationFailed, 401, "authentication_failed"],
           [Unauthenticated, 401, "unauthenticated"],
           [CsrfFailure, 403, "csrf"],
+          [WrongArea, 403, "wrong_area"],
           [BadRequest, 400, "bad_request"],
           [PayloadTooLarge, 413, "payload_too_large"],
           [Infrastructure::Database::PoolTimeout, 503, "unavailable_capacity"]
@@ -91,7 +92,8 @@ module Locentra
         end
 
         def handle_error(ctx, error)
-          return login_redirect(ctx) if error.is_a?(Unauthenticated) && !ctx.wants_json?
+          redirect = navigation_redirect(ctx, error)
+          return redirect if redirect
 
           _, status, code = ERRORS.find { |klass, _, _| error.is_a?(klass) }
           unless status
@@ -123,9 +125,23 @@ module Locentra
           else
             html = ViewContext.new(@templates, ctx, status: status, message: message, details: details, flash: nil, content: nil)
             page = html.render("errors/show")
-            layout = ViewContext.new(@templates, ctx, content: Html.safe(page), title: "Erro #{status}", flash: nil).render("layouts/application")
+            layout_name = ctx.actor&.customer? ? "layouts/portal" : "layouts/application"
+            layout = ViewContext.new(@templates, ctx, content: Html.safe(page), title: "Erro #{status}", flash: nil).render(layout_name)
             [status, { "content-type" => "text/html; charset=utf-8" }, [layout]]
           end
+        end
+
+        # Interface web: sem sessão, vai para a entrada; sessão de outra área (portal x equipe) em uma
+        # página, para o início da própria área.
+        def navigation_redirect(ctx, error)
+          return nil if ctx.wants_json?
+          return login_redirect(ctx) if error.is_a?(Unauthenticated)
+
+          area_redirect(error) if error.is_a?(WrongArea) && ctx.get?
+        end
+
+        def area_redirect(error)
+          [303, { "location" => error.home, "content-type" => "text/html; charset=utf-8" }, [""]]
         end
 
         def login_redirect(ctx)

@@ -37,6 +37,12 @@ module Locentra
           end
         end
 
+        # SKU (normalizado em maiúsculas) => id, somente para SKUs existentes na organização.
+        def product_ids_by_sku(tx, skus)
+          tx.query("SELECT sku, id FROM products WHERE organization_id = $1 AND sku = ANY($2::text[])", [tx.tenant_id!, skus])
+            .to_h { |row| [row["sku"], row["id"]] }
+        end
+
         # Lock dos estoques quantitativos em ordem de id: evita deadlock entre transações concorrentes.
         def lock_pools(tx, branch_id, product_ids)
           return {} if product_ids.empty?

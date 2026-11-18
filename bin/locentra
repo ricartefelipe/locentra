@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# CLI operacional: DATABASE_URL (papel da aplicação) e credencial de integração do tipo "cli" em
+# LOCENTRA_TOKEN ou --token-file. Comandos administrativos de banco ficam em bin/locentra-admin.
+require "bundler/setup"
+require_relative "../lib/locentra/interfaces/cli/operational"
+
+exit Locentra::Interfaces::CLI::Operational.new.run(ARGV)

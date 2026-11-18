@@ -28,6 +28,17 @@ module Locentra
               "deposit" => money(reservation.deposit), "version" => reservation.version }
           end
 
+          # Detalhe da reserva: itens com snapshot de preço, alocações ativas e ajustes.
+          def reservation_details(data)
+            items = data[:items].map do |i|
+              { "product_id" => i["product_id"], "sku" => i["sku"], "quantity" => i["quantity"], "pricing" => i["pricing"] }
+            end
+            assets = data[:allocations][:assets].select { |a| a["active"] }.map { |a| { "asset_id" => a["asset_id"], "tag" => a["tag"] } }
+            stock = data[:allocations][:stock].select { |s| s["active"] }.map { |s| { "product_id" => s["product_id"], "quantity" => s["quantity"] } }
+            reservation(data[:reservation]).merge("items" => items, "allocations" => { "assets" => assets, "stock" => stock },
+                                                  "pricing" => data[:pricing][:summary], "adjustments" => data[:pricing][:adjustments])
+          end
+
           def page(page, &)
             { "data" => page.items.map(&), "pagination" => { "limit" => page.limit, "offset" => page.offset, "total" => page.total,
                                                              "next_offset" => page.next_offset } }

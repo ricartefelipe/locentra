@@ -98,6 +98,10 @@ devolução.
   próprio cliente), usuário, nome, IP da requisição e instante. O caso de uso aceita ator `customer`
   com a permissão `portal.access`, restrito ao próprio `customer_id` (outro cliente recebe "não
   encontrado"). A rejeição segue a mesma regra de ator.
+- A rejeição (`RejectQuote`, parâmetro `version:`) também vale para a versão exibida: versão diferente
+  da atual gera `Conflict` `stale_quote_version` sem gravar nada. O ator `customer` sempre informa a
+  versão; para a equipe ela é opcional (sem versão, vale a atual). Os formulários da equipe e do
+  portal enviam a versão exibida.
 - O envio registra `quote_versions.sent_at`. O ator `customer` só enxerga orçamentos com alguma versão
   enviada (rascunho nunca enviado resulta em "não encontrado", inclusive para aprovar ou rejeitar) e,
   deles, somente as versões enviadas: uma nova versão em preparação não aparece até ser enviada
@@ -138,6 +142,11 @@ devolução.
 - Aceite (`AcceptContract`): declaração obrigatória, nome, CPF ou CNPJ válido, IP, navegador e instante;
   vale para a versão atual do documento e é gravado uma única vez. O primeiro aceite torna o contrato
   vigente. O caso de uso aceita ator `customer` restrito ao próprio cadastro.
+- O parâmetro `version:` identifica a versão do documento exibida a quem aceita: se um aditivo gerou
+  versão nova depois disso, o aceite é recusado com `Conflict` `stale_document_version`
+  (`Contract#acceptable_version!`) e nenhuma versão recebe aceite. O ator `customer` sempre informa a
+  versão; para a equipe ela é opcional. Os formulários de aceite da equipe e do portal enviam a versão
+  exibida.
 
 ### Aditivos e alterações da reserva
 
@@ -246,9 +255,8 @@ A tela do cliente tem o atalho "Novo orçamento". Os formulários têm labels, m
 
 - Não há endpoints de API v1 para orçamentos e contratos; as operações estão disponíveis na interface
   web e nos casos de uso.
-- O portal do cliente não existe ainda: os casos de uso de aprovação, rejeição, leitura e aceite já
-  aceitam ator `customer`, mas não há telas de portal, e o download de PDFs por clientes continua
-  bloqueado pelo escopo de portal padrão (`NoPortalScope`).
+- As telas do cliente (aprovação, rejeição, leitura, aceite e download dos PDFs) estão no módulo do
+  portal do cliente (`docs/modulos/portal-cliente.md`).
 - O único tipo de aditivo é a extensão de prazo. Antecipação, troca de itens ou de condições exigem
   cancelamento e novo contrato.
 - O encerramento depende da conclusão da reserva, que será registrada pelo módulo de retirada e

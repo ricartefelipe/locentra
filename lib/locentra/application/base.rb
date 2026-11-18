@@ -120,8 +120,9 @@ module Locentra
 
           actor.with(role: membership.fetch("role"), membership_id: membership.fetch("id"))
         when "api", "cli"
+          # O tipo também é conferido: um ator "cli" só é aceito com credencial do tipo cli.
           credential = @access.active_credential(tx, actor.credential_id, @clock.now)
-          unless credential && credential.fetch("organization_id") == actor.organization_id
+          unless credential && credential.fetch("organization_id") == actor.organization_id && credential.fetch("kind") == actor.kind
             raise Domain::AccessDenied,
                   "credencial inválida ou revogada"
           end
