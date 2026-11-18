@@ -29,6 +29,9 @@ module Locentra
       PREPAYABLE_RESERVATION_STATUSES = (%w[held] + CHARGEABLE_RESERVATION_STATUSES).freeze
       MANUAL_CHARGE_RESERVATION_STATUSES = (CHARGEABLE_RESERVATION_STATUSES + %w[cancelled]).freeze
       CLOSED_RESERVATION_STATUSES = %w[cancelled expired].freeze
+      # Cobranças que nascem do próprio cancelamento: geradas para reserva cancelada e esperadas em
+      # aberto depois dele (não motivam o alerta de reserva encerrada com cobranças).
+      CANCELLATION_CHARGE_KINDS = %w[cancellation_fee].freeze
 
       RECEIVABLE_STATUSES = {
         "open" => "Em aberto", "partial" => "Parcialmente paga", "paid" => "Quitada", "credit" => "Crédito do cliente",
@@ -116,6 +119,15 @@ module Locentra
 
         def chargeable?(reservation_status, prepayment: false)
           (prepayment ? PREPAYABLE_RESERVATION_STATUSES : CHARGEABLE_RESERVATION_STATUSES).include?(reservation_status)
+        end
+
+        # Ajuste vira cobrança quando a locação é cobrável; numa reserva cancelada, somente a multa de
+        # cancelamento (os demais ajustes pressupõem a locação).
+        def adjustment_chargeable?(adjustment_kind, reservation_status, prepayment: false)
+          return false unless ADJUSTMENT_KINDS.key?(adjustment_kind)
+          return true if chargeable?(reservation_status, prepayment: prepayment)
+
+          reservation_status == "cancelled" && CANCELLATION_CHARGE_KINDS.include?(ADJUSTMENT_KINDS.fetch(adjustment_kind))
         end
 
         def manual_kind!(kind)

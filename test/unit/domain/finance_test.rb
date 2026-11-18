@@ -78,6 +78,16 @@ class FinanceDomainTest < UnitTest
     assert_raises(Domain::InvalidTransition) { F::Charges.manual_allowed!("held") }
   end
 
+  def test_adjustments_chargeable_after_cancellation_are_only_cancellation_fees
+    assert F::Charges.adjustment_chargeable?("damage", "completed")
+    assert F::Charges.adjustment_chargeable?("extension", "held", prepayment: true)
+    refute F::Charges.adjustment_chargeable?("extension", "held")
+    assert F::Charges.adjustment_chargeable?("cancellation_fee", "cancelled")
+    refute F::Charges.adjustment_chargeable?("extension", "cancelled")
+    refute F::Charges.adjustment_chargeable?("cancellation_fee", "expired")
+    refute F::Charges.adjustment_chargeable?("desconhecido", "confirmed")
+  end
+
   def test_manual_payment_is_born_confirmed
     payment = manual_payment
 

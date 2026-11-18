@@ -181,6 +181,25 @@ class FinanceFlowTest < DatabaseTest
     assert_equal(["reservation_closed_with_charges"], uc(:finance).overview(@actor)[:alerts].map { |a| a["kind"] })
   end
 
+  def test_cancellation_fee_of_cancelled_reservation_becomes_a_charge
+    reservation = booking
+    rental = sync(reservation).first
+    uc(:cancel_receivable).call(@actor, rental.id, reason: "Reserva cancelada pelo cliente")
+    uc(:cancel_reservation).call(@actor, reservation.id, reason: "Cliente cancelou")
+    fee = adjustment(reservation, "cancellation_fee", 2_500)
+    adjustment(reservation, "extension", 10_000)
+    adjustment(reservation, "cancellation_fee", 0)
+    created = sync(reservation)
+
+    assert_equal([["cancellation_fee", 2_500, "Multa de cancelamento da reserva #{reservation.code}"]],
+                 created.map { |r| [r.kind, r.amount.cents, r.description] }, "somente a multa vira cobrança após o cancelamento")
+    assert_equal fee, created.first.source_id
+    assert_empty sync(reservation), "sem duplicar"
+    assert_empty uc(:finance).overview(@actor)[:alerts], "multa de cancelamento em aberto é esperada"
+    assert_equal({ "additional_revenue" => -2_500, "receivable" => 2_500 }, trial_balance.reject { |_, v| v.zero? })
+    assert_empty unbalanced_transactions
+  end
+
   def test_finance_tables_follow_the_tenant_conventions
     tables = %w[payment_provider_accounts receivables receivable_cancellations deposits payments refunds deposit_entries financial_entries
                 finance_alerts payment_simulator_charges reconciliation_reports reconciliation_items invoices]
@@ -306,5 +325,13 @@ class FinanceFlowTest < DatabaseTest
     owner_query("UPDATE invitations SET token_digest = $1 WHERE id = $2", [A::Identity::Tokens.digest(token), invite["id"]])
     joined = uc(:accept_invitation).call(token: token, name: "Membro #{role}", password: "senha-muito-segura-7")
     A::Actor.user(user_id: joined[:user_id], organization_id: @org[:organization_id], role: role)
+  end
+
+  def adjustment(reservation, kind, cents)
+    SecureRandom.uuid.tap do |id|
+      owner_query(<<~SQL, [id, @org[:organization_id], reservation.id, kind, cents])
+        INSERT INTO reservation_adjustments (id, organization_id, reservation_id, kind, amount_cents, created_at) VALUES ($1, $2, $3, $4, $5, now())
+      SQL
+    end
   end
 end

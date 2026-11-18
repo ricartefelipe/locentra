@@ -4,8 +4,9 @@ module Locentra
   module Application
     module Finance
       # Cria as cobranças de uma reserva: locação (total da reserva confirmada, em andamento ou
-      # concluída) e uma cobrança por ajuste com valor positivo. A origem é única no banco, portanto
-      # execuções repetidas (eventos reentregues, botão na interface) não duplicam cobranças.
+      # concluída) e uma cobrança por ajuste com valor positivo; numa reserva cancelada, apenas a
+      # multa de cancelamento. A origem é única no banco, portanto execuções repetidas (eventos
+      # reentregues, botão na interface) não duplicam cobranças.
       class SyncReservationCharges
         include Composable
 
@@ -34,20 +35,22 @@ module Locentra
         private
 
         def charge(tx, actor, reservation, prepayment)
-          return [] unless F::Charges.chargeable?(reservation.status, prepayment: prepayment)
+          rental = F::Charges.chargeable?(reservation.status, prepayment: prepayment)
+          adjustments = @reservations.adjustments(tx, reservation.id).select do |adjustment|
+            adjustment["amount_cents"].positive? && F::Charges.adjustment_chargeable?(adjustment["kind"], reservation.status, prepayment: prepayment)
+          end
+          return [] unless rental || adjustments.any?
 
           zone = @organizations.find(tx, tx.tenant_id!).time_zone
           created = []
-          if reservation.total.positive?
+          if rental && reservation.total.positive?
             created << issue(tx, actor, reservation, kind: "rental", source_type: "reservation", source_id: reservation.id,
                                                      description: F::Charges.rental_description(reservation.code), amount: reservation.total,
                                                      due_on: zone.local_date(reservation.period.starts_at))
           end
-          @reservations.adjustments(tx, reservation.id).each do |adjustment|
-            kind = F::Charges.adjustment_kind(adjustment["kind"])
-            next unless kind && adjustment["amount_cents"].positive?
-
-            created << issue(tx, actor, reservation, kind: kind, source_type: "reservation_adjustment", source_id: adjustment["id"],
+          adjustments.each do |adjustment|
+            created << issue(tx, actor, reservation, kind: F::Charges.adjustment_kind(adjustment["kind"]), source_type: "reservation_adjustment",
+                                                     source_id: adjustment["id"],
                                                      description: F::Charges.adjustment_description(adjustment["kind"], reservation.code),
                                                      amount: Domain::Money.new(adjustment["amount_cents"]), due_on: zone.local_date(adjustment["created_at"]))
           end
@@ -66,10 +69,10 @@ module Locentra
         end
 
         # Reserva cancelada ou expirada com saldo em aberto: a equipe decide (cancelamento compensatório,
-        # multa de cancelamento ou cobrança mantida).
+        # multa de cancelamento ou cobrança mantida). A multa de cancelamento em aberto é esperada.
         def flag_closed(tx, reservation)
           return unless F::CLOSED_RESERVATION_STATUSES.include?(reservation.status)
-          return unless @receivables.open_for_reservation?(tx, reservation.id)
+          return unless @receivables.open_for_reservation?(tx, reservation.id, except_kinds: F::CANCELLATION_CHARGE_KINDS)
 
           @alert_book.raise_alert(tx, kind: "reservation_closed_with_charges", reservation_id: reservation.id,
                                       dedupe_key: "reservation_closed:#{reservation.id}",

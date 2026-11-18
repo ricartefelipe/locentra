@@ -85,9 +85,11 @@ module Locentra
             .map { |row| self.class.listed(row) }
         end
 
-        def open_for_reservation?(tx, reservation_id)
-          !tx.query_one("#{LISTING} SELECT 1 FROM listing WHERE reservation_id = $2 AND status IN ('open', 'partial') LIMIT 1",
-                        [tx.tenant_id!, reservation_id]).nil?
+        # Há cobrança em aberto na reserva (desconsiderados os tipos em `except_kinds`).
+        def open_for_reservation?(tx, reservation_id, except_kinds: [])
+          !tx.query_one(<<~SQL, [tx.tenant_id!, reservation_id, except_kinds]).nil?
+            #{LISTING} SELECT 1 FROM listing WHERE reservation_id = $2 AND status IN ('open', 'partial') AND kind <> ALL($3::text[]) LIMIT 1
+          SQL
         end
 
         # Listagem paginada com filtro de situação por allowlist (o valor é parâmetro, nunca SQL).
