@@ -50,6 +50,29 @@ class ApiTest < HttpTest
     assert_equal 422, last_response.status
   end
 
+  def test_reservation_detail_includes_items_allocations_and_frozen_pricing
+    post "/api/v1/reservations", JSON.generate(reservation_payload), auth.merge("HTTP_IDEMPOTENCY_KEY" => "pedido-detalhe-1")
+    id = json_body["id"]
+    get "/api/v1/reservations/#{id}", {}, auth
+
+    assert_equal 200, last_response.status, last_response.body
+    body = json_body
+
+    assert_equal id, body["id"]
+    assert_equal([@camera.id], body["items"].map { |i| i["product_id"] })
+    assert_equal 1, body["allocations"]["assets"].size
+    assert body["pricing"].key?("total_cents")
+    assert_kind_of Array, body["adjustments"]
+    other = create_organization(name: "Outra Locadora", email: "outra@example.test")
+    chairs = create_product(other[:actor], sku: "CAD-OUT", tracking: "bulk")
+    stock(other[:actor], chairs, other[:branch], 2)
+    foreign = reserve(other[:actor], create_customer(other[:actor]), other[:branch],
+                      period("2026-03-12T08:00:00Z", "2026-03-12T10:00:00Z"), [line(chairs, 1)])
+    get "/api/v1/reservations/#{foreign.id}", {}, auth
+
+    assert_equal 404, last_response.status, "reserva de outra organização não é revelada"
+  end
+
   def test_idempotent_reservation_creation_replays_and_detects_reuse
     post "/api/v1/reservations", JSON.generate(reservation_payload), auth.merge("HTTP_IDEMPOTENCY_KEY" => "pedido-0001")
 
