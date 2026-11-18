@@ -6,8 +6,14 @@ module Locentra
   module Interfaces
     module HTTP
       # Identificação da requisição, log estruturado e métricas por rota modelo.
+      #
+      # O identificador recebido em X-Request-Id (formato restrito) ou gerado aqui é devolvido na
+      # resposta, gravado no ator (auditoria, eventos da outbox e tarefas como correlation_id) e
+      # registrado no log. Métodos fora da lista viram "OTHER" no rótulo, para que um cliente não
+      # crie séries novas com métodos arbitrários.
       class RequestLogger
         REQUEST_ID = /\A[A-Za-z0-9._-]{8,64}\z/
+        METHODS = %w[GET HEAD POST PUT PATCH DELETE OPTIONS].freeze
 
         def initialize(app, logger:, metrics:)
           @app = app
@@ -36,7 +42,8 @@ module Locentra
         def record(env, request_id, status, started)
           duration = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
           route = env["locentra.route"] || (env["PATH_INFO"].to_s.start_with?("/css", "/js", "/img") ? "static" : "unmatched")
-          @metrics.increment("http_requests_total", method: env["REQUEST_METHOD"], route: route, status: status.to_s)
+          method = METHODS.include?(env["REQUEST_METHOD"]) ? env["REQUEST_METHOD"] : "OTHER"
+          @metrics.increment("http_requests_total", method: method, route: route, status: status.to_s)
           @metrics.observe("http_request_duration_seconds", duration, route: route)
           return if ["static", "/health/live"].include?(route)
 

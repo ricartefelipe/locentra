@@ -102,7 +102,8 @@ module Locentra
             return error_response(ctx, 500, "internal_error", "Erro interno. Informe a referência #{ctx.request_id}.", {})
           end
 
-          @system.metrics.increment("domain_conflicts_total", code: code || error.code) if status == 409
+          # Conflitos de negócio são contados pela unidade de trabalho (domain_conflicts_total), inclusive
+          # os tratados pelos formulários; a resposta 409 aparece em http_requests_total.
           details = details_for(error)
           response = error_response(ctx, status, code || error.code, error.message, details)
           response[1]["retry-after"] = error.retry_after.to_s if error.respond_to?(:retry_after)

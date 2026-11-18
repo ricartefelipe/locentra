@@ -13,6 +13,9 @@ module Locentra
       #   assumiu a tarefa, o resultado desta execução é descartado e registrado como "lease_lost".
       # - Leases de tarefas em execução são renovados periodicamente enquanto o handler trabalha.
       # - Mutex local não é usado como exclusão entre processos: toda coordenação é feita no banco.
+      # - Retentativas e falhas permanentes são somadas pela fila em `job_outcome_totals` (todos os
+      #   workers) e expostas no /metrics do processo web; o log `job.finished` traz o correlation_id
+      #   da requisição que originou a tarefa.
       class Runner
         SCHEDULE_INTERVAL = 30
 
@@ -79,11 +82,9 @@ module Locentra
           end
         rescue PermanentFailure, KeyError => e
           finished = @system.transactor.call { |tx| @system.queue.kill(tx, job, e) }
-          @system.metrics.increment("jobs_failed_total", kind: job.kind, outcome: "dead")
           log_result(job, finished ? "dead" : "lease_lost", started, error: e)
         rescue StandardError => e
           retried = @system.transactor.call { |tx| @system.queue.retry_later(tx, job, e) }
-          @system.metrics.increment("jobs_retried_total", kind: job.kind)
           log_result(job, retried ? "retry" : "lease_lost_or_dead", started, error: e)
         end
 

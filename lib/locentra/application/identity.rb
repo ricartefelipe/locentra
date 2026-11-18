@@ -144,6 +144,7 @@ module Locentra
       end
 
       # Cadastro de nova organização: usuário proprietário, filial principal e assinatura em teste.
+      # `request_id` (da requisição, quando houver) correlaciona a auditoria e o e-mail de confirmação.
       class SignUp
         TRIAL_DAYS = 14
 
@@ -158,7 +159,7 @@ module Locentra
           @audit = audit
         end
 
-        def call(name:, email:, password:, organization_name:, plan_id: "profissional", timezone: "America/Sao_Paulo")
+        def call(name:, email:, password:, organization_name:, plan_id: "profissional", timezone: "America/Sao_Paulo", request_id: nil)
           now = @clock.now
           email = Domain::Identity::Email.normalize(email)
           Domain::Identity::PasswordPolicy.validate!(password)
@@ -166,7 +167,7 @@ module Locentra
           org = Domain::Organizations::Organization.build(id: @ids.uuid, name: organization_name, timezone: timezone)
           digest = @hasher.hash(password)
 
-          @uow.anonymous do |tx|
+          @uow.anonymous(request_id: request_id) do |tx|
             if @users.find_by_email(
               tx, email
             )
@@ -181,7 +182,7 @@ module Locentra
             tx.switch_tenant!(org.id)
             create_tenant(tx, org, user_id, plan, now)
             @notifier.email_confirmation(tx, user_id)
-            actor = Actor.user(user_id: user_id, organization_id: org.id, role: "owner")
+            actor = Actor.user(user_id: user_id, organization_id: org.id, role: "owner", request_id: request_id)
             @audit.record(tx, actor, "organization.created", "organization", org.id, "plan" => plan.fetch("id"))
             { user_id: user_id, organization_id: org.id }
           end
@@ -248,7 +249,8 @@ module Locentra
       end
 
       # Recuperação de senha. A resposta é idêntica para e-mails existentes e inexistentes; o token
-      # é emitido pelo envio do e-mail (worker) e nunca fica gravado em texto claro.
+      # é emitido pelo envio do e-mail (worker) e nunca fica gravado em texto claro. A tarefa do e-mail
+      # recebe o `request_id` da requisição como correlação.
       class RequestPasswordReset
         def initialize(uow:, users:, rate_limiter:, notifier:)
           @uow = uow
@@ -257,12 +259,12 @@ module Locentra
           @notifier = notifier
         end
 
-        def call(email:, ip:)
+        def call(email:, ip:, request_id: nil)
           normalized = email.to_s.strip.downcase[0, 254]
           return true unless @rate_limiter.hit("reset:ip:#{ip}", limit: 10, window_seconds: 3600).allowed
           return true unless @rate_limiter.hit("reset:email:#{normalized}", limit: 3, window_seconds: 3600).allowed
 
-          @uow.anonymous do |tx|
+          @uow.anonymous(request_id: request_id) do |tx|
             user = @users.find_by_email(tx, normalized)
             @notifier.password_reset(tx, user) if user
           end

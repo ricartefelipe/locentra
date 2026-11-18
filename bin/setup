@@ -20,6 +20,8 @@ Locentra disponível em http://localhost:9292
 Mailpit (e-mails locais) em http://localhost:8025
 
 Usuários demonstrativos (senha: locentra-local-demo):
-  ana@alfa.demo   (proprietária, Alfa Audiovisual)
+  ana@alfa.demo   (proprietária, Alfa Audiovisual; gerente, Beta Eventos)
   paulo@beta.demo (proprietário, Beta Eventos)
+
+Roteiro de demonstração: docs/DEMONSTRACAO.md
 MSG

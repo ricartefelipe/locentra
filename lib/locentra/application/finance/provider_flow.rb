@@ -36,7 +36,7 @@ module Locentra
           end
           return prepared unless prepared.is_a?(Hash)
 
-          found = Lookup.perform(@providers, prepared[:account], prepared[:payment], @clock)
+          found = Lookup.perform(@providers, prepared[:account], prepared[:payment], @clock, actor: actor)
           @uow.run(actor, "finance.write") { |tx, current| resolve(tx, current, id, found) }
         end
 
@@ -50,15 +50,17 @@ module Locentra
           return await(tx, actor, payment) unless payment.submission_settled?(lookup.at)
 
           @payments.update(tx, payment.transition("pending_submission"), from: payment.status, now: @clock.now)
-          @queue.enqueue(tx, "payments.submit", { "payment_id" => id }, priority: 30)
+          @queue.enqueue(tx, "payments.submit", { "payment_id" => id }, priority: 30, correlation_id: actor.request_id)
           @audit.record(tx, actor, "payment.resubmission_scheduled", "payment", id, "external_reference" => payment.external_reference)
           :resubmission_scheduled
         end
 
-        # Nova consulta ao fim da janela da tentativa atual (uma por tentativa).
-        def schedule_check(tx, payment)
+        # Nova consulta ao fim da janela da tentativa atual (uma por tentativa), com a correlação da
+        # operação que originou o envio.
+        def schedule_check(tx, payment, actor)
           @queue.enqueue(tx, "payments.submit", { "payment_id" => payment.id }, run_at: payment.settles_at, priority: 30,
-                                                                                unique_key: "payment-check:#{payment.id}:#{payment.submission_attempts}")
+                                                                                unique_key: "payment-check:#{payment.id}:#{payment.submission_attempts}",
+                                                                                correlation_id: actor.request_id)
         end
 
         private
@@ -73,7 +75,7 @@ module Locentra
         end
 
         def await(tx, actor, payment)
-          schedule_check(tx, payment)
+          schedule_check(tx, payment, actor)
           @audit.record(tx, actor, "payment.submission_check_scheduled", "payment", payment.id, "run_at" => payment.settles_at.utc.iso8601)
           :awaiting_settlement
         end
@@ -117,7 +119,7 @@ module Locentra
           return @resolver.call(actor, id) if prepared == :resolve
           return prepared unless prepared.is_a?(Hash)
 
-          outcome = submit(prepared)
+          outcome = submit(actor, prepared)
           result = @uow.run(actor, "finance.write") { |tx, current| record(tx, current, id, prepared[:attempt], outcome) }
           # Requisição não enviada: a fila reagenda a tarefa com espera crescente.
           raise outcome.last if result == :not_sent
@@ -152,8 +154,8 @@ module Locentra
 
         # Qualquer outra exceção deixa o pagamento em submission_unknown (já gravado): a nova execução
         # da tarefa consulta o provedor antes de decidir.
-        def submit(prepared)
-          [:created, @providers.for(prepared[:account]["provider"]).create_charge(prepared[:account], prepared[:request])]
+        def submit(actor, prepared)
+          [:created, @providers.for(prepared[:account]["provider"], actor: actor).create_charge(prepared[:account], prepared[:request])]
         rescue ProviderTimeout => e
           [:unknown, e.message]
         rescue ProviderRejected => e
@@ -176,7 +178,7 @@ module Locentra
             @audit.record(tx, actor, "payment.submitted", "payment", id, "provider_payment_id" => value.provider_payment_id)
             :submitted
           when :unknown
-            @resolver.schedule_check(tx, payment)
+            @resolver.schedule_check(tx, payment, actor)
             @audit.record(tx, actor, "payment.submission_unknown", "payment", id, "error" => value.to_s[0, 300])
             :submission_unknown
           when :not_sent
@@ -237,14 +239,14 @@ module Locentra
           end
           return prepared unless prepared.is_a?(Hash)
 
-          outcome = execute(prepared)
+          outcome = execute(actor, prepared)
           @uow.run(actor, "finance.refund") { |tx, current| record(tx, current, id, outcome) }
         end
 
         private
 
-        def execute(prepared)
-          provider = @providers.for(prepared[:account]["provider"])
+        def execute(actor, prepared)
+          provider = @providers.for(prepared[:account]["provider"], actor: actor)
           account = prepared[:account]
           charge = prepared[:payment].provider_payment_id
           refund = prepared[:refund]
@@ -275,7 +277,7 @@ module Locentra
             @payments.update_refund(tx, done, from: refund.status, now: @clock.now)
             RefundCompletion.confirmed(tx, actor, done, ledger: @ledger, audit: @audit, events: @events)
           when :pending
-            return recheck(tx, refund)
+            return recheck(tx, actor, refund)
           else
             done = refund.fail(value)
             @payments.update_refund(tx, done, from: refund.status, now: @clock.now)
@@ -286,10 +288,11 @@ module Locentra
 
         # Estorno em andamento no provedor: o reembolso continua pendente (o valor segue comprometido)
         # e a situação é consultada de novo, uma tarefa por janela.
-        def recheck(tx, refund)
+        def recheck(tx, actor, refund)
           run_at = @clock.now + RECHECK_DELAY
           @queue.enqueue(tx, "payments.refund", { "refund_id" => refund.id }, run_at: run_at, priority: 40,
-                                                                              unique_key: "refund-check:#{refund.id}:#{run_at.to_i / RECHECK_DELAY}")
+                                                                              unique_key: "refund-check:#{refund.id}:#{run_at.to_i / RECHECK_DELAY}",
+                                                                              correlation_id: actor.request_id)
           :pending
         end
       end

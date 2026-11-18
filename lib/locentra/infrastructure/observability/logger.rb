@@ -52,11 +52,34 @@ module Locentra
         end
       end
 
-      # Registro de métricas em memória do processo, exposto no formato texto do Prometheus.
-      # Labels são restritos a valores de baixa cardinalidade (rota modelo, método, status, tipo).
+      # Registro de métricas em memória do processo, exposto no formato texto do Prometheus (0.0.4),
+      # com linhas HELP/TYPE por família.
+      #
+      # Rótulos restritos a valores de baixa cardinalidade (rota modelo, método, situação, tipo de
+      # tarefa, provedor, código de conflito): nomes fora de ALLOWED_LABELS são descartados e valores
+      # com formato de identificador (UUID ou sequência hexadecimal longa) são substituídos por
+      # "redacted". Identificadores de organizações, clientes ou reservas nunca viram série temporal.
       class Metrics
         BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10].freeze
         ALLOWED_LABELS = %w[method route status pool reason kind outcome provider queue code].freeze
+        IDENTIFIER = /\h{8}-\h{4}-\h{4}-\h{4}-\h{12}|\h{16,}/
+        REDACTED_LABEL = "redacted"
+        HELP = {
+          "http_requests_total" => "Requisições HTTP por método, rota modelo e status",
+          "http_request_duration_seconds" => "Latência das requisições HTTP por rota modelo",
+          "db_pool_wait_seconds" => "Espera por conexão do pool de banco",
+          "db_pool_timeouts_total" => "Esperas por conexão do pool que excederam o tempo limite",
+          "db_transaction_retries_total" => "Transações repetidas por deadlock ou falha de serialização",
+          "domain_conflicts_total" => "Operações recusadas por conflito com o estado atual, por código (disponibilidade, concorrência)",
+          "jobs_queue_size" => "Tarefas por fila e situação (agregado gravado pelo worker)",
+          "jobs_oldest_age_seconds" => "Idade da tarefa mais antiga já liberada para execução, por fila e situação",
+          "jobs_queue_stats_age_seconds" => "Tempo desde a última atualização dos agregados da fila pelo worker",
+          "jobs_retries_total" => "Reagendamentos de tarefas após falha, somados entre todos os workers",
+          "jobs_dead_total" => "Tarefas encerradas sem novas tentativas (falha permanente), somadas entre todos os workers",
+          "job_duration_seconds" => "Duração da execução de tarefas no processo do worker",
+          "external_calls_total" => "Chamadas a sistemas externos por provedor, operação e desfecho",
+          "external_call_duration_seconds" => "Duração das chamadas a sistemas externos por provedor e operação"
+        }.freeze
 
         def initialize
           @mutex = Thread::Mutex.new
@@ -68,6 +91,13 @@ module Locentra
         def increment(name, by = 1, **labels)
           key = [name, normalize(labels)]
           @mutex.synchronize { @counters[key] += by }
+        end
+
+        # Contador cujo total é mantido fora do processo (por exemplo, somado no banco por todos os
+        # workers): o valor informado substitui o anterior.
+        def set_counter(name, value, **labels)
+          key = [name, normalize(labels)]
+          @mutex.synchronize { @counters[key] = value }
         end
 
         def observe(name, value, **labels)
@@ -84,6 +114,16 @@ module Locentra
           @mutex.synchronize { @gauges[[name, normalize(labels)]] = value }
         end
 
+        # Substitui todas as séries de um gauge: séries que deixaram de existir não continuam expostas
+        # com o último valor. `series` é uma lista de pares [valor, rótulos].
+        def replace_gauges(name, series)
+          entries = series.map { |value, labels| [[name, normalize(labels)], value] }
+          @mutex.synchronize do
+            @gauges.delete_if { |(gauge_name, _), _| gauge_name == name }
+            entries.each { |key, value| @gauges[key] = value }
+          end
+        end
+
         def counter_value(name, **labels)
           @mutex.synchronize { @counters[[name, normalize(labels)]] }
         end
@@ -91,25 +131,42 @@ module Locentra
         def render
           lines = []
           @mutex.synchronize do
-            counters = @counters.sort_by { |k, _| k.to_s }
-            counters.each { |(name, labels), value| lines << "locentra_#{name}#{format_labels(labels)} #{value}" }
-            @gauges.sort_by { |k, _| k.to_s }.each { |(name, labels), value| lines << "locentra_#{name}#{format_labels(labels)} #{value}" }
-            @histograms.sort_by { |k, _| k.to_s }.each do |(name, labels), h|
-              BUCKETS.each_with_index do |bound, i|
-                lines << "locentra_#{name}_bucket#{format_labels(labels.merge("le" => bound.to_s))} #{h[:buckets][i]}"
-              end
-              lines << "locentra_#{name}_bucket#{format_labels(labels.merge("le" => "+Inf"))} #{h[:count]}"
-              lines << "locentra_#{name}_sum#{format_labels(labels)} #{h[:sum].round(6)}"
-              lines << "locentra_#{name}_count#{format_labels(labels)} #{h[:count]}"
-            end
+            families(@counters, "counter", lines) { |name, labels, value| lines << sample(name, labels, value) }
+            families(@gauges, "gauge", lines) { |name, labels, value| lines << sample(name, labels, value) }
+            families(@histograms, "histogram", lines) { |name, labels, histogram| histogram_lines(lines, name, labels, histogram) }
           end
           "#{lines.join("\n")}\n"
         end
 
         private
 
+        # Séries agrupadas por nome, com HELP/TYPE antes das amostras de cada família.
+        def families(store, type, lines)
+          store.group_by { |(name, _), _| name }.sort_by(&:first).each do |name, series|
+            lines << "# HELP locentra_#{name} #{HELP[name]}" if HELP.key?(name)
+            lines << "# TYPE locentra_#{name} #{type}"
+            series.sort_by { |(_, labels), _| labels.to_a }.each { |(_, labels), value| yield name, labels, value }
+          end
+        end
+
+        def histogram_lines(lines, name, labels, histogram)
+          BUCKETS.each_with_index do |bound, i|
+            lines << sample("#{name}_bucket", labels.merge("le" => bound.to_s), histogram[:buckets][i])
+          end
+          lines << sample("#{name}_bucket", labels.merge("le" => "+Inf"), histogram[:count])
+          lines << sample("#{name}_sum", labels, histogram[:sum].round(6))
+          lines << sample("#{name}_count", labels, histogram[:count])
+        end
+
+        def sample(name, labels, value) = "locentra_#{name}#{format_labels(labels)} #{value}"
+
         def normalize(labels)
-          labels.to_h { |k, v| [k.to_s, v.to_s[0, 80]] }.slice(*ALLOWED_LABELS).sort.to_h
+          labels.to_h { |k, v| [k.to_s, label_value(v)] }.slice(*ALLOWED_LABELS).sort.to_h
+        end
+
+        def label_value(value)
+          text = value.to_s
+          text.match?(IDENTIFIER) ? REDACTED_LABEL : text[0, 80]
         end
 
         def format_labels(labels)
