@@ -2,7 +2,7 @@
 
 Cobre RNF-05 (logs estruturados correlacionados, métricas de baixa cardinalidade), a verificação no
 navegador de RNF-04 (CSP, escape de conteúdo) e RNF-08 (teclado, foco visível, mensagens de erro) e a
-demonstração do fluxo completo (RF-06 a RF-32 e RNF-02). Migration: `db/migrations/0013_observabilidade.sql`.
+demonstração do fluxo completo (RF-06 a RF-32 e RNF-02). Migration: `db/migrations/0012_observabilidade.sql`.
 
 | Parte | Arquivos |
 |---|---|
@@ -112,7 +112,7 @@ não são contados, pois não encerram a operação.
   (retentativas agendadas não inflam a espera) e nunca é negativa. A coleta substitui a família inteira
   de gauges e publica `jobs_queue_stats_age_seconds`: um worker parado aparece como idade crescente.
 - Retentativas e falhas permanentes eram contadores na memória de cada worker, processo que não expõe
-  HTTP. A tabela global `job_outcome_totals` (migration 0013) recebe `total + 1` por fila, tipo e
+  HTTP. A tabela global `job_outcome_totals` (migration 0012) recebe `total + 1` por fila, tipo e
   desfecho (`retry`, `dead`) na **mesma transação** que reagenda ou encerra a tarefa, e somente quando a
   transição vale (lease atual): perda de lease não conta, e uma tarefa que esgota as tentativas conta
   como `dead`. O processo web lê a tabela e publica os totais com valor absoluto
