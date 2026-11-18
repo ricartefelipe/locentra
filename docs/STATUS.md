@@ -1,57 +1,57 @@
 # Status de implementação
 
-Atualizado a cada incremento. "Testado" indica testes automatizados executados com sucesso no
-incremento indicado. Comandos de verificação estão em `CONTRIBUTING.md`.
+"Testado" indica testes automatizados executados com sucesso. Comandos de verificação em
+`CONTRIBUTING.md`; documentação de cada módulo em `docs/modulos/`.
 
-## Incremento 1 — Fundação (PR #1)
+## Última verificação completa
 
-| Item | Situação | Evidência |
+Executada na integração do PR #9 (código idêntico ao de `develop` após o merge; esta branch acrescenta
+apenas documentação e scripts operacionais):
+
+| Verificação | Resultado |
+|---|---|
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 553 testes, 0 falhas |
+| Cobertura de domínio + aplicação | 99,05% de linhas, 92,01% de branches (metas 90% / 80%) |
+| `rake test:browser` (Ferrum, Chrome headless) | 9 testes, 0 falhas |
+| `rubocop`, actionlint | sem ofensas |
+| CI do PR #9 | 7 checks aprovados (análise, segredos, unitários, PostgreSQL, navegador, reconstrução do banco, imagem) |
+
+## Entregas por incremento
+
+| PR | Incremento | Situação |
 |---|---|---|
-| Ruby 4.0.9, Gemfile e lockfile fixados | Implementado | `Gemfile.lock` |
-| Imagem Docker (dev, build, runtime) com correções de segurança | Implementado | `Dockerfile`, job "Build e análise da imagem" |
-| CI: RuboCop, Bundler Audit, Gitleaks, testes unitários, build e Trivy | Implementado | `.github/workflows/ci.yml` |
-| Dinheiro, períodos, fusos e motor de disponibilidade | Implementado e testado (inclui propriedades) | `test/unit/domain/*` |
+| #1 | Fundação: Ruby 4.0.9, Docker, CI, dinheiro, períodos, fusos, motor de disponibilidade | Integrado e testado |
+| #2 | Fatia vertical: organizações, autenticação, clientes, catálogo, disponibilidade, reservas concorrentes, interface, API | Integrado e testado |
+| #3 | Worker com lease e fencing, e-mails, outbox, webhooks assinados com proteção SSRF, anexos | Integrado e testado |
+| #4 | Orçamentos versionados, contratos com PDF, aditivos, cancelamento com política | Integrado e testado |
+| #5 | Retirada, devolução, inspeção, avarias, manutenção, transferências, atrasos | Integrado e testado |
+| #6 | Financeiro: cobranças, pagamentos, reembolsos, cauções, diário, simulador, Asaas, conciliação | Integrado e testado (Asaas sem credenciais reais) |
+| #7 | Portal do cliente | Integrado e testado |
+| #8 | CLI operacional e correção do detalhe de reserva na API | Integrado e testado |
+| #9 | Testes de navegador, métricas, correlação de logs, demonstração de ponta a ponta | Integrado e testado |
+| esta branch | Documentação consolidada, backup e restauração, publicação de imagem por tag | Backup e restauração exercitados (ver `RUNBOOKS.md`) |
 
-## Incremento 2 — Fatia vertical de reservas
+## Casos obrigatórios cobertos por testes
 
-| Item | Situação | Evidência |
-|---|---|---|
-| Migrations SQL com checksum, advisory lock e credenciais separadas | Implementado e testado | `test/repository/transactor_test.rb` (MigratorTest) |
-| RLS forçada, papéis sem superuser/BYPASSRLS, chaves compostas | Implementado e testado | `test/repository/tenant_isolation_test.rb` |
-| Pool, coordenador de transações, savepoints, conexões quebradas | Implementado e testado | `test/repository/transactor_test.rb` |
-| Organizações, filiais, usuários, convites, papéis, revogação | Implementado e testado | `test/integration/identity_flow_test.rb` |
-| Autenticação, sessões, bloqueio por tentativas, rate limit, confirmação de e-mail, recuperação de senha | Implementado e testado (envio do e-mail depende do worker do incremento 3) | idem |
-| Planos e limites (ativos, filiais, usuários, funcionalidades) | Implementado e testado | `test_plan_limits_are_enforced` |
-| Clientes PF/PJ, contatos, autorizados a retirar, endereços | Implementado e testado | `test/integration/catalog_customers_test.rb` |
-| Produtos, kits, ativos individuais, estoque quantitativo, histórico | Implementado e testado | idem |
-| Disponibilidade (consulta, calendário, kits, buffers, bloqueios) | Implementado e testado | `reservation_flow_test.rb`, `pages_test.rb` |
-| Reservas: solicitação, bloqueio temporário, confirmação, cancelamento, reagendamento, extensão, expiração | Implementado e testado | `reservation_flow_test.rb` |
-| Disputas concorrentes (último ativo, estoque, confirmação × expiração) | Testado com conexões separadas e barreiras | `test/concurrency/reservation_race_test.rb` |
-| Precificação (hora, diária 24 h, dia de calendário, semana, mínimo, tolerância, faixas, cupons, condições negociadas, multa por atraso, ajuste de extensão) | Implementado e testado (inclui propriedades) | `test/unit/domain/pricing_test.rb` |
-| Interface web (login, organizações, painel, clientes, catálogo, ativos, disponibilidade, reservas, usuários, organização, auditoria) | Implementado e testado | `test/http/*` |
-| API v1 com OpenAPI, Bearer com escopos, idempotência | Implementado e testado | `test/http/api_test.rb` |
-| Rack::Lint, CSRF, XSS, CSP, redirecionamento aberto, limites de payload | Testado | `test/http/web_flow_test.rb` |
-| Seed idempotente com duas organizações | Implementado e verificado na CI | job "Reconstrução do banco e seed" |
-| Cobertura domínio + aplicação | 98,4% linhas / 87,9% branches na última execução local | `rake test:all` com `COVERAGE_CHECK=1` |
-
-## Incremento 3 — Worker, notificações e integrações
-
-| Item | Situação | Evidência |
-|---|---|---|
-| Worker com threads limitadas, lease, fencing, heartbeat, backoff, `dead` e reprocessamento | Implementado e testado | `test/integration/worker_test.rb` |
-| Agendador com chave única por janela (expiração de bloqueios por organização, limpeza) | Implementado e testado | `test_scheduler_fanout_expires_holds_per_organization_once` |
-| Encerramento gracioso (TERM/INT) | Verificado manualmente com `bin/worker` e `docker stop` | logs `worker.stopping`/`worker.stopped` |
-| E-mails transacionais (confirmação, recuperação, convite, reservas) via SMTP | Implementado e testado com mailer em memória; entrega real verificada no Mailpit local | `worker_test.rb` |
-| Outbox → webhooks assinados com identificador estável e retentativas | Implementado e testado com servidor HTTP local | `test_events_are_dispatched_to_signed_webhooks_with_stable_ids` |
-| Proteção SSRF, cifragem de segredos, assinatura | Implementado e testado (sem rede) | `test/unit/infrastructure/security_adapters_test.rb` |
-| Anexos com detecção de tipo, download autenticado e isolamento | Implementado e testado | `test_attachments_upload_download_and_tenant_isolation` |
-| Tela de integrações (endpoints e entregas, reenvio) | Implementado e testado (renderização) | `pages_test.rb` |
+Disputa pelo último ativo; estoque quantitativo com sobreposições (cenário das dez cadeiras); kits com
+componentes compartilhados; expiração concorrente com confirmação; reagendamento com conflito; extensão que
+invade outra reserva; retirada e devolução duplicadas (sequencial e concorrente); devolução parcial; avaria e
+indisponibilidade; isolamento entre organizações e entre clientes; revogação de acesso; cálculos e
+arredondamentos (inclusive propriedades); caução e reembolso (inclusive concorrente); timeout após sucesso no
+provedor; recuperação de tarefas e worker com lease vencido; downloads não autorizados; XSS e CSRF;
+contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
 
 ## Limitações conhecidas
 
-- Orçamentos, contratos/PDF, retirada/devolução, manutenção, financeiro, portal do cliente, CLI
-  operacional e testes de navegador estão planejados para os próximos incrementos.
-- Adaptador de object storage não implementado; somente armazenamento local (fora do diretório
-  público). A interface do adaptador está documentada em ADR-022.
-- Métricas de contadores por processo (Prometheus) refletem apenas o processo consultado; métricas de
-  fila vêm de agregados gravados pelo worker em `queue_stats`.
+- Integração real com o sandbox Asaas não exercitada (sem credenciais); adaptador testado com cliente HTTP
+  falso conforme a documentação oficial.
+- Pré-autorização de cartão modelada e recusada (exigiria tokenização; PAN/CVV nunca são armazenados).
+- NFS-e fora do escopo; apenas faturas comerciais.
+- Armazenamento de anexos somente local; object storage privado depende de adaptador com a mesma interface.
+- Recuperação em ponto no tempo (WAL) não exercitada.
+- Métricas de duração de tarefas e de chamadas externas ficam no processo do worker; com vários processos
+  Puma o coletor precisa somar as séries.
+- Sem API v1 para orçamentos, contratos, operação e portal (disponíveis pela interface e casos de uso).
+- Sem medições de desempenho publicadas.
+- Proteções de branch exigem os checks; aprovação de revisão não é exigida porque o repositório tem um único
+  mantenedor (revisões independentes não são simuladas).
