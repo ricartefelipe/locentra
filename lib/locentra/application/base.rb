@@ -67,29 +67,43 @@ module Locentra
     # O tenant vem do ator autenticado, nunca de parâmetros. Dentro da transação, o vínculo
     # (membro ativo, credencial válida, acesso de portal) é consultado novamente: uma revogação
     # tem efeito na operação seguinte, mesmo com sessão aberta.
+    #
+    # Conflitos que encerram a operação (disponibilidade, bloqueio vencido, concorrência,
+    # idempotência) são contados em `domain_conflicts_total{code}` independentemente da interface
+    # (formulário web, API, worker ou CLI). `metrics` é uma porta com `increment(nome, **rótulos)`.
     class UnitOfWork
-      def initialize(transactor:, access:, clock:)
+      def initialize(transactor:, access:, clock:, metrics: nil)
         @transactor = transactor
         @access = access
         @clock = clock
+        @metrics = metrics
       end
 
       def run(actor, permission = nil, retries: 2)
         raise Domain::AccessDenied, "contexto de organização ausente" if actor.organization_id.nil?
 
-        @transactor.call(tenant_id: actor.organization_id, user_id: actor.user_id, actor: actor, retries: retries) do |tx|
-          current = refresh(tx, actor)
-          Authorizer.authorize!(current, permission) if permission
-          yield tx, current
+        counting_conflicts do
+          @transactor.call(tenant_id: actor.organization_id, user_id: actor.user_id, actor: actor, retries: retries) do |tx|
+            current = refresh(tx, actor)
+            Authorizer.authorize!(current, permission) if permission
+            yield tx, current
+          end
         end
       end
 
       # Transação sem ator de tenant (cadastro inicial, autenticação, aceite de convite).
       def anonymous(tenant_id: nil, user_id: nil, &)
-        @transactor.call(tenant_id: tenant_id, user_id: user_id, &)
+        counting_conflicts { @transactor.call(tenant_id: tenant_id, user_id: user_id, &) }
       end
 
       private
+
+      def counting_conflicts
+        yield
+      rescue Domain::Conflict => e
+        @metrics&.increment("domain_conflicts_total", code: e.code)
+        raise
+      end
 
       def refresh(tx, actor)
         case actor.kind

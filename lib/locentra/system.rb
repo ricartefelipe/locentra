@@ -34,7 +34,7 @@ module Locentra
       @http = http || I::Integrations::SafeHttp.new(allow_http: !config.production?, allow_private: config.test?)
       @transactor = I::Database::Transactor.new(pool: @pool, logger: @logger, metrics: @metrics)
       build_repositories
-      @uow = A::UnitOfWork.new(transactor: @transactor, access: @repos[:access], clock: clock)
+      @uow = A::UnitOfWork.new(transactor: @transactor, access: @repos[:access], clock: clock, metrics: @metrics)
       build_services
       build_use_cases
     end
