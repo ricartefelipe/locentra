@@ -6,6 +6,8 @@ require_relative "web/operations_controllers"
 require_relative "web/integrations_controller"
 require_relative "web/fulfillment_controllers"
 require_relative "web/maintenance_controllers"
+require_relative "web/quotes_controller"
+require_relative "web/contracts_controller"
 require_relative "api/v1"
 
 module Locentra
@@ -85,6 +87,9 @@ module Locentra
           r.post "/reservas/:id/reagendar", reservations, :reschedule
           r.post "/reservas/:id/estender", reservations, :extend_period
 
+          draw_quotes(r, deps, w)
+          draw_contracts(r, deps, w)
+
           members = w::MembersController.new(deps)
           r.get "/usuarios", members, :index
           r.post "/usuarios/convites", members, :invite
@@ -160,6 +165,33 @@ module Locentra
           r.post "/transferencias/:id/saida", transfers, :dispatch_transfer
           r.post "/transferencias/:id/recebimento", transfers, :receive
           r.post "/transferencias/:id/cancelar", transfers, :cancel
+        end
+
+        def draw_quotes(router, deps, web)
+          r = router
+          quotes = web::QuotesController.new(deps)
+          r.get "/orcamentos", quotes, :index
+          r.get "/orcamentos/novo", quotes, :new
+          r.post "/orcamentos", quotes, :create
+          r.get "/orcamentos/:id", quotes, :show
+          r.get "/orcamentos/:id/nova-versao", quotes, :revision
+          r.post "/orcamentos/:id/versoes", quotes, :revise
+          r.post "/orcamentos/:id/enviar", quotes, :send_to_customer
+          r.post "/orcamentos/:id/aprovar", quotes, :approve
+          r.post "/orcamentos/:id/rejeitar", quotes, :reject
+          r.post "/orcamentos/:id/converter", quotes, :convert
+        end
+
+        def draw_contracts(router, deps, web)
+          r = router
+          contracts = web::ContractsController.new(deps)
+          r.get "/contratos", contracts, :index
+          r.post "/contratos", contracts, :create
+          r.get "/contratos/:id", contracts, :show
+          r.post "/contratos/:id/aceite", contracts, :accept
+          r.post "/contratos/:id/aditivos", contracts, :amend
+          r.post "/contratos/:id/cancelar", contracts, :cancel
+          r.post "/contratos/:id/encerrar", contracts, :close
         end
 
         def draw_api(router, api)

@@ -173,6 +173,37 @@ class ReservationFlowTest < DatabaseTest
     assert_equal 12_000, details[:items].first["pricing"]["unit_amount_cents"] / 2
   end
 
+  # Snapshot de preços pré-calculado (conversão de orçamento): precisa corresponder exatamente aos
+  # itens e ao período da reserva; divergências são recusadas sem gravar nada.
+  def test_precalculated_pricing_snapshot_must_match_items_and_period
+    camera = create_product(@actor, sku: "CAM-SNP", tracking: "serialized", pricing: { "daily_cents" => 12_000 })
+    lens = create_product(@actor, sku: "LEN-SNP", tracking: "serialized", pricing: { "daily_cents" => 3_000 })
+    register_assets(@actor, camera, @branch, 2)
+    register_assets(@actor, lens, @branch, 1)
+    rental = period("2026-03-10T08:00:00Z", "2026-03-12T08:00:00Z")
+    priced, summary = @system.transactor.call(tenant_id: @org[:organization_id]) do |tx|
+      products = @system.services[:allocator].products_for(tx, [camera.id])
+      @system.services[:pricer].price(tx, products: products, lines: [line(camera, 1)], period: rental, zone: D::TimeZone.new("America/Sao_Paulo"),
+                                          customer_id: @customer.id, now: @clock.now)
+    end
+    snapshot = { items: priced, summary: summary }
+    cases = {
+      "quantidade" => [rental, [line(camera, 2)], "itens"],
+      "produto" => [rental, [line(lens, 1)], "itens"],
+      "item a mais" => [rental, [line(camera, 1), line(lens, 1)], "itens"],
+      "período" => [period("2026-03-10T08:00:00Z", "2026-03-13T08:00:00Z"), [line(camera, 1)], "período"]
+    }
+    cases.each do |label, (requested, lines, reason)|
+      error = assert_raises(D::ValidationError, label) { reserve(@actor, @customer, @branch, requested, lines, mode: "confirm", pricing_snapshot: snapshot) }
+
+      assert_includes error.errors.fetch("precos").first, reason, label
+    end
+    assert_equal 0, owner_query("SELECT count(*) AS n FROM reservations").first["n"].to_i
+    reservation = reserve(@actor, @customer, @branch, rental, [line(camera, 1)], mode: "confirm", pricing_snapshot: snapshot)
+
+    assert_equal 24_000, reservation.total.cents
+  end
+
   def test_asset_status_change_relocates_future_reservations
     camera = create_product(@actor, sku: "CAM-MNT", tracking: "serialized")
     first, second = register_assets(@actor, camera, @branch, 2)

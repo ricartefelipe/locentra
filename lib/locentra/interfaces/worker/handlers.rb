@@ -94,7 +94,7 @@ module Locentra
           vars = job.payload.fetch("variables", {}).dup
           if job.organization_id
             zone = tenant(job) { |tx| @system.repos[:organizations].find(tx, tx.tenant_id!).time_zone }
-            %w[starts_at ends_at].each do |key|
+            %w[starts_at ends_at valid_until].each do |key|
               vars["#{key}_local"] = zone.format_local(Time.iso8601(vars[key])) if vars[key]
             end
           end
@@ -124,14 +124,15 @@ module Locentra
           :ok
         end
 
-        # Rotina por organização: expira bloqueios vencidos, detecta atrasos e limpa chaves de
-        # idempotência vencidas. Cada etapa é idempotente.
+        # Rotina por organização: expira bloqueios e orçamentos vencidos, detecta atrasos e limpa
+        # chaves de idempotência vencidas. Cada etapa é idempotente.
         def organization_tick(job)
           actor = Application::Actor.system(organization_id: job.organization_id, request_id: job.correlation_id)
           expired = uc(:expire_holds).call(actor)
+          expired_quotes = uc(:expire_quotes).call(actor)
           overdue = @system.use_cases.names.include?(:detect_overdue) ? uc(:detect_overdue).call(actor) : []
           tenant(job) { |tx| @system.repos[:idempotency].purge(tx, @system.clock.now) }
-          { "expired" => expired.size, "overdue" => Array(overdue).size }
+          { "expired" => expired.size, "expired_quotes" => expired_quotes.size, "overdue" => Array(overdue).size }
         end
 
         def send_template(template, to, vars)

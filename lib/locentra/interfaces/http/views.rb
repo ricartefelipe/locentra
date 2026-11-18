@@ -146,7 +146,8 @@ module Locentra
           "blocked" => "danger", "inactive" => "muted", "revoked" => "muted", "picking" => "warning", "delivered" => "success",
           "partial" => "info", "not_delivered" => "muted", "pending" => "warning", "checked" => "info", "approved" => "success",
           "rejected" => "danger", "open" => "warning", "dismissed" => "muted", "received" => "success", "resolved" => "muted",
-          "overdue" => "danger", "affected_by_overdue" => "warning", "asset_unavailable" => "danger"
+          "overdue" => "danger", "affected_by_overdue" => "warning", "asset_unavailable" => "danger", "draft" => "neutral",
+          "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted"
         }.freeze
 
         def status_badge(status, label)
@@ -184,6 +185,9 @@ module Locentra
           bucket.is_a?(Hash) ? bucket[key] : nil
         end
 
+        # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.
+        def open_if(errors, *fields) = raw(fields.any? { |field| errors&.key?(field.to_s) } ? " open" : "")
+
         def selected(current, value) = raw(current.to_s == value.to_s ? " selected" : "")
         def checked(flag) = raw(flag ? " checked" : "")
 
@@ -197,6 +201,8 @@ module Locentra
         NAVIGATION = [
           ["Painel", "/", "reservations.read"],
           ["Reservas", "/reservas", "reservations.read"],
+          ["Orçamentos", "/orcamentos", "quotes.read"],
+          ["Contratos", "/contratos", "contracts.read"],
           ["Disponibilidade", "/disponibilidade", "availability.read"],
           ["Clientes", "/clientes", "customers.read"],
           ["Produtos e kits", "/produtos", "catalog.read"],
