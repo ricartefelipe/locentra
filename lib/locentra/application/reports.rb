@@ -42,8 +42,17 @@ module Locentra
         end
       end
 
-      # Métricas derivadas do banco (fila), atualizadas no momento da coleta.
+      # Métricas derivadas do banco, atualizadas no momento da coleta pelo processo web:
+      #
+      # - tamanho e idade da fila por fila e situação (`queue_stats`, gravado pelo worker), e há
+      #   quanto tempo esses agregados foram atualizados (worker parado aparece como idade crescente);
+      # - totais de retentativas e de falhas permanentes somados por todos os workers
+      #   (`job_outcome_totals`), publicados como contadores.
+      #
+      # Nenhum rótulo carrega organização ou identificador: somente fila, situação e tipo de tarefa.
       class CollectMetrics
+        OUTCOME_COUNTERS = { "retry" => "jobs_retries_total", "dead" => "jobs_dead_total" }.freeze
+
         def initialize(transactor:, reports:, metrics:, clock:)
           @transactor = transactor
           @reports = reports
@@ -52,14 +61,27 @@ module Locentra
         end
 
         def call
-          stats = @transactor.call { |tx| @reports.queue_stats(tx, @clock.now) }
-          stats.each do |row|
-            @metrics.gauge("jobs_queue_size", row["size"], queue: row["queue"], kind: row["status"])
-            @metrics.gauge("jobs_oldest_age_seconds", row["oldest_age"].to_f.round(1), queue: row["queue"], kind: row["status"])
+          now = @clock.now
+          stats, totals = @transactor.call { |tx| [@reports.queue_stats(tx, now), @reports.job_outcome_totals(tx)] }
+          publish_queue(stats, now)
+          totals.each do |row|
+            name = OUTCOME_COUNTERS[row["outcome"]]
+            @metrics.set_counter(name, row["total"].to_i, queue: row["queue"], kind: row["kind"]) if name
           end
           true
         rescue StandardError
           false
+        end
+
+        private
+
+        def publish_queue(stats, now)
+          labels = ->(row) { { queue: row["queue"], status: row["status"] } }
+          @metrics.replace_gauges("jobs_queue_size", stats.map { |row| [row["size"].to_i, labels.call(row)] })
+          @metrics.replace_gauges("jobs_oldest_age_seconds", stats.map { |row| [row["oldest_age"].to_f.round(1), labels.call(row)] })
+          updated = stats.filter_map { |row| row["updated_at"] }.max
+          series = updated ? [[[now - updated, 0].max.round(1), {}]] : []
+          @metrics.replace_gauges("jobs_queue_stats_age_seconds", series)
         end
       end
     end

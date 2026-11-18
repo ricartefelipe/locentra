@@ -13,6 +13,9 @@ module Locentra
       # - `complete`/`retry_later`/`kill` exigem o token do lease atual (fencing): um worker cujo lease
       #   venceu e foi assumido por outro não consegue registrar resultado.
       # - Nenhum lock de banco é mantido durante a execução da tarefa ou chamadas de rede.
+      # - Reagendamentos e encerramentos sem novas tentativas somam em `job_outcome_totals` (fila, tipo
+      #   e desfecho, sem dados de tenant) na mesma transação da transição: o processo web expõe os
+      #   totais de todos os workers em /metrics.
       class Queue
         Claimed = Data.define(:id, :organization_id, :kind, :payload, :attempts, :max_attempts, :lease_token, :correlation_id)
 
@@ -86,6 +89,7 @@ module Locentra
              WHERE id = $1 AND lease_token = $2 AND status = 'running'
           SQL
           record_attempt(tx, job, updated == 1 ? "retry" : "lease_lost", error, now)
+          count_outcome(tx, job, "retry", now) if updated == 1
           updated == 1
         end
 
@@ -134,7 +138,17 @@ module Locentra
              WHERE id = $1 AND lease_token = $2 AND status = 'running'
           SQL
           record_attempt(tx, job, updated == 1 ? outcome : "lease_lost", error, now)
+          count_outcome(tx, job, outcome, now) if updated == 1 && outcome == "dead"
           updated == 1
+        end
+
+        # Fila e tipo vêm da própria linha da tarefa; nenhum identificador é gravado no total.
+        def count_outcome(tx, job, outcome, now)
+          tx.execute(<<~SQL, [job.id, outcome, now])
+            INSERT INTO job_outcome_totals (queue, kind, outcome, total, updated_at)
+            SELECT queue, kind, $2, 1, $3 FROM jobs WHERE id = $1
+            ON CONFLICT (queue, kind, outcome) DO UPDATE SET total = job_outcome_totals.total + 1, updated_at = EXCLUDED.updated_at
+          SQL
         end
 
         def record_attempt(tx, job, outcome, error, now)
