@@ -95,6 +95,36 @@ jobs:
           path: coverage/
           retention-days: 7
 
+  navegador:
+    name: Testes de navegador
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.7-alpine
+        env:
+          POSTGRES_PASSWORD: ci-superuser
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      APP_ENV: test
+      TEST_MIGRATION_DATABASE_URL: postgres://locentra_owner:ci-owner@localhost:5432/locentra_test
+      TEST_DATABASE_URL: postgres://locentra_app:ci-app@localhost:5432/locentra_test
+      TEST_WORKER_DATABASE_URL: postgres://locentra_worker:ci-worker@localhost:5432/locentra_test
+      # Chrome já instalado na imagem do runner; Ferrum o executa em modo headless e sem sandbox.
+      BROWSER_PATH: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          bundler-cache: true
+      - name: Criar papéis e bancos (mesmo script do ambiente local)
+        run: sh docker/postgres/init/01-roles.sh
+      - name: Versão do navegador
+        run: '"$BROWSER_PATH" --version'
+      - name: Suíte de navegador (Puma em processo, Chrome headless via Ferrum)
+        run: bundle exec rake test:browser TESTOPTS="--verbose"
+
   banco:
     name: Reconstrução do banco e seed
     runs-on: ubuntu-24.04
