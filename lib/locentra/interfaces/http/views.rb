@@ -154,6 +154,18 @@ module Locentra
           badge(label, STATUS_TONES.fetch(status, "neutral"))
         end
 
+        # Situações do financeiro (cobranças, pagamentos, reembolsos, cauções e conciliação).
+        FINANCE_TONES = {
+          "open" => "warning", "partial" => "info", "paid" => "success", "credit" => "danger", "cancelled" => "muted",
+          "pending_submission" => "neutral", "submission_unknown" => "warning", "pending" => "warning", "confirmed" => "success",
+          "failed" => "danger", "awaiting" => "neutral", "held" => "info", "settled" => "muted", "running" => "info", "completed" => "success",
+          "resolved" => "muted"
+        }.freeze
+
+        def finance_badge(status, label)
+          badge(label, FINANCE_TONES.fetch(status, "neutral"))
+        end
+
         def url(path, params = {})
           query = params.compact.reject { |_, v| v.to_s.empty? }
           query.empty? ? path : "#{path}?#{URI.encode_www_form(query)}"
@@ -205,6 +217,7 @@ module Locentra
           ["Contratos", "/contratos", "contracts.read"],
           ["Disponibilidade", "/disponibilidade", "availability.read"],
           ["Clientes", "/clientes", "customers.read"],
+          ["Financeiro", "/financeiro", "finance.read"],
           ["Produtos e kits", "/produtos", "catalog.read"],
           ["Ativos", "/ativos", "catalog.read"],
           ["Retiradas e devoluções", "/operacao", "fulfillment.write"],

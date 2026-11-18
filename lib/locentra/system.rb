@@ -21,8 +21,9 @@ module Locentra
     end
 
     def initialize(config, clock: Domain::SystemClock.new, ids: Domain::IdGenerator.new, logger: nil, metrics: nil, database_url: nil,
-                   pool_name: "web", pool_size: nil, mailer: nil, http: nil)
+                   pool_name: "web", pool_size: nil, mailer: nil, http: nil, payment_http: nil)
       @config = config
+      @payment_http = payment_http
       @clock = clock
       @ids = ids
       @logger = logger || I::Observability::StructuredLogger.new(level: config.log_level, base: { "service" => "locentra" })
@@ -53,6 +54,10 @@ module Locentra
         reservations: P::ReservationRepository.new, audit: P::AuditRepository.new, pricing: P::PricingRepository.new,
         credentials: P::CredentialRepository.new, idempotency: P::IdempotencyRepository.new, reports: P::ReportsRepository.new,
         webhooks: P::WebhookRepository.new, attachments: P::AttachmentRepository.new,
+        receivables: P::ReceivableRepository.new, payments: P::PaymentRepository.new, deposits: P::DepositRepository.new,
+        ledger_entries: P::LedgerRepository.new, finance_alerts: P::FinanceAlertRepository.new, invoices: P::InvoiceRepository.new,
+        payment_accounts: P::PaymentAccountRepository.new, inbound_webhooks: P::InboundWebhookRepository.new,
+        reconciliation: P::ReconciliationRepository.new,
         fulfillment: P::FulfillmentRepository.new, operational_allocations: P::OperationalAllocationRepository.new,
         inspections: P::InspectionRepository.new, maintenance_orders: P::MaintenanceOrderRepository.new,
         damage_reports: P::DamageReportRepository.new, transfers: P::TransferRepository.new, alerts: P::AlertRepository.new,
@@ -83,8 +88,9 @@ module Locentra
       }
       @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
                                                                            quotes: repos[:quotes], contracts: repos[:contracts])
+      @services[:finance_subscriber] = A::Finance::ReservationChargesSubscriber.new(queue: queue)
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
-                                                                  clock: clock, ids: ids)
+                                                                  clock: clock, ids: ids, subscribers: [@services[:finance_subscriber]])
       @services[:deliver_webhook] = A::Webhooks::Deliver.new(transactor: transactor, webhooks: repos[:webhooks], http: @http, box: @services[:box],
                                                              clock: clock, logger: logger)
     end
@@ -97,6 +103,7 @@ module Locentra
       build_catalog_use_cases(uc)
       build_reservation_use_cases(uc)
       build_integration_use_cases(uc)
+      build_finance_use_cases(uc)
       build_operations_use_cases(uc)
       build_quote_use_cases(uc)
       build_contract_use_cases(uc)
@@ -346,6 +353,64 @@ module Locentra
       uc[:list_contracts] = A::Contracts::ListContracts.new(uow: uow, contracts: r[:contracts])
       uc[:get_contract] = A::Contracts::GetContract.new(uow: uow, contracts: r[:contracts], reservations: r[:reservations], clock: clock)
       uc[:reservation_links] = A::Contracts::ReservationLinks.new(uow: uow, contracts: r[:contracts], quotes: r[:quotes])
+    end
+
+    # Financeiro: cobranças, pagamentos, reembolsos, cauções, diário, provedores, webhooks e conciliação.
+    def build_finance_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      fn = A::Finance
+      simulator = I::Payments::Simulator.new(transactor: transactor, clock: clock, ids: ids)
+      asaas = I::Payments::Asaas.new(http: @payment_http || I::Payments::HttpClient.new, box: s[:box], sandbox_url: config.asaas_base_url)
+      providers = fn::Providers.new("simulator" => simulator, "asaas" => asaas)
+      s[:payment_providers] = providers
+      ledger = fn::Ledger.new(entries: r[:ledger_entries], ids: ids, clock: clock)
+      alert_book = fn::AlertBook.new(alerts: r[:finance_alerts], ids: ids, clock: clock)
+      settlement = fn::Settlement.new(payments: r[:payments], deposits: r[:deposits], reservations: r[:reservations], ledger: ledger,
+                                      alert_book: alert_book, audit: audit, events: s[:events], clock: clock, ids: ids)
+      remote = fn::RemoteSync.new(payments: r[:payments], settlement: settlement, clock: clock)
+      s[:payment_remote_sync] = remote
+      s[:finance_alert_book] = alert_book
+      target = fn::PaymentTarget.new(receivables: r[:receivables], deposits: r[:deposits])
+      accounts = { accounts: r[:payment_accounts] }
+      money = { ledger: ledger, audit: audit, clock: clock, ids: ids }
+      resolver = fn::ResolveSubmission.new(uow: uow, payments: r[:payments], **accounts, providers: providers, remote: remote,
+                                           alert_book: alert_book, queue: queue, audit: audit, clock: clock)
+      ingest = fn::IngestWebhook.new(uow: uow, **accounts, inbound: r[:inbound_webhooks], providers: providers, queue: queue, clock: clock, ids: ids)
+
+      uc[:sync_reservation_charges] = fn::SyncReservationCharges.new(uow: uow, reservations: r[:reservations], organizations: r[:organizations],
+                                                                     receivables: r[:receivables], alert_book: alert_book, **money)
+      uc[:create_manual_charge] = fn::CreateManualCharge.new(uow: uow, reservations: r[:reservations], organizations: r[:organizations],
+                                                             receivables: r[:receivables], **money)
+      uc[:cancel_receivable] = fn::CancelReceivable.new(uow: uow, receivables: r[:receivables], **money)
+      uc[:register_payment] = fn::RegisterPayment.new(uow: uow, payments: r[:payments], target: target, settlement: settlement, clock: clock, ids: ids)
+      uc[:request_payment] = fn::RequestPayment.new(uow: uow, payments: r[:payments], **accounts, organizations: r[:organizations], target: target,
+                                                    queue: queue, audit: audit, clock: clock, ids: ids)
+      uc[:request_refund] = fn::RequestRefund.new(uow: uow, payments: r[:payments], queue: queue, events: s[:events], **money)
+      uc[:submit_payment] = fn::SubmitPayment.new(uow: uow, payments: r[:payments], **accounts, customers: r[:customers], reservations: r[:reservations],
+                                                  providers: providers, remote: remote, resolver: resolver, alert_book: alert_book, audit: audit, clock: clock)
+      uc[:resolve_submission] = resolver
+      uc[:process_refund] = fn::ProcessRefund.new(uow: uow, payments: r[:payments], **accounts, providers: providers, ledger: ledger, queue: queue,
+                                                  audit: audit, events: s[:events], clock: clock)
+      uc[:ingest_payment_webhook] = ingest
+      uc[:process_payment_webhook] = fn::ProcessWebhook.new(uow: uow, inbound: r[:inbound_webhooks], payments: r[:payments], providers: providers,
+                                                            settlement: settlement, alert_book: alert_book, clock: clock)
+      uc[:simulate_payment] = fn::SimulateProviderEvent.new(uow: uow, payments: r[:payments], **accounts, simulator: simulator, ingest: ingest)
+      uc[:open_deposit] = fn::OpenDeposit.new(uow: uow, reservations: r[:reservations], deposits: r[:deposits], audit: audit, clock: clock, ids: ids)
+      uc[:move_deposit] = fn::MoveDeposit.new(uow: uow, deposits: r[:deposits], receivables: r[:receivables], **money)
+      uc[:reconcile_payments] = fn::Reconcile.new(uow: uow, **accounts, payments: r[:payments], reports: r[:reconciliation], providers: providers,
+                                                  resolver: resolver, remote: remote, audit: audit, clock: clock, ids: ids)
+      uc[:configure_payment_account] = fn::ConfigureProviderAccount.new(uow: uow, **accounts, limits: s[:limits], box: s[:box], audit: audit,
+                                                                        clock: clock, ids: ids)
+      uc[:deactivate_payment_account] = fn::DeactivateProviderAccount.new(uow: uow, **accounts, audit: audit, clock: clock)
+      uc[:resolve_finance_alert] = fn::ResolveAlert.new(uow: uow, alerts: r[:finance_alerts], audit: audit, clock: clock)
+      uc[:issue_invoice] = fn::IssueInvoice.new(uow: uow, reservations: r[:reservations], receivables: r[:receivables], organizations: r[:organizations],
+                                                invoices: r[:invoices], audit: audit, clock: clock, ids: ids)
+      uc[:finance] = fn::Queries.new(uow: uow, receivables: r[:receivables], payments: r[:payments], deposits: r[:deposits], alerts: r[:finance_alerts],
+                                     **accounts, reports: r[:reconciliation], invoices: r[:invoices], ledger_entries: r[:ledger_entries],
+                                     reservations: r[:reservations])
     end
 
     # Escopo de portal antes do portal do cliente existir: nenhum anexo é acessível por clientes.

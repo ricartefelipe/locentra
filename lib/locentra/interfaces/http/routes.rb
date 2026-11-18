@@ -4,11 +4,13 @@ require_relative "web/auth_controller"
 require_relative "web/main_controllers"
 require_relative "web/operations_controllers"
 require_relative "web/integrations_controller"
+require_relative "web/finance_controllers"
 require_relative "web/fulfillment_controllers"
 require_relative "web/maintenance_controllers"
 require_relative "web/quotes_controller"
 require_relative "web/contracts_controller"
 require_relative "api/v1"
+require_relative "api/v1_finance"
 
 module Locentra
   module Interfaces
@@ -115,7 +117,53 @@ module Locentra
           r.get "/anexos/:id", attachments, :show, auth: :staff_or_portal
           r.post "/anexos/:id/remover", attachments, :remove
 
+          draw_finance(r, deps, w)
           draw_operations(r, deps, w)
+        end
+
+        # Financeiro: cobranças, pagamentos, reembolsos, cauções, faturas, conciliação, provedor,
+        # webhook público do provedor e API de pagamentos.
+        def draw_finance(router, deps, web)
+          r = router
+          w = web
+          finance = w::FinanceController.new(deps)
+          r.get "/financeiro", finance, :index
+          r.post "/financeiro/conciliacao", finance, :reconcile
+          r.get "/financeiro/conciliacao/:id", finance, :report
+          r.post "/financeiro/alertas/:id/resolver", finance, :resolve_alert
+          r.get "/financeiro/provedor", finance, :provider
+          r.post "/financeiro/provedor", finance, :configure_provider
+          r.post "/financeiro/provedor/:id/desativar", finance, :deactivate_provider
+
+          receivables = w::ReceivablesController.new(deps)
+          r.get "/financeiro/cobrancas/:id", receivables, :show
+          r.post "/financeiro/cobrancas/:id/pagamentos", receivables, :register_payment
+          r.post "/financeiro/cobrancas/:id/solicitar", receivables, :request_payment
+          r.post "/financeiro/cobrancas/:id/cancelar", receivables, :cancel
+          r.post "/financeiro/reservas/:id/sincronizar", receivables, :sync
+          r.post "/financeiro/reservas/:id/cobrancas", receivables, :create_charge
+          r.post "/financeiro/reservas/:id/faturas", receivables, :issue_invoice
+          r.get "/financeiro/faturas/:id", receivables, :invoice
+
+          payments = w::PaymentsController.new(deps)
+          r.get "/financeiro/pagamentos/:id", payments, :show
+          r.post "/financeiro/pagamentos/:id/reembolsos", payments, :refund
+          r.post "/financeiro/pagamentos/:id/simular", payments, :simulate
+
+          deposits = w::DepositsController.new(deps)
+          r.post "/financeiro/reservas/:id/caucao", deposits, :create
+          r.get "/financeiro/caucoes/:id", deposits, :show
+          r.post "/financeiro/caucoes/:id/receber", deposits, :receive
+          r.post "/financeiro/caucoes/:id/solicitar", deposits, :request_payment
+          r.post "/financeiro/caucoes/:id/aplicar", deposits, :apply
+          r.post "/financeiro/caucoes/:id/devolver", deposits, :give_back
+
+          r.post "/webhooks/pagamentos/:conta_id", w::PaymentWebhooksController.new(deps), :receive, auth: :public, csrf: false
+
+          api = API::FinanceV1Controller.new(deps)
+          r.post "/api/v1/payments", api, :create_payment, auth: :api
+          r.get "/api/v1/payments/:id", api, :payment, auth: :api
+          r.post "/api/v1/payments/:id/refunds", api, :create_refund, auth: :api
         end
 
         # Retirada, devolução, inspeção, avarias, manutenção e transferências.

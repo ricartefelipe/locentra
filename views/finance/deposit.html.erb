@@ -1,0 +1,113 @@
+<% fin = Locentra::Domain::Finance %>
+<% deposit = @data[:deposit] %>
+<% ledger = @data[:ledger] %>
+<% remaining = ledger.remaining(deposit.expected) %>
+<% applicable = @data[:receivables].select { |row| !row[:balance].cancelled? && row[:balance].open_amount.positive? } %>
+<header class="page-header">
+  <h1>Caução da reserva <a href="/reservas/<%= deposit.reservation_id %>"><%= @data[:reservation]&.code %></a> <%= finance_badge(ledger.status, ledger.status_label) %></h1>
+  <p class="muted"><%= deposit.kind_label %>. A caução é valor do cliente sob guarda (passivo): não é receita até ser aplicada a uma cobrança.</p>
+</header>
+<%= partial("shared/errors") %>
+<div class="grid-2">
+  <section class="panel" aria-labelledby="titulo-saldo-caucao">
+    <h2 id="titulo-saldo-caucao">Saldo</h2>
+    <dl class="details">
+      <dt>Valor previsto</dt><dd><%= money(deposit.expected) %></dd>
+      <dt>Recebido</dt><dd><%= money(ledger.received) %></dd>
+      <dt>Aplicado a cobranças</dt><dd><%= money(ledger.applied) %></dd>
+      <dt>Devolvido</dt><dd><%= money(ledger.returned) %></dd>
+      <dt>Saldo retido</dt><dd><strong><%= money(ledger.balance) %></strong></dd>
+    </dl>
+    <% if deposit.notes %><p class="muted"><%= deposit.notes %></p><% end %>
+  </section>
+  <section class="panel" aria-labelledby="titulo-movimentar">
+    <h2 id="titulo-movimentar">Movimentar</h2>
+    <% if !can?("deposits.manage") %>
+      <p class="empty">Sem permissão para movimentar cauções.</p>
+    <% else %>
+      <% if remaining.positive? %>
+        <form method="post" action="/financeiro/caucoes/<%= deposit.id %>/receber" class="stack">
+          <%= csrf_field %>
+          <h3>Registrar recebimento</h3>
+          <label for="metodo-caucao">Método</label>
+          <select id="metodo-caucao" name="metodo">
+            <% fin::PAYMENT_METHODS.each do |key, label| %><option value="<%= key %>"><%= label %></option><% end %>
+          </select>
+          <label for="valor-caucao">Valor (R$)</label>
+          <input id="valor-caucao" name="valor" inputmode="decimal" required value="<%= remaining.to_decimal_string %>"<%= invalid(@errors, "valor") %>>
+          <%= field_errors(@errors, "valor") %>
+          <button type="submit" class="primary">Registrar recebimento</button>
+        </form>
+        <% if @data[:account] && can?("deposits.manage") %>
+          <form method="post" action="/financeiro/caucoes/<%= deposit.id %>/solicitar" class="stack">
+            <%= csrf_field %>
+            <h3>Cobrar caução pelo provedor</h3>
+            <label for="metodo-caucao-provedor">Método</label>
+            <select id="metodo-caucao-provedor" name="metodo">
+              <% fin::PROVIDER_METHODS.each do |key| %><option value="<%= key %>"><%= fin::PAYMENT_METHODS.fetch(key) %></option><% end %>
+            </select>
+            <label for="valor-caucao-provedor">Valor (R$)</label>
+            <input id="valor-caucao-provedor" name="valor" inputmode="decimal" required value="<%= remaining.to_decimal_string %>">
+            <% if @data[:account]["provider"] == "simulator" %>
+              <label for="cenario-caucao">Cenário do simulador</label>
+              <select id="cenario-caucao" name="cenario">
+                <% fin::SIMULATOR_SCENARIOS.each do |key, label| %><option value="<%= key %>"><%= label %></option><% end %>
+              </select>
+            <% end %>
+            <button type="submit">Enviar cobrança</button>
+          </form>
+        <% end %>
+      <% end %>
+      <% if ledger.balance.positive? %>
+        <% if applicable.empty? %>
+          <p class="muted">Nenhuma cobrança em aberto desta reserva para aplicar a caução.</p>
+        <% else %>
+          <form method="post" action="/financeiro/caucoes/<%= deposit.id %>/aplicar" class="stack">
+            <%= csrf_field %>
+            <h3>Aplicar a uma cobrança</h3>
+            <label for="cobranca-aplicar">Cobrança</label>
+            <select id="cobranca-aplicar" name="cobranca_id" required>
+              <% applicable.each do |row| %><option value="<%= row[:receivable].id %>"><%= row[:receivable].description %> — saldo <%= money(row[:balance].open_amount) %></option><% end %>
+            </select>
+            <label for="valor-aplicar">Valor (R$)</label>
+            <input id="valor-aplicar" name="valor" inputmode="decimal" required>
+            <button type="submit">Aplicar caução</button>
+          </form>
+        <% end %>
+        <form method="post" action="/financeiro/caucoes/<%= deposit.id %>/devolver" class="stack" data-confirm="Registrar a devolução da caução ao cliente?">
+          <%= csrf_field %>
+          <h3>Devolver saldo</h3>
+          <label for="metodo-devolucao">Método</label>
+          <select id="metodo-devolucao" name="metodo">
+            <% fin::DEPOSIT_RETURN_METHODS.each do |key| %><option value="<%= key %>"><%= fin::PAYMENT_METHODS.fetch(key) %></option><% end %>
+          </select>
+          <label for="valor-devolucao">Valor (R$)</label>
+          <input id="valor-devolucao" name="valor" inputmode="decimal" required value="<%= ledger.balance.to_decimal_string %>">
+          <label for="observacoes-devolucao">Observações</label>
+          <input id="observacoes-devolucao" name="observacoes" maxlength="500">
+          <button type="submit" class="danger">Devolver</button>
+        </form>
+      <% end %>
+    <% end %>
+  </section>
+</div>
+<section class="panel" aria-labelledby="titulo-movimentos">
+  <h2 id="titulo-movimentos">Movimentos</h2>
+  <% if @data[:entries].empty? %><p class="empty">Nenhum movimento. A caução ainda não foi recebida.</p><% else %>
+    <table class="table">
+      <caption class="sr-only">Movimentos da caução</caption>
+      <thead><tr><th scope="col">Data</th><th scope="col">Movimento</th><th scope="col">Detalhe</th><th scope="col" class="num">Valor</th></tr></thead>
+      <tbody>
+        <% @data[:entries].each do |entry| %>
+          <tr><td><%= datetime(entry["created_at"]) %></td><td><%= fin::DEPOSIT_ENTRY_KINDS.fetch(entry["kind"]) %></td>
+            <td><%= entry["receivable_description"] || (entry["method"] && fin::PAYMENT_METHODS.fetch(entry["method"])) %><%= entry["notes"] ? " — #{entry["notes"]}" : "" %></td>
+            <td class="num"><%= money(entry["amount_cents"]) %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>
+<section class="panel" aria-labelledby="titulo-pagamentos-caucao">
+  <h2 id="titulo-pagamentos-caucao">Pagamentos da caução</h2>
+  <%= partial("finance/payments_table", rows: @data[:payments]) %>
+</section>

@@ -232,6 +232,84 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Reservation" }
         "409": { $ref: "#/components/responses/Error" }
+  /payments:
+    post:
+      summary: Registra pagamento recebido fora do provedor (manual), confirmado na hora
+      description: |
+        Informe `receivable_id` (cobrança, escopo `finance.write`) ou `deposit_id` (caução, escopo `deposits.manage`).
+        O valor não pode exceder o saldo em aberto da cobrança ou o restante previsto da caução. Pagamento de reserva
+        expirada ou cancelada é confirmado com `requires_review: true` e gera alerta; a reserva não é reativada.
+      operationId: createPayment
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method, amount_cents]
+              properties:
+                receivable_id: { type: string, format: uuid }
+                deposit_id: { type: string, format: uuid }
+                method: { type: string, enum: [pix, boleto, card, cash, transfer] }
+                amount_cents: { type: integer, minimum: 1, description: Centavos inteiros (valores decimais são recusados) }
+                paid_at: { type: string, format: date-time, description: Instante do recebimento; padrão é o instante atual }
+                notes: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: Pagamento confirmado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /payments/{id}:
+    get:
+      summary: Detalha pagamento com reembolsos e saldo reembolsável
+      operationId: getPayment
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Pagamento
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Payment" }
+                  - type: object
+                    properties:
+                      refunds: { type: array, items: { $ref: "#/components/schemas/Refund" } }
+                      refundable: { $ref: "#/components/schemas/Money" }
+        "404": { $ref: "#/components/responses/Error" }
+  /payments/{id}/refunds:
+    post:
+      summary: Reembolsa pagamento de cobrança
+      description: |
+        O pagamento é bloqueado e a soma dos reembolsos pendentes e confirmados não pode exceder o valor confirmado
+        (`409 refund_exceeds_eligible`). Pagamentos manuais têm o reembolso confirmado na hora; pagamentos de provedor
+        ficam `pending` até o estorno ser concluído pelo worker. Escopo `finance.refund`.
+      operationId: createRefund
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount_cents, reason]
+              properties:
+                amount_cents: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        "201":
+          description: Reembolso registrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Refund" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearer:
@@ -323,3 +401,31 @@ components:
         total: { $ref: "#/components/schemas/Money" }
         deposit: { $ref: "#/components/schemas/Money" }
         version: { type: integer }
+    Payment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string, enum: [receivable, deposit] }
+        receivable_id: { type: [string, "null"], format: uuid }
+        deposit_id: { type: [string, "null"], format: uuid }
+        reservation_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        method: { type: string, enum: [pix, boleto, card, cash, transfer] }
+        provider: { type: string, enum: [manual, simulator, asaas] }
+        status: { type: string, enum: [pending_submission, submission_unknown, pending, confirmed, failed, cancelled] }
+        amount: { $ref: "#/components/schemas/Money" }
+        external_reference: { type: string, description: Referência estável enviada ao provedor (igual ao id) }
+        provider_payment_id: { type: [string, "null"] }
+        requires_review: { type: boolean }
+        review_reason: { type: [string, "null"] }
+        paid_at: { type: [string, "null"], format: date-time }
+        confirmed_at: { type: [string, "null"], format: date-time }
+    Refund:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        payment_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, confirmed, failed] }
+        amount: { $ref: "#/components/schemas/Money" }
+        reason: { type: string }
+        confirmed_at: { type: [string, "null"], format: date-time }
