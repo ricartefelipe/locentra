@@ -6,8 +6,9 @@ module Locentra
     #
     # As duas operações exigem `jobs.manage`: a mensagem de erro de uma tarefa pode revelar detalhes
     # de integrações. O reprocessamento devolve a tarefa a `pending` com as tentativas zeradas e é
-    # auditado na mesma transação; o histórico em `job_attempts` é preservado. Tarefas de outra
-    # organização ou sem organização não são visíveis (filtro explícito e RLS).
+    # auditado na mesma transação; o histórico em `job_attempts` é preservado (a numeração continua e
+    # tentativas abandonadas são encerradas). Tarefas de outra organização ou sem organização não são
+    # visíveis (filtro explícito e RLS).
     module Jobs
       STATUSES = {
         "pending" => "Pendente", "running" => "Em execução", "succeeded" => "Concluída",
@@ -19,11 +20,19 @@ module Locentra
 
       # Remove da mensagem de erro credenciais de integração, credenciais embutidas em URLs,
       # parâmetros de consulta e pares chave=valor sensíveis antes de exibi-la ou auditá-la.
+      #
+      # Chaves sensíveis valem isoladas ou como parte de nomes compostos (`access_token`,
+      # `client_secret`, `x-api-key`), em `chave=valor`, `chave: valor` ou JSON (`"chave":"valor"`).
+      # O valor inclui o esquema de autenticação (`Authorization: Bearer ...`) e, entre aspas, vai até
+      # a aspa de fechamento.
       module ErrorText
         CREDENTIAL_TOKEN = /lcn_[0-9a-f]{32}_[A-Za-z0-9_-]{43}/
+        PROVIDER_KEY = %r{\$aact_[A-Za-z0-9_+/=:$-]+}
         URL_USERINFO = %r{(\b[a-z][a-z0-9+.-]*://)[^/\s@]+@}i
         URL_QUERY = %r{(\bhttps?://[^\s?#]+)\?[^\s#]*}i
-        SENSITIVE_PAIR = /\b(pass(?:word)?|senha|token|secret|segredo|api[_-]?key|authorization)(\s*[=:]\s*)\S+/i
+        SENSITIVE_KEY = /(?<![a-z0-9])(?:[a-z0-9]+[_-])*(?:pass(?:word|wd)?|senha|token|secret|segredo|api[_-]?key|access[_-]?key|
+                         private[_-]?key|authorization)(?:[_-][a-z0-9]+)*/ix
+        SENSITIVE_PAIR = /(#{SENSITIVE_KEY})(["']?\s*[=:]\s*["']?)(?:(?:bearer|basic|digest|token)\s+)?(?:(?<=")[^"]*|(?<=')[^']*|\S+)/i
 
         module_function
 
@@ -31,6 +40,7 @@ module Locentra
           return nil if text.nil?
 
           text.to_s.gsub(CREDENTIAL_TOKEN, "[credencial]")
+              .gsub(PROVIDER_KEY, "[credencial]")
               .gsub(URL_USERINFO, '\1[credenciais]@')
               .gsub(URL_QUERY, '\1?[parâmetros omitidos]')
               .gsub(SENSITIVE_PAIR, '\1\2[omitido]')

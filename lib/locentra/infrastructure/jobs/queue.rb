@@ -13,8 +13,14 @@ module Locentra
       # - `complete`/`retry_later`/`kill` exigem o token do lease atual (fencing): um worker cujo lease
       #   venceu e foi assumido por outro não consegue registrar resultado.
       # - Nenhum lock de banco é mantido durante a execução da tarefa ou chamadas de rede.
+      # - Cada reivindicação abre uma linha em `job_attempts`, identificada por `attempt_id`, com
+      #   numeração crescente por tarefa (continua após o reprocessamento, que zera `attempts`).
       class Queue
-        Claimed = Data.define(:id, :organization_id, :kind, :payload, :attempts, :max_attempts, :lease_token, :correlation_id)
+        Claimed = Data.define(:id, :organization_id, :kind, :payload, :attempts, :max_attempts, :lease_token, :correlation_id, :attempt_id) do
+          def initialize(attempt_id: nil, **)
+            super
+          end
+        end
 
         def initialize(clock:, ids:, lease_seconds: 120)
           @clock = clock
@@ -56,10 +62,13 @@ module Locentra
                WHERE id = $1
               RETURNING id, organization_id, kind, payload, attempts, max_attempts, lease_token, correlation_id
             SQL
-            tx.execute(<<~SQL, [@ids.uuid, job["id"], job["organization_id"], job["attempts"], worker, now])
-              INSERT INTO job_attempts (id, job_id, organization_id, attempt, worker, started_at) VALUES ($1, $2, $3, $4, $5, $6)
+            attempt_id = @ids.uuid
+            # A tarefa está bloqueada (FOR UPDATE) nesta transação: o próximo número é único.
+            tx.execute(<<~SQL, [attempt_id, job["id"], job["organization_id"], worker, now])
+              INSERT INTO job_attempts (id, job_id, organization_id, attempt, worker, started_at)
+              VALUES ($1, $2, $3, (SELECT COALESCE(MAX(attempt), 0) + 1 FROM job_attempts WHERE job_id = $2), $4, $5)
             SQL
-            Claimed.new(**job.transform_keys(&:to_sym))
+            Claimed.new(**job.transform_keys(&:to_sym), attempt_id: attempt_id)
           end
         end
 
@@ -106,13 +115,21 @@ module Locentra
           SQL
         end
 
-        # Reprocessamento autorizado de tarefa morta (com contexto de tenant).
+        # Reprocessamento autorizado de tarefa morta (com contexto de tenant). O orçamento de
+        # tentativas recomeça; tentativas ainda abertas (lease vencido sem retorno do worker) são
+        # encerradas como `lease_lost`, e o histórico anterior não é alterado.
         def requeue(tx, job_id)
           now = @clock.now
-          tx.execute(<<~SQL, [job_id, now, tx.tenant_id!]) == 1
+          requeued = tx.execute(<<~SQL, [job_id, now, tx.tenant_id!]) == 1
             UPDATE jobs SET status = 'pending', run_at = $2, attempts = 0, last_error = NULL, finished_at = NULL, updated_at = $2
              WHERE id = $1 AND organization_id = $3 AND status = 'dead'
           SQL
+          return false unless requeued
+
+          tx.execute(<<~SQL, [job_id, now, tx.tenant_id!])
+            UPDATE job_attempts SET finished_at = $2, outcome = 'lease_lost' WHERE job_id = $1 AND organization_id = $3 AND finished_at IS NULL
+          SQL
+          true
         end
 
         def failures(tx, limit: 50)
@@ -144,9 +161,10 @@ module Locentra
           updated == 1
         end
 
+        # Encerra somente a linha aberta por esta reivindicação (nunca uma tentativa de outro ciclo).
         def record_attempt(tx, job, outcome, error, now)
-          tx.execute(<<~SQL, [job.id, job.attempts, now, outcome, truncate(error)])
-            UPDATE job_attempts SET finished_at = $3, outcome = $4, error = $5 WHERE job_id = $1 AND attempt = $2 AND finished_at IS NULL
+          tx.execute(<<~SQL, [job.attempt_id, job.id, now, outcome, truncate(error)])
+            UPDATE job_attempts SET finished_at = $3, outcome = $4, error = $5 WHERE id = $1 AND job_id = $2 AND finished_at IS NULL
           SQL
         end
 
