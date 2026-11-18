@@ -98,6 +98,10 @@ devolução.
   próprio cliente), usuário, nome, IP da requisição e instante. O caso de uso aceita ator `customer`
   com a permissão `portal.access`, restrito ao próprio `customer_id` (outro cliente recebe "não
   encontrado"). A rejeição segue a mesma regra de ator.
+- A rejeição (`RejectQuote`, parâmetro `version:`) também vale para a versão exibida: versão diferente
+  da atual gera `Conflict` `stale_quote_version` sem gravar nada. O ator `customer` sempre informa a
+  versão; para a equipe ela é opcional (sem versão, vale a atual). Os formulários da equipe e do
+  portal enviam a versão exibida.
 - O envio registra `quote_versions.sent_at`. O ator `customer` só enxerga orçamentos com alguma versão
   enviada (rascunho nunca enviado resulta em "não encontrado", inclusive para aprovar ou rejeitar) e,
   deles, somente as versões enviadas: uma nova versão em preparação não aparece até ser enviada
@@ -138,6 +142,11 @@ devolução.
 - Aceite (`AcceptContract`): declaração obrigatória, nome, CPF ou CNPJ válido, IP, navegador e instante;
   vale para a versão atual do documento e é gravado uma única vez. O primeiro aceite torna o contrato
   vigente. O caso de uso aceita ator `customer` restrito ao próprio cadastro.
+- O parâmetro `version:` identifica a versão do documento exibida a quem aceita: se um aditivo gerou
+  versão nova depois disso, o aceite é recusado com `Conflict` `stale_document_version`
+  (`Contract#acceptable_version!`) e nenhuma versão recebe aceite. O ator `customer` sempre informa a
+  versão; para a equipe ela é opcional. Os formulários de aceite da equipe e do portal enviam a versão
+  exibida.
 
 ### Aditivos e alterações da reserva
 
