@@ -183,3 +183,17 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
 - **Decisão:** papel `locentra_backup` somente leitura (`pg_read_all_data`) com `BYPASSRLS`, usado apenas por
   `pg_dump`; restauração executada por superusuário em banco novo, preservando proprietários e políticas.
   Procedimento exercitado e registrado em `RUNBOOKS.md`.
+
+## ADR-025 — Portal, CLI e observabilidade
+
+- **Portal do cliente** ([módulo](modulos/portal-cliente.md)): acesso por convite a contato do cliente, com
+  token emitido no envio; áreas separadas para sessões de portal e de equipe; aceite de contrato e rejeição de
+  orçamento vinculados à versão exibida; download restrito aos documentos gerados dos contratos do próprio
+  cliente; disponibilidade apresentada sem dados de alocação.
+- **CLI operacional** ([módulo](modulos/cli-operacional.md)): credencial `cli` por variável de ambiente ou
+  arquivo com permissões restritas; mesmos casos de uso e auditoria (`actor_type = cli`); recusa credenciais
+  de migration e de worker; códigos de saída estáveis e redação de segredos na saída.
+- **Observabilidade** ([módulo](modulos/navegador-observabilidade.md)): desfechos de tarefas agregados em
+  tabela global sem dados de tenant e expostos pelo processo web; conflitos contados na unidade de trabalho;
+  rótulos com aparência de identificador mascarados; `request_id` propagado à outbox, às tarefas e às chamadas
+  externas.

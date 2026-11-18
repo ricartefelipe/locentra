@@ -68,7 +68,10 @@ unitária carrega apenas domínio e aplicação.
 | Orçamentos e contratos | `quotes.rb`, `contracts.rb` | `quotes.rb`, `contracts.rb` | [Módulo](modulos/orcamentos-contratos.md) |
 | Retirada, devolução, manutenção | `fulfillment.rb`, `maintenance.rb`, `transfers.rb`, `alerts.rb` | `fulfillment.rb`, `returns.rb`, `inspections.rb`, `maintenance.rb`, `transfers.rb`, `overdue.rb` | [Módulo](modulos/retirada-devolucao-manutencao.md) |
 | Financeiro e cauções | `finance/*` | `finance/*` | [Módulo](modulos/financeiro.md), [Caução](CAUCAO.md) |
-| Notificações e integrações | — | `notifications.rb`, `webhooks.rb`, `attachments.rb` | ADR-020 a ADR-022 |
+| Portal do cliente | `portal.rb` | `portal.rb` | [Módulo](modulos/portal-cliente.md) |
+| Notificações e integrações | — | `notifications.rb`, `webhooks.rb`, `attachments.rb`, `external_calls.rb` | ADR-020 a ADR-022 |
+| CLI operacional | — | `integrations.rb`, `jobs.rb` | [Módulo](modulos/cli-operacional.md) |
+| Observabilidade e navegador | — | métricas e correlação | [Módulo](modulos/navegador-observabilidade.md) |
 | Auditoria | — | `AuditTrail` em `base.rb` | — |
 | Assinaturas da plataforma | — | `PlanLimits` em `organizations.rb` | ADR-012 |
 

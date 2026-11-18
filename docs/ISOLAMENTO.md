@@ -12,7 +12,8 @@ dados de outra organização.
 | Banco: RLS | `ENABLE` e `FORCE ROW LEVEL SECURITY` em todas as tabelas de tenant, com `USING` e `WITH CHECK`. |
 | Banco: papéis | `locentra_app` e `locentra_worker` sem superuser, sem `BYPASSRLS` e sem propriedade de tabelas; `locentra_owner` só para migrations. |
 | Banco: integridade | Chaves estrangeiras compostas `(organization_id, id)` impedem relacionamentos entre tenants. |
-| Respostas | Recurso de outra organização retorna "não encontrado" (sem enumeração). |
+| Respostas | Recurso de outra organização (ou de outro cliente, no portal) retorna "não encontrado" (sem enumeração). |
+| Áreas | Sessões de portal não acessam rotas da equipe nem a API sem credencial, e vice-versa. |
 | Worker | Cada tarefa executa no contexto de tenant da própria tarefa; o papel do worker só enxerga todas as linhas da fila e da outbox. |
 | Arquivos | Chave de armazenamento `<organização>/<anexo>` gerada pelo servidor; download só por rota autenticada que localiza o anexo dentro do tenant. |
 | Idempotência, auditoria, webhooks, relatórios | Tabelas de tenant com RLS; chaves de idempotência têm escopo por organização e ator. |
@@ -24,7 +25,7 @@ dados de outra organização.
 |---|---|
 | `users`, `sessions`, `user_tokens`, `rate_limits` | A autenticação ocorre antes de existir contexto de organização. |
 | `plans` | Catálogo de planos da plataforma (somente leitura para a aplicação). |
-| `queue_stats` | Agregados da fila sem dados de tenant. |
+| `queue_stats`, `job_outcome_totals` | Agregados da fila e desfechos de tarefas por fila e tipo, sem dados de tenant nem identificadores. |
 | `organizations` | RLS própria: o tenant ativo, organizações das quais o usuário é membro ou cliente de portal, e leitura pelo worker. |
 | `jobs` sem organização | A aplicação pode **inserir** tarefas de e-mail de identidade sem organização, mas não lê-las. |
 

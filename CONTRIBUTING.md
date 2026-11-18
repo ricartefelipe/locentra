@@ -55,6 +55,7 @@ Pré-requisitos: Docker com Compose v2. Ruby local é opcional (versão em `.rub
 bin/setup                                   # constrói imagens, sobe PostgreSQL e Mailpit, aplica migrations e seed
 docker compose run --rm dev bundle exec rake test:unit
 docker compose run --rm dev bundle exec rake test:all
+docker compose run --rm dev bundle exec rake test:browser
 docker compose run --rm dev bundle exec rake test:browser    # Chromium headless (BROWSER_PATH já definido na imagem)
 docker compose run --rm dev bundle exec rubocop
 docker compose run --rm dev bundle exec rake audit
