@@ -3,7 +3,9 @@
 module Locentra
   # Dados demonstrativos idempotentes: duas organizações independentes, executados pelos mesmos
   # casos de uso da aplicação (papel de aplicação, RLS e auditoria ativos). Uma organização já
-  # existente (identificada pelo e-mail do proprietário) não é recriada.
+  # existente (identificada pelo e-mail do proprietário) não é recriada. Depois das organizações, o
+  # preparo da demonstração manual (vínculo da proprietária da Alfa com a Beta e conta do simulador
+  # de pagamentos da Alfa) é verificado e completado, sem alterar o resumo devolvido.
   class Seed
     PASSWORD = "locentra-local-demo"
     D = Domain
@@ -35,13 +37,51 @@ module Locentra
       @system = system
     end
 
+    # Acesso extra da demonstração manual (docs/DEMONSTRACAO.md): a proprietária da Alfa também é
+    # gerente da Beta, para exercitar a escolha e a troca de organização e o isolamento entre elas.
+    DEMO_MEMBERSHIP = { owner: "ana@alfa.demo", organization: "Beta Eventos", role: "manager" }.freeze
+    DEMO_SIMULATOR = { organization: "Alfa Audiovisual", name: "Simulador local" }.freeze
+
     def run
-      ORGANIZATIONS.map { |spec| seed_organization(spec) }
+      summaries = ORGANIZATIONS.map { |spec| seed_organization(spec) }
+      prepare_demonstration
+      summaries
     end
 
     private
 
     def uc(name) = @system.use_cases[name]
+
+    # Idempotente também em bancos semeados antes da demonstração: cada item é verificado antes de ser
+    # criado (vínculo ativo; conta do simulador ativa).
+    def prepare_demonstration
+      owners = ORGANIZATIONS.to_h { |spec| [spec[:name], owner_actor(spec)] }
+      return if owners.values.any?(&:nil?)
+
+      ensure_membership(owners.fetch(DEMO_MEMBERSHIP[:organization]), DEMO_MEMBERSHIP[:owner], DEMO_MEMBERSHIP[:role])
+      ensure_simulator(owners.fetch(DEMO_SIMULATOR[:organization]))
+    end
+
+    def owner_actor(spec)
+      user = @system.uow.anonymous { |tx| @system.repos[:users].find_by_email(tx, spec[:owner].last) }
+      membership = user && uc(:list_memberships).call(user["id"]).find { |m| m["name"] == spec[:name] && m["role"] == "owner" }
+      membership && Application::Actor.user(user_id: user["id"], organization_id: membership["organization_id"], role: "owner")
+    end
+
+    def ensure_membership(inviter, email, role)
+      user = @system.uow.anonymous { |tx| @system.repos[:users].find_by_email(tx, email) }
+      return unless user
+      return if uc(:list_memberships).call(user["id"]).any? { |m| m["organization_id"] == inviter.organization_id }
+
+      token = invite_with_known_token(inviter, email, role)
+      uc(:accept_invitation).call(token: token, user_id: user["id"])
+    end
+
+    def ensure_simulator(actor)
+      return if uc(:finance).accounts(actor).any? { |account| account["active"] && account["provider"] == "simulator" }
+
+      uc(:configure_payment_account).call(actor, provider: "simulator", name: DEMO_SIMULATOR[:name])
+    end
 
     def seed_organization(spec)
       owner_email = spec[:owner].last
@@ -72,12 +112,17 @@ module Locentra
 
     # Convites aceitos diretamente com token conhecido (somente no seed local).
     def add_member(actor, name, email, role)
+      token = invite_with_known_token(actor, email, role)
+      uc(:accept_invitation).call(token: token, name: name, password: PASSWORD)
+    end
+
+    def invite_with_known_token(actor, email, role)
       invitation = uc(:invite_member).call(actor, email: email, role: role)
       token = "#{actor.organization_id}.seed-#{@system.ids.token(24)}"
       @system.uow.run(actor) do |tx, _|
         tx.execute("UPDATE invitations SET token_digest = $1 WHERE id = $2", [Application::Identity::Tokens.digest(token), invitation["id"]])
       end
-      uc(:accept_invitation).call(token: token, name: name, password: PASSWORD)
+      token
     end
 
     def seed_catalog(actor, branch, spec)
