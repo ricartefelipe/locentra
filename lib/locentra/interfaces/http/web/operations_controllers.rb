@@ -216,8 +216,9 @@ module Locentra
             history = @system.uow.run(ctx.actor, "reservations.read") do |tx, _|
               @system.repos[:audit].for_resource(tx, "reservation", data[:reservation].id)
             end
+            links = uc(:reservation_links).call(ctx.actor, data[:reservation].id)
             render(ctx, "reservations/show", title: "Reserva #{data[:reservation].code}", status: status, data: data, customer: customer,
-                                             history: history, errors: errors, shortages: shortages, now: @system.clock.now)
+                                             history: history, errors: errors, shortages: shortages, now: @system.clock.now, links: links)
           end
 
           def confirm(ctx)
@@ -227,12 +228,14 @@ module Locentra
             show(ctx, errors: { "base" => ["Confirmação recusada: #{e.message}"] }, status: 409, shortages: e.shortages)
           rescue Domain::HoldExpired
             redirect(ctx, "/reservas/#{ctx.param(:id)}", alert: "O bloqueio temporário expirou; a reserva não pode ser confirmada.")
+          rescue Domain::InvalidTransition, Domain::Conflict => e
+            show(ctx, errors: { "base" => [e.message] }, status: 422)
           end
 
           def cancel(ctx)
             uc(:cancel_reservation).call(ctx.actor, ctx.param(:id), reason: ctx.form["motivo"])
             redirect(ctx, "/reservas/#{ctx.param(:id)}", notice: "Reserva cancelada.")
-          rescue Domain::ValidationError, Domain::InvalidTransition => e
+          rescue Domain::ValidationError, Domain::InvalidTransition, Domain::Conflict => e
             show(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
           end
 
@@ -242,7 +245,7 @@ module Locentra
           rescue Domain::Unavailable => e
             show(ctx, errors: { "base" => ["Reagendamento recusado: período indisponível. A reserva permanece no período original."] }, status: 409,
                       shortages: e.shortages)
-          rescue Domain::ValidationError, Domain::InvalidTransition, Domain::HoldExpired => e
+          rescue Domain::ValidationError, Domain::InvalidTransition, Domain::Conflict => e
             show(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
           end
 
@@ -251,7 +254,7 @@ module Locentra
             redirect(ctx, "/reservas/#{ctx.param(:id)}", notice: "Reserva estendida. Ajuste registrado: #{result[:adjustment].format_brl}.")
           rescue Domain::Unavailable => e
             show(ctx, errors: { "base" => ["Extensão recusada: #{e.message}."] }, status: 409, shortages: e.shortages)
-          rescue Domain::ValidationError, Domain::InvalidTransition, Domain::HoldExpired => e
+          rescue Domain::ValidationError, Domain::InvalidTransition, Domain::Conflict => e
             show(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
           end
 

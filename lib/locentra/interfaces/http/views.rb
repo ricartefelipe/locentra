@@ -143,7 +143,8 @@ module Locentra
           "confirmed" => "success", "in_progress" => "info", "held" => "warning", "requested" => "neutral", "completed" => "muted",
           "cancelled" => "danger", "expired" => "muted", "available" => "success", "checked_out" => "info", "in_inspection" => "warning",
           "in_maintenance" => "warning", "in_transit" => "info", "lost" => "danger", "retired" => "muted", "active" => "success",
-          "blocked" => "danger", "inactive" => "muted", "revoked" => "muted"
+          "blocked" => "danger", "inactive" => "muted", "revoked" => "muted", "draft" => "neutral", "sent" => "info", "approved" => "success",
+          "rejected" => "danger", "converted" => "muted", "issued" => "warning", "closed" => "muted"
         }.freeze
 
         def status_badge(status, label)
@@ -175,6 +176,9 @@ module Locentra
           raw(%( aria-invalid="true" aria-describedby="erro-#{h(field)}"))
         end
 
+        # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.
+        def open_if(errors, *fields) = raw(fields.any? { |field| errors&.key?(field.to_s) } ? " open" : "")
+
         def selected(current, value) = raw(current.to_s == value.to_s ? " selected" : "")
         def checked(flag) = raw(flag ? " checked" : "")
 
@@ -188,6 +192,8 @@ module Locentra
         NAVIGATION = [
           ["Painel", "/", "reservations.read"],
           ["Reservas", "/reservas", "reservations.read"],
+          ["Orçamentos", "/orcamentos", "quotes.read"],
+          ["Contratos", "/contratos", "contracts.read"],
           ["Disponibilidade", "/disponibilidade", "availability.read"],
           ["Clientes", "/clientes", "customers.read"],
           ["Produtos e kits", "/produtos", "catalog.read"],

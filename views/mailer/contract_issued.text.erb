@@ -1,0 +1,11 @@
+Assunto: Contrato de locação <%= v["code"] %> emitido
+Olá, <%= v["customer_name"] %>.
+
+O contrato de locação <%= v["code"] %> referente à reserva <%= v["reservation_code"] %> foi emitido.
+Retirada: <%= v["starts_at_local"] %>
+Devolução: <%= v["ends_at_local"] %>
+Valor contratado: <%= v["total"] %>
+
+<%= v["acceptance_notice"] %>
+
+Para registrar o aceite, fale com a equipe da locadora: o registro guarda nome, documento, endereço IP e data e hora informados no ato.

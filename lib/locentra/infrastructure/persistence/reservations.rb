@@ -48,6 +48,18 @@ module Locentra
           row && self.class.map(row)
         end
 
+        # Reserva resultante da conversão de um orçamento (no máximo uma, por índice único parcial).
+        def find_by_quote(tx, quote_id)
+          row = tx.query_one("SELECT #{COLUMNS} FROM reservations WHERE organization_id = $1 AND quote_id = $2", [tx.tenant_id!, quote_id])
+          row && self.class.map(row)
+        end
+
+        # Vincula ao orçamento a reserva confirmada a partir do bloqueio temporário do envio.
+        def link_quote(tx, reservation_id, quote_id)
+          tx.execute("UPDATE reservations SET quote_id = $3, source = 'quote' WHERE organization_id = $1 AND id = $2 AND quote_id IS NULL",
+                     [tx.tenant_id!, reservation_id, quote_id])
+        end
+
         def items(tx, reservation_id)
           tx.query(<<~SQL, [tx.tenant_id!, reservation_id])
             SELECT i.id, i.product_id, i.quantity, i.position, i.pricing, i.total_cents, p.sku, p.name, p.tracking

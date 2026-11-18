@@ -1,0 +1,16 @@
+Assunto: Orçamento <%= v["code"] %> (versão <%= v["version"] %>)
+Olá, <%= v["customer_name"] %>.
+
+Segue o orçamento <%= v["code"] %>, versão <%= v["version"] %>.
+Retirada: <%= v["starts_at_local"] %>
+Devolução: <%= v["ends_at_local"] %>
+Valor total: <%= v["total"] %>
+Válido até: <%= v["valid_until_local"] %>
+
+<% if v["hold"] -%>
+Os itens estão reservados em bloqueio temporário por <%= v["hold_minutes"] %> minutos a partir do envio. Após esse prazo, a disponibilidade deixa de ser garantida.
+<% else -%>
+Este orçamento não garante a disponibilidade dos itens: ela é confirmada somente quando o orçamento aprovado for convertido em reserva.
+<% end -%>
+
+Para aprovar, responda a esta mensagem informando a versão <%= v["version"] %> ou fale com a equipe da locadora.

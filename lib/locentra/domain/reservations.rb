@@ -81,6 +81,7 @@ module Locentra
         def occupying? = OCCUPYING.include?(status)
         def held? = status == "held"
         def requested? = status == "requested"
+        def cancellable? = TRANSITIONS.fetch(status).include?("cancelled")
 
         # Um bloqueio temporário é válido enquanto `now < hold_expires_at`. O instante de expiração
         # pertence ao período expirado, de modo que confirmação e expiração concorrentes têm

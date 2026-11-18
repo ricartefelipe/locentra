@@ -76,6 +76,44 @@ class ApiTest < HttpTest
     assert_equal 403, last_response.status
   end
 
+  # A composição com a transação de idempotência não dispensa as verificações de vínculo: reserva com
+  # contrato em aberto só é cancelada pelo contrato, que aplica a política de cancelamento.
+  def test_cancel_refuses_reservation_with_open_contract
+    token = uc(:create_credential).call(@actor, name: "Cancelamentos", scopes: %w[reservations.cancel], expires_in_days: 30)["token"]
+    free = reserve(@actor, @customer, @org[:branch], period("2026-03-20T08:00:00Z", "2026-03-21T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
+    reservation = reserve(@actor, @customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), [line(@camera, 1)],
+                          mode: "confirm")
+    contract = uc(:issue_contract).call(@actor, reservation.id)
+    @clock.travel_to(t("2026-03-09T20:00:00Z"))
+    post "/api/v1/reservations/#{reservation.id}/cancel", JSON.generate("reason" => "desistência"),
+         auth(token).merge("HTTP_IDEMPOTENCY_KEY" => "cancelamento-0001")
+
+    assert_equal 409, last_response.status, last_response.body
+    assert_equal "contract_amendment_required", json_body["error"]["code"]
+    assert_includes json_body["error"]["message"], contract.code
+    assert_equal "confirmed", uc(:get_reservation).call(@actor, reservation.id)[:reservation].status
+    assert_equal "issued", uc(:get_contract).call(@actor, contract.id)[:contract].status
+    assert_empty owner_query("SELECT id FROM reservation_adjustments")
+    post "/api/v1/reservations/#{free.id}/cancel", JSON.generate("reason" => "desistência"),
+         auth(token).merge("HTTP_IDEMPOTENCY_KEY" => "cancelamento-0002")
+
+    assert_equal 200, last_response.status, last_response.body
+    assert_equal "cancelled", json_body["status"]
+  end
+
+  # O bloqueio temporário de um orçamento é confirmado somente pela conversão do orçamento aprovado.
+  def test_confirm_refuses_the_hold_of_a_quote
+    quote = uc(:create_quote).call(@actor, { customer_id: @customer.id, branch_id: @org[:branch].id, lines: [line(@camera, 1)],
+                                             period: period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), valid_until: t("2026-03-06T00:00:00Z"),
+                                             hold_policy: "hold_on_send", hold_minutes: 600 })
+    hold_id = uc(:send_quote).call(@actor, quote.id).hold_reservation_id
+    post "/api/v1/reservations/#{hold_id}/confirm", "{}", auth.merge("HTTP_IDEMPOTENCY_KEY" => "confirmacao-0001")
+
+    assert_equal 409, last_response.status, last_response.body
+    assert_equal "quote_hold", json_body["error"]["code"]
+    assert_equal "held", uc(:get_reservation).call(@actor, hold_id)[:reservation].status
+  end
+
   def test_revoked_credential_stops_working
     credential = uc(:list_credentials).call(@actor).first
     uc(:revoke_credential).call(@actor, credential["id"])
