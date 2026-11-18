@@ -84,6 +84,14 @@ module Locentra
              WHERE user_id = $1 AND organization_id = $2 AND revoked_at IS NULL
           SQL
         end
+
+        # Somente as sessões do portal: o mesmo usuário pode ter sessões de equipe na organização.
+        def revoke_portal_for_organization(tx, user_id, organization_id, now, reason)
+          tx.execute(<<~SQL, [user_id, organization_id, now, reason])
+            UPDATE sessions SET revoked_at = $3, revoked_reason = $4
+             WHERE user_id = $1 AND organization_id = $2 AND kind = 'portal' AND revoked_at IS NULL
+          SQL
+        end
       end
 
       class UserTokenRepository
@@ -116,18 +124,20 @@ module Locentra
           SQL
         end
 
+        # Como no vínculo de usuários, a organização precisa estar ativa (não suspensa nem encerrada).
         def active_credential(tx, credential_id, now)
           return nil unless credential_id
 
           tx.query_one(<<~SQL, [credential_id, now])
-            SELECT id, organization_id, scopes FROM api_credentials
-             WHERE id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $2)
+            SELECT c.id, c.organization_id, c.kind, c.scopes FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
+             WHERE c.id = $1 AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > $2) AND o.status = 'active'
           SQL
         end
 
         def active_portal_access(tx, organization_id, user_id)
           tx.query_one(<<~SQL, [organization_id, user_id])
-            SELECT id, customer_id FROM portal_accesses WHERE organization_id = $1 AND user_id = $2 AND status = 'active'
+            SELECT p.id, p.customer_id FROM portal_accesses p JOIN organizations o ON o.id = p.organization_id
+             WHERE p.organization_id = $1 AND p.user_id = $2 AND p.status = 'active' AND o.status = 'active'
           SQL
         end
       end

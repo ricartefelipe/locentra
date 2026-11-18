@@ -30,18 +30,30 @@ module Locentra
             .to_h { |row| [row["status"], row["total"]] }
         end
 
-        # Agregados da fila gravados pelo worker (sem identificadores nos rótulos).
+        # Agregados da fila gravados pelo worker (sem identificadores nem dados de tenant).
         def queue_stats(tx, _now)
-          tx.query("SELECT queue, status, size, oldest_age_seconds AS oldest_age FROM queue_stats")
+          tx.query("SELECT queue, status, size, oldest_age_seconds AS oldest_age, updated_at FROM queue_stats ORDER BY queue, status")
         end
 
-        # Executado pelo worker (papel com visão de todas as filas).
+        # Totais de retentativas e de falhas permanentes somados por todos os workers.
+        def job_outcome_totals(tx)
+          tx.query("SELECT queue, kind, outcome, total FROM job_outcome_totals ORDER BY queue, kind, outcome")
+        end
+
+        # Executado pelo worker (papel com visão de todas as filas). Cada fila com tarefas em aberto,
+        # e sempre a fila padrão, recebe as três situações (zero quando vazias), de modo que uma fila
+        # esvaziada aparece com tamanho zero em vez de sumir. A idade considera somente tarefas já
+        # liberadas para execução (run_at no passado): retentativas agendadas não inflam a espera.
         def refresh_queue_stats(tx, now)
           tx.execute("DELETE FROM queue_stats")
           tx.execute(<<~SQL, [now])
             INSERT INTO queue_stats (queue, status, size, oldest_age_seconds, updated_at)
-            SELECT queue, status, count(*), COALESCE(EXTRACT(EPOCH FROM ($1::timestamptz - min(run_at))), 0), $1
-              FROM jobs WHERE status IN ('pending', 'running', 'dead') GROUP BY queue, status
+            SELECT q.queue, s.status, count(j.id),
+                   COALESCE(GREATEST(EXTRACT(EPOCH FROM ($1::timestamptz - min(j.run_at) FILTER (WHERE j.run_at <= $1::timestamptz))), 0), 0), $1
+              FROM (SELECT DISTINCT queue FROM jobs WHERE status IN ('pending', 'running', 'dead') UNION SELECT 'default') q
+             CROSS JOIN (VALUES ('pending'), ('running'), ('dead')) AS s (status)
+              LEFT JOIN jobs j ON j.queue = q.queue AND j.status = s.status
+             GROUP BY q.queue, s.status
           SQL
         end
 

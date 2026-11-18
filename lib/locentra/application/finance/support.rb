@@ -39,24 +39,75 @@ module Locentra
       # Consulta pela referência externa de um pagamento: instante em que começou e tentativa de envio
       # observada antes dela (a conclusão só vale se nenhuma tentativa nova começou depois).
       Lookup = Data.define(:charges, :at, :attempt) do
-        # Consulta ao provedor, fora de transação.
-        def self.perform(providers, account, payment, clock)
+        # Consulta ao provedor, fora de transação. O ator leva a correlação para o log da chamada.
+        def self.perform(providers, account, payment, clock, actor: nil)
           at = clock.now
-          charges = providers.for(account["provider"]).find_by_external_reference(account, payment.external_reference)
+          charges = providers.for(account["provider"], actor: actor).find_by_external_reference(account, payment.external_reference)
           new(charges: charges, at: at, attempt: payment.submission_attempts)
         end
       end
       # action: "confirm" (pago), "cancel" (removido), "ignore" (informativo).
       ProviderEvent = Data.define(:event_id, :event_type, :action, :provider_payment_id, :external_reference, :status, :amount)
 
-      # Adaptadores por nome de provedor.
+      # Adaptadores por nome de provedor. Com `calls` (ExternalCalls) e o ator da operação, o adaptador
+      # devolvido registra cada chamada de rede com a organização e a correlação do ator. `calls` é
+      # posicional para que o mapa possa ser passado sem chaves (`Providers.new("simulator" => a)`).
       class Providers
-        def initialize(map)
+        def initialize(map, calls = nil)
           @map = map.freeze
+          @calls = calls
         end
 
-        def for(name)
-          @map.fetch(name) { raise Domain::ValidationError.field("provedor", "provedor de pagamento não configurado: #{name}") }
+        def for(name, actor: nil)
+          adapter = @map.fetch(name) { raise Domain::ValidationError.field("provedor", "provedor de pagamento não configurado: #{name}") }
+          return adapter unless @calls && actor
+
+          TrackedProvider.new(adapter, name: name, actor: actor, calls: @calls)
+        end
+      end
+
+      # Adaptador de provedor com registro das chamadas de rede (a interpretação de webhooks é local
+      # e não é registrada). Desfechos: ok, timeout (resultado desconhecido), rejected, unavailable e
+      # error (resposta inesperada).
+      class TrackedProvider
+        ERRORS = { ProviderTimeout => "timeout", ProviderRejected => "rejected", ProviderUnavailable => "unavailable" }.freeze
+
+        def initialize(adapter, name:, actor:, calls:)
+          @adapter = adapter
+          @name = name
+          @actor = actor
+          @calls = calls
+        end
+
+        def create_charge(account, request)
+          track("create_charge", reference: request.external_reference) { @adapter.create_charge(account, request) }
+        end
+
+        def find_by_external_reference(account, reference)
+          track("find_by_external_reference", reference: reference) { @adapter.find_by_external_reference(account, reference) }
+        end
+
+        def list_charges(account, since:)
+          track("list_charges") { @adapter.list_charges(account, since: since) }
+        end
+
+        def refunds(account, provider_payment_id)
+          track("refunds", provider_payment_id: provider_payment_id) { @adapter.refunds(account, provider_payment_id) }
+        end
+
+        def refund(account, provider_payment_id, amount:, description:)
+          track("refund", provider_payment_id: provider_payment_id) do
+            @adapter.refund(account, provider_payment_id, amount: amount, description: description)
+          end
+        end
+
+        def parse_webhook(body) = @adapter.parse_webhook(body)
+
+        private
+
+        def track(operation, **details, &)
+          @calls.track(service: @name, operation: operation, organization_id: @actor.organization_id, correlation_id: @actor.request_id,
+                       errors: ERRORS, details: details, &)
         end
       end
 

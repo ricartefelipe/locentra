@@ -79,6 +79,15 @@ module Locentra
           SQL
         end
 
+        # O anexo é documento gerado de um contrato do cliente (escopo de downloads do portal).
+        def customer_document?(tx, attachment_id, customer_id)
+          !tx.query_one(<<~SQL, [tx.tenant_id!, attachment_id, customer_id]).nil?
+            SELECT 1 FROM contract_documents d
+              JOIN contracts k ON k.organization_id = d.organization_id AND k.id = d.contract_id
+             WHERE d.organization_id = $1 AND d.attachment_id = $2 AND k.customer_id = $3
+          SQL
+        end
+
         def lock_document(tx, contract_id, version)
           tx.query_one(<<~SQL, [tx.tenant_id!, contract_id, version])
             SELECT #{DOCUMENT_COLUMNS} FROM contract_documents d

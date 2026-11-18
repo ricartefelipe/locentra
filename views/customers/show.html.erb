@@ -94,6 +94,7 @@
     <% end %>
   </section>
 </div>
+<%= partial("customers/portal_access") %>
 <%= partial("shared/attachments", owner_type: "customer", owner_id: c.id, can_upload: can?("customers.write")) %>
 <section class="panel">
   <h2>Reservas recentes</h2>

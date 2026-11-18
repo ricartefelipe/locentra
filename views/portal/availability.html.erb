@@ -1,0 +1,71 @@
+<header class="page-header">
+  <h1>Disponibilidade e solicitação de reserva</h1>
+  <p class="muted">Consulte os itens disponíveis no período desejado e envie uma solicitação de reserva à locadora.</p>
+</header>
+<div class="notice" role="note"><%= Locentra::Domain::Portal::REQUEST_NOTICE %></div>
+<%= partial("shared/errors") %>
+<section class="panel" aria-labelledby="consulta-titulo">
+  <h2 id="consulta-titulo">Período e local de retirada</h2>
+  <% if @branches.empty? %>
+    <p class="empty">Nenhuma filial disponível para retirada no momento.</p>
+  <% else %>
+    <form method="get" action="/portal/disponibilidade" class="filters">
+      <label for="filial">Filial</label>
+      <select id="filial" name="filial"<%= invalid(@errors, "filial") %>>
+        <% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["filial"], b.id) %>><%= b.name %></option><% end %>
+      </select>
+      <label for="inicio">Retirada (horário local <%= time_zone.identifier %>)</label>
+      <input id="inicio" name="inicio" type="datetime-local" required value="<%= @values["inicio"] %>"<%= invalid(@errors, "inicio") %>>
+      <label for="fim">Devolução</label>
+      <input id="fim" name="fim" type="datetime-local" required value="<%= @values["fim"] %>"<%= invalid(@errors, "fim") %>>
+      <button type="submit" class="primary">Consultar</button>
+    </form>
+    <%= field_errors(@errors, "filial") %>
+    <%= field_errors(@errors, "inicio") %>
+    <%= field_errors(@errors, "fim") %>
+  <% end %>
+</section>
+<% if @result %>
+  <section class="panel" aria-labelledby="resultado-titulo">
+    <h2 id="resultado-titulo">Itens no período</h2>
+    <% if @result.empty? %>
+      <p class="empty">Nenhum item disponível para locação.</p>
+    <% else %>
+      <form method="post" action="/portal/reservas" class="stack">
+        <%= csrf_field %>
+        <input type="hidden" name="filial" value="<%= @values["filial"] %>">
+        <input type="hidden" name="inicio" value="<%= @values["inicio"] %>">
+        <input type="hidden" name="fim" value="<%= @values["fim"] %>">
+        <table class="table">
+          <caption class="sr-only">Disponibilidade dos itens no período informado</caption>
+          <thead><tr><th scope="col">Item</th><th scope="col">Situação no período</th><th scope="col">Quantidade desejada</th></tr></thead>
+          <tbody>
+            <% @result.each_with_index do |row, index| %>
+              <tr>
+                <td><strong><%= row.name %></strong><% if row.description %><br><span class="muted"><%= row.description %></span><% end %></td>
+                <td>
+                  <% if row.available %>
+                    <%= badge(row.requested ? "Disponível para #{row.requested}" : "Disponível", "success") %>
+                  <% else %>
+                    <%= badge(row.requested ? "Indisponível para #{row.requested}" : "Indisponível", "danger") %>
+                  <% end %>
+                </td>
+                <td>
+                  <input type="hidden" name="produto[]" value="<%= row.product_id %>">
+                  <label class="sr-only" for="quantidade-<%= index %>">Quantidade de <%= row.name %></label>
+                  <input id="quantidade-<%= index %>" name="quantidade[]" type="number" min="0" max="100000" inputmode="numeric" value="<%= row.requested %>"<%= invalid(@errors, "quantidade") %>>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+        <%= field_errors(@errors, "quantidade") %>
+        <%= field_errors(@errors, "itens") %>
+        <label for="observacoes">Observações para a locadora (opcional)</label>
+        <textarea id="observacoes" name="observacoes" rows="3" maxlength="2000"><%= @values["observacoes"] %></textarea>
+        <p class="notice" role="note"><strong>Atenção:</strong> <%= Locentra::Domain::Portal::REQUEST_NOTICE %></p>
+        <button type="submit" class="primary">Enviar solicitação de reserva</button>
+      </form>
+    <% end %>
+  </section>
+<% end %>

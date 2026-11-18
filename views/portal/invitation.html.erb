@@ -1,0 +1,18 @@
+<section class="panel narrow" aria-labelledby="titulo-convite-portal">
+  <h1 id="titulo-convite-portal">Ativar acesso ao portal do cliente</h1>
+  <%= partial("shared/errors") %>
+  <form method="post" action="/portal/convite" class="stack">
+    <input type="hidden" name="token" value="<%= @token %>">
+    <% if request.session %>
+      <%= csrf_field %>
+      <p>Você está conectado como <strong><%= request.session["email"] %></strong>. O acesso será vinculado a esta conta se o convite tiver sido enviado para este e-mail.</p>
+    <% else %>
+      <label for="nome">Seu nome</label>
+      <input id="nome" name="nome" required maxlength="120" autocomplete="name">
+      <label for="senha">Crie uma senha (mínimo 12 caracteres)</label>
+      <input id="senha" name="senha" type="password" autocomplete="new-password" required minlength="12">
+      <p class="muted">Já possui conta no Locentra com este e-mail? <a href="/entrar?voltar=<%= u("/portal/convite?token=#{@token}") %>">Entre primeiro</a> para vincular o acesso.</p>
+    <% end %>
+    <button type="submit" class="primary">Ativar acesso</button>
+  </form>
+</section>

@@ -153,18 +153,27 @@ module Locentra
           raise Conflict.new("Orçamento expirado: crie uma nova versão com nova validade", code: "quote_expired") if status == "expired"
           raise InvalidTransition.new("orçamento", status, "approved") unless status == "sent"
 
-          unless number == current_version && version.number == current_version
-            raise Conflict.new("A versão #{number} não é a versão atual do orçamento (versão atual: #{current_version})",
-                               code: "stale_quote_version")
-          end
+          current_version!(number)
+          current_version!(version.number)
           raise Conflict.new("Orçamento expirado: crie uma nova versão com nova validade", code: "quote_expired") if version.expired?(now)
 
           transition("approved").with(approved_version: number, approved_at: now, approved_by_type: approver.type,
                                       approved_by_user_id: approver.user_id, approved_by_name: approver.name, approved_ip: approver.ip)
         end
 
-        def reject(reason, now)
-          transition("rejected").with(rejected_at: now, rejection_reason: Organizations::Text.required(reason, "motivo", max: 500))
+        # A rejeição, quando informa a versão exibida, só vale se ela ainda for a atual: uma versão
+        # reenviada depois não é rejeitada por quem não a viu.
+        def reject(reason, now, version: nil)
+          rejected = transition("rejected")
+          current_version!(version) unless version.nil?
+
+          rejected.with(rejected_at: now, rejection_reason: Organizations::Text.required(reason, "motivo", max: 500))
+        end
+
+        def current_version!(number)
+          return number if number == current_version
+
+          raise Conflict.new("A versão #{number} não é a versão atual do orçamento (versão atual: #{current_version})", code: "stale_quote_version")
         end
 
         def expire(now) = transition("expired").with(expired_at: now)

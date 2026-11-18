@@ -148,7 +148,8 @@ module Locentra
           SQL
         end
 
-        def search(tx, status:, customer_id:, search:, from:, to:, sort:, limit:, offset:)
+        # `customer_names: false`: a busca considera apenas o código e o nome do cliente não é devolvido.
+        def search(tx, status:, customer_id:, search:, from:, to:, sort:, limit:, offset:, customer_names: true)
           params = [tx.tenant_id!]
           conditions = ["r.organization_id = $1"]
           { "r.status = $%d" => status, "r.customer_id = $%d" => customer_id, "r.ends_at > $%d" => from,
@@ -160,7 +161,8 @@ module Locentra
           end
           unless search.to_s.empty?
             params << "%#{search.upcase.gsub(/[\\%_]/) { |c| "\\#{c}" }}%"
-            conditions << "(r.code LIKE $#{params.size} ESCAPE '\\' OR upper(c.name) LIKE $#{params.size} ESCAPE '\\')"
+            by_name = customer_names ? " OR upper(c.name) LIKE $#{params.size} ESCAPE '\\'" : ""
+            conditions << "(r.code LIKE $#{params.size} ESCAPE '\\'#{by_name})"
           end
           where = conditions.join(" AND ")
           from_sql = "FROM reservations r JOIN customers c ON c.organization_id = r.organization_id AND c.id = r.customer_id"
@@ -170,7 +172,7 @@ module Locentra
                    r.quote_id, r.notes, r.total_cents, r.deposit_cents, r.version, c.name AS customer_name
               #{from_sql} WHERE #{where} ORDER BY #{SORTS.fetch(sort)} LIMIT $#{params.size + 1} OFFSET $#{params.size + 2}
           SQL
-          [rows.map { |row| { reservation: self.class.map(row), customer_name: row["customer_name"] } }, total]
+          [rows.map { |row| { reservation: self.class.map(row), customer_name: customer_names ? row["customer_name"] : nil } }, total]
         end
 
         def allocation_details(tx, reservation_id)

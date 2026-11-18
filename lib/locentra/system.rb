@@ -34,7 +34,7 @@ module Locentra
       @http = http || I::Integrations::SafeHttp.new(allow_http: !config.production?, allow_private: config.test?)
       @transactor = I::Database::Transactor.new(pool: @pool, logger: @logger, metrics: @metrics)
       build_repositories
-      @uow = A::UnitOfWork.new(transactor: @transactor, access: @repos[:access], clock: clock)
+      @uow = A::UnitOfWork.new(transactor: @transactor, access: @repos[:access], clock: clock, metrics: @metrics)
       build_services
       build_use_cases
     end
@@ -62,7 +62,7 @@ module Locentra
         inspections: P::InspectionRepository.new, maintenance_orders: P::MaintenanceOrderRepository.new,
         damage_reports: P::DamageReportRepository.new, transfers: P::TransferRepository.new, alerts: P::AlertRepository.new,
         operations: P::OperationsRepository.new,
-        quotes: P::QuoteRepository.new, contracts: P::ContractRepository.new
+        quotes: P::QuoteRepository.new, contracts: P::ContractRepository.new, portal: P::PortalRepository.new
       }
     end
 
@@ -84,7 +84,10 @@ module Locentra
         storage: I::Storage::Local.new(root: config.storage_root),
         mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__)),
         contract_renderer: I::Documents::ContractPdf.new,
-        reservation_guard: A::Reservations::ChangeGuard.new(contracts: repos[:contracts], quotes: repos[:quotes])
+        reservation_guard: A::Reservations::ChangeGuard.new(contracts: repos[:contracts], quotes: repos[:quotes]),
+        # Chamadas a provedores de pagamento e webhooks enviados: log com correlação e métricas.
+        external_calls: A::ExternalCalls.new(logger: logger, metrics: metrics),
+        portal_scope: A::Portal::ContractDocumentScope.new(contracts: repos[:contracts])
       }
       @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
                                                                            quotes: repos[:quotes], contracts: repos[:contracts])
@@ -92,7 +95,7 @@ module Locentra
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
                                                                   clock: clock, ids: ids, subscribers: [@services[:finance_subscriber]])
       @services[:deliver_webhook] = A::Webhooks::Deliver.new(transactor: transactor, webhooks: repos[:webhooks], http: @http, box: @services[:box],
-                                                             clock: clock, logger: logger)
+                                                             clock: clock, calls: @services[:external_calls])
     end
 
     def common = { uow: uow, clock: clock }
@@ -107,6 +110,8 @@ module Locentra
       build_operations_use_cases(uc)
       build_quote_use_cases(uc)
       build_contract_use_cases(uc)
+      build_cli_use_cases(uc)
+      build_portal_use_cases(uc)
       @use_cases = UseCases.new(uc)
     end
 
@@ -219,7 +224,7 @@ module Locentra
       uc[:upload_attachment] = A::Attachments::Upload.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit, ids: ids,
                                                                     max_bytes: config.max_upload_bytes, guards: guards)
       uc[:download_attachment] = A::Attachments::Download.new(uow: uow, attachments: r[:attachments], storage: s[:storage],
-                                                              portal_scope: s.fetch(:portal_scope) { NoPortalScope.new })
+                                                              portal_scope: s[:portal_scope])
       uc[:remove_attachment] = A::Attachments::Remove.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit, guards: guards)
     end
 
@@ -355,6 +360,27 @@ module Locentra
       uc[:reservation_links] = A::Contracts::ReservationLinks.new(uow: uow, contracts: r[:contracts], quotes: r[:quotes])
     end
 
+    # Portal do cliente: concessão e revogação de acesso pela equipe, aceite do convite e operações do
+    # próprio cliente, que compõem os casos de uso de disponibilidade e reservas na mesma transação.
+    def build_portal_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      pt = A::Portal
+      uc[:invite_portal_contact] = pt::InviteContact.new(**common, portal: r[:portal], customers: r[:customers], limits: s[:limits],
+                                                                   notifier: s[:notifier], audit: audit, ids: ids)
+      uc[:cancel_portal_invitation] = pt::CancelInvitation.new(**common, portal: r[:portal], audit: audit)
+      uc[:accept_portal_invitation] = pt::AcceptInvitation.new(**common, portal: r[:portal], customers: r[:customers], users: r[:users],
+                                                                         limits: s[:limits], hasher: s[:hasher], audit: audit, ids: ids)
+      uc[:revoke_portal_access] = pt::RevokeAccess.new(**common, portal: r[:portal], sessions_repository: r[:sessions], audit: audit)
+      uc[:list_portal_accesses] = pt::ListAccesses.new(**common, portal: r[:portal], customers: r[:customers], limits: s[:limits])
+      uc[:portal_home] = pt::Home.new(**common, customers: r[:customers], reservations: r[:reservations], quotes: r[:quotes],
+                                                contracts: r[:contracts], receivables: r[:receivables])
+      uc[:portal_availability] = pt::CheckAvailability.new(**common, organizations: r[:organizations], check: uc[:check_availability])
+      uc[:portal_request_reservation] = pt::RequestReservation.new(uow: uow, create_reservation: uc[:create_reservation])
+    end
+
     # Financeiro: cobranças, pagamentos, reembolsos, cauções, diário, provedores, webhooks e conciliação.
     def build_finance_use_cases(cases)
       uc = cases
@@ -364,7 +390,7 @@ module Locentra
       fn = A::Finance
       simulator = I::Payments::Simulator.new(transactor: transactor, clock: clock, ids: ids)
       asaas = I::Payments::Asaas.new(http: @payment_http || I::Payments::HttpClient.new, box: s[:box], sandbox_url: config.asaas_base_url)
-      providers = fn::Providers.new("simulator" => simulator, "asaas" => asaas)
+      providers = fn::Providers.new({ "simulator" => simulator, "asaas" => asaas }, s[:external_calls])
       s[:payment_providers] = providers
       ledger = fn::Ledger.new(entries: r[:ledger_entries], ids: ids, clock: clock)
       alert_book = fn::AlertBook.new(alerts: r[:finance_alerts], ids: ids, clock: clock)
@@ -413,9 +439,14 @@ module Locentra
                                      reservations: r[:reservations])
     end
 
-    # Escopo de portal antes do portal do cliente existir: nenhum anexo é acessível por clientes.
-    class NoPortalScope
-      def customer_owns?(*) = false
+    # CLI operacional (bin/locentra): identidade autenticada e tarefas mortas da fila. Os demais
+    # comandos usam os casos de uso já montados (disponibilidade, reservas, ativos, conciliação).
+    def build_cli_use_cases(cases)
+      uc = cases
+      r = repos
+      uc[:whoami] = A::Integrations::WhoAmI.new(uow: uow, credentials: r[:credentials], organizations: r[:organizations])
+      uc[:list_failed_jobs] = A::Jobs::ListFailures.new(uow: uow, queue: queue)
+      uc[:retry_job] = A::Jobs::RetryJob.new(uow: uow, queue: queue, audit: services[:audit])
     end
 
     # Acesso explícito aos casos de uso por nome, com erro claro para nomes inexistentes.

@@ -9,17 +9,24 @@ module Locentra
 
       # Transação ativa ligada a uma única conexão. Repositórios recebem este objeto como
       # primeiro argumento e nunca acessam o pool: toda a operação ocorre na mesma conexão.
+      #
+      # `request_id` correlaciona o que a transação grava (eventos, tarefas) com a requisição de
+      # origem: vem do ator ou, em fluxos sem ator (cadastro, recuperação de senha), é informado
+      # explicitamente.
       class Transaction
         attr_reader :tenant_id, :user_id, :actor
 
-        def initialize(conn, tenant_id:, user_id:, actor: nil)
+        def initialize(conn, tenant_id:, user_id:, actor: nil, request_id: nil)
           @conn = conn
           @tenant_id = tenant_id
           @user_id = user_id
           @actor = actor
+          @request_id = request_id
           @savepoints = 0
           @after_commit = []
         end
+
+        def request_id = @request_id || @actor&.request_id
 
         # Executa SQL parametrizado e devolve linhas como Hash com chaves String.
         def query(sql, params = [])
@@ -96,13 +103,14 @@ module Locentra
           @metrics = metrics
         end
 
-        def call(tenant_id: nil, user_id: nil, actor: nil, isolation: :read_committed, retries: 2, &)
+        def call(tenant_id: nil, user_id: nil, actor: nil, request_id: nil, isolation: :read_committed, retries: 2, &)
           raise NestedTransactionError, "transação já ativa nesta thread" if Thread.current[THREAD_KEY]
 
           attempt = 0
+          context = { tenant_id: tenant_id, user_id: user_id, actor: actor, request_id: request_id }
           begin
             attempt += 1
-            run(tenant_id, user_id, actor, isolation, &)
+            run(context, isolation, &)
           rescue *RETRYABLE => e
             @metrics&.increment("db_transaction_retries_total", reason: e.class.name.split("::").last)
             retry if attempt <= retries
@@ -116,14 +124,14 @@ module Locentra
 
         private
 
-        def run(tenant_id, user_id, actor, isolation)
+        def run(context, isolation)
           @pool.with_connection do |conn|
-            tx = Transaction.new(conn, tenant_id: tenant_id, user_id: user_id, actor: actor)
+            tx = Transaction.new(conn, **context)
             Thread.current[THREAD_KEY] = tx
             begin
               conn.exec("BEGIN ISOLATION LEVEL #{ISOLATION.fetch(isolation)}")
               conn.exec_params("SELECT set_config('app.tenant_id', $1, true), set_config('app.user_id', $2, true)",
-                               [tenant_id.to_s, user_id.to_s])
+                               [context[:tenant_id].to_s, context[:user_id].to_s])
               result = yield tx
               conn.exec("COMMIT")
             rescue Exception # rubocop:disable Lint/RescueException -- rollback também em interrupções

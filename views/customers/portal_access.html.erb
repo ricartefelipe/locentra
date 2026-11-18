@@ -1,0 +1,79 @@
+<% c = @data[:customer] %>
+<% now = @portal[:now] %>
+<% pending = @portal[:invitations].select { |row| row[:invitation].pending?(now) } %>
+<section class="panel" id="portal" aria-labelledby="portal-titulo">
+  <h2 id="portal-titulo">Acesso ao portal do cliente</h2>
+  <% unless @portal[:enabled] %>
+    <p class="notice" role="status">O plano da organização não inclui o portal do cliente. Os acessos existentes continuam listados, mas novos convites são recusados.</p>
+  <% end %>
+  <p class="muted">Contatos convidados acessam o portal com login próprio e veem somente reservas, orçamentos enviados, contratos e cobranças deste cliente. A revogação encerra as sessões do portal imediatamente.</p>
+  <h3>Acessos</h3>
+  <% if @portal[:accesses].empty? %>
+    <p class="empty">Nenhum acesso concedido.</p>
+  <% else %>
+    <table class="table">
+      <thead><tr><th scope="col">Usuário</th><th scope="col">Situação</th><th scope="col">Desde</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
+      <tbody>
+        <% @portal[:accesses].each do |row| %>
+          <% a = row[:access] %>
+          <tr>
+            <td><strong><%= row[:name] %></strong><br><span class="muted"><%= row[:email] %></span></td>
+            <td><%= status_badge(a.status, a.status_label) %><% if a.revoked_at %><br><span class="muted">revogado em <%= datetime(a.revoked_at) %></span><% end %></td>
+            <td><%= datetime(a.created_at) %></td>
+            <td>
+              <% if a.active? && can?("customers.write") %>
+                <form method="post" action="/clientes/<%= c.id %>/portal/acessos/<%= a.id %>/revogar" data-confirm="Revogar o acesso de <%= row[:name] %> ao portal? As sessões abertas serão encerradas.">
+                  <%= csrf_field %>
+                  <button type="submit" class="danger">Revogar acesso</button>
+                </form>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+  <h3>Convites</h3>
+  <% if @portal[:invitations].empty? %>
+    <p class="empty">Nenhum convite enviado.</p>
+  <% else %>
+    <table class="table">
+      <thead><tr><th scope="col">Contato</th><th scope="col">Enviado em</th><th scope="col">Validade</th><th scope="col">Situação</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
+      <tbody>
+        <% @portal[:invitations].each do |row| %>
+          <% i = row[:invitation] %>
+          <tr>
+            <td><%= row[:contact_name] %><br><span class="muted"><%= i.email %></span></td>
+            <td><%= datetime(i.created_at) %></td>
+            <td><%= datetime(i.expires_at) %></td>
+            <td><%= badge(i.status_label(now), i.pending?(now) ? "warning" : "muted") %></td>
+            <td>
+              <% if i.pending?(now) && can?("customers.write") %>
+                <form method="post" action="/clientes/<%= c.id %>/portal/convites/<%= i.id %>/cancelar">
+                  <%= csrf_field %>
+                  <button type="submit">Cancelar convite</button>
+                </form>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+  <% if can?("customers.write") && @portal[:enabled] && c.status == "active" %>
+    <% contacts = @data[:contacts].reject { |contact| contact.email.nil? } %>
+    <% if contacts.empty? %>
+      <p class="empty">Cadastre um contato com e-mail para convidar ao portal.</p>
+    <% else %>
+      <form method="post" action="/clientes/<%= c.id %>/portal/convites" class="stack">
+        <%= csrf_field %>
+        <label for="portal-contato">Convidar contato</label>
+        <select id="portal-contato" name="contato_id" required>
+          <% contacts.each do |contact| %><option value="<%= contact.id %>"><%= contact.name %> (<%= contact.email %>)</option><% end %>
+        </select>
+        <p class="muted">O convite é enviado por e-mail com link válido por 7 dias.<% unless pending.empty? %> Um novo convite para o mesmo e-mail substitui o pendente deste cliente.<% end %> Se o e-mail tiver convite pendente em outro cliente, cancele-o antes na página daquele cliente.</p>
+        <button type="submit" class="primary">Enviar convite</button>
+      </form>
+    <% end %>
+  <% end %>
+</section>

@@ -103,6 +103,30 @@ module Locentra
           [rows.map { |row| self.class.listed(row) }, total]
         end
 
+        # Cobranças de um cliente (extrato do portal), paginadas: as em aberto primeiro, das mais antigas
+        # para as mais recentes; depois as demais, das mais recentes para as mais antigas.
+        def for_customer(tx, customer_id, limit:, offset:)
+          total = tx.query_value("#{LISTING} SELECT count(*) FROM listing WHERE customer_id = $2", [tx.tenant_id!, customer_id])
+          rows = tx.query(<<~SQL, [tx.tenant_id!, customer_id, limit, offset])
+            #{LISTING}
+            SELECT * FROM listing WHERE customer_id = $2
+             ORDER BY status IN ('open', 'partial') DESC, CASE WHEN status IN ('open', 'partial') THEN due_on END, due_on DESC, created_at DESC, id
+             LIMIT $3 OFFSET $4
+          SQL
+          [rows.map { |row| self.class.listed(row) }, total]
+        end
+
+        def customer_totals(tx, customer_id)
+          row = tx.query_one(<<~SQL, [tx.tenant_id!, customer_id])
+            #{LISTING}
+            SELECT COALESCE(sum(outstanding_cents) FILTER (WHERE status IN ('open', 'partial')), 0)::bigint AS open_cents,
+                   COALESCE(-sum(outstanding_cents) FILTER (WHERE outstanding_cents < 0), 0)::bigint AS credit_cents,
+                   count(*) FILTER (WHERE status IN ('open', 'partial')) AS open_count
+              FROM listing WHERE customer_id = $2
+          SQL
+          { open: Domain::Money.new(row["open_cents"]), credit: Domain::Money.new(row["credit_cents"]), open_count: row["open_count"] }
+        end
+
         def totals(tx)
           row = tx.query_one(<<~SQL, [tx.tenant_id!])
             #{LISTING}

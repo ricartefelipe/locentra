@@ -82,10 +82,10 @@ module Locentra
           return unless created
 
           @audit.record(tx, current, "reservation.overdue", "reservation", reservation.id, "ends_at" => scheduled_end.iso8601)
-          notify(tx, reservation)
+          notify(tx, current, reservation)
         end
 
-        def notify(tx, reservation)
+        def notify(tx, actor, reservation)
           contact = @operations.contact_email(tx, reservation.id)
           return unless contact && contact["email"]
 
@@ -93,7 +93,7 @@ module Locentra
                          { "template" => "late_return", "to" => contact["email"],
                            "variables" => { "customer_name" => contact["name"], "code" => reservation.code,
                                             "ends_at" => reservation.period.ends_at.iso8601 } },
-                         unique_key: "late_return:#{reservation.id}", priority: 60)
+                         unique_key: "late_return:#{reservation.id}", priority: 60, correlation_id: actor.request_id)
         end
 
         # Reservas futuras que usam os mesmos ativos ainda com o cliente, ou cuja capacidade de estoque

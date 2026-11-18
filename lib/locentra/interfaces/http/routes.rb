@@ -9,6 +9,7 @@ require_relative "web/fulfillment_controllers"
 require_relative "web/maintenance_controllers"
 require_relative "web/quotes_controller"
 require_relative "web/contracts_controller"
+require_relative "web/portal_controllers"
 require_relative "api/v1"
 require_relative "api/v1_finance"
 
@@ -43,6 +44,7 @@ module Locentra
           r.get "/convites", auth, :invitation_form, auth: :public
           r.post "/convites", auth, :accept_invitation, auth: :public, csrf: false
 
+          draw_portal(r, deps, w)
           draw_staff(r, deps, w)
           draw_api(r, API::V1Controller.new(deps))
         end
@@ -240,6 +242,43 @@ module Locentra
           r.post "/contratos/:id/aditivos", contracts, :amend
           r.post "/contratos/:id/cancelar", contracts, :cancel
           r.post "/contratos/:id/encerrar", contracts, :close
+        end
+
+        # Portal do cliente: aceite público do convite, área do cliente (modo :portal, sessão de
+        # portal) e gestão dos acessos na tela do cliente (equipe).
+        def draw_portal(router, deps, web)
+          r = router
+          w = web
+          invitations = w::PortalInvitationsController.new(deps)
+          r.get "/portal/convite", invitations, :show, auth: :public
+          # Sem sessão não há token CSRF; com sessão, o controlador exige o token da sessão.
+          r.post "/portal/convite", invitations, :accept, auth: :public, csrf: false
+
+          portal = w::PortalController.new(deps)
+          r.get "/portal", portal, :home, auth: :portal
+          r.get "/portal/disponibilidade", portal, :availability, auth: :portal
+          r.post "/portal/reservas", portal, :request_reservation, auth: :portal
+          r.get "/portal/financeiro", portal, :finance, auth: :portal
+
+          reservations = w::PortalReservationsController.new(deps)
+          r.get "/portal/reservas", reservations, :index, auth: :portal
+          r.get "/portal/reservas/:id", reservations, :show, auth: :portal
+
+          quotes = w::PortalQuotesController.new(deps)
+          r.get "/portal/orcamentos", quotes, :index, auth: :portal
+          r.get "/portal/orcamentos/:id", quotes, :show, auth: :portal
+          r.post "/portal/orcamentos/:id/aprovar", quotes, :approve, auth: :portal
+          r.post "/portal/orcamentos/:id/rejeitar", quotes, :reject, auth: :portal
+
+          contracts = w::PortalContractsController.new(deps)
+          r.get "/portal/contratos", contracts, :index, auth: :portal
+          r.get "/portal/contratos/:id", contracts, :show, auth: :portal
+          r.post "/portal/contratos/:id/aceite", contracts, :accept, auth: :portal
+
+          access = w::CustomerPortalController.new(deps)
+          r.post "/clientes/:id/portal/convites", access, :invite
+          r.post "/clientes/:id/portal/convites/:convite_id/cancelar", access, :cancel_invitation
+          r.post "/clientes/:id/portal/acessos/:acesso_id/revogar", access, :revoke
         end
 
         def draw_api(router, api)
