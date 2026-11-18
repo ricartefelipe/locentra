@@ -65,6 +65,7 @@
         <summary>Registrar aceite da versão <%= c.current_document_version %></summary>
         <form method="post" action="/contratos/<%= c.id %>/aceite" class="stack">
           <%= csrf_field %>
+          <input type="hidden" name="versao" value="<%= c.current_document_version %>">
           <p>Registro presencial do aceite eletrônico simples do locatário. Não equivale a assinatura digital certificada.</p>
           <label for="aceite-nome">Nome completo de quem aceita</label>
           <input id="aceite-nome" name="nome" required maxlength="160" value="<%= terms.dig("customer", "name") %>"<%= invalid(@errors, "nome") %>>

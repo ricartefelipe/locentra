@@ -14,7 +14,8 @@ module Locentra
         def self.cookie_name(config) = config.secure_cookies? ? "__Host-locentra" : "locentra_session"
 
         # Modos: :public (sessão opcional), :login (sessão sem organização), :session (equipe),
-        # :portal (cliente), :api (credencial Bearer ou sessão de equipe).
+        # :portal (cliente), :api (credencial Bearer ou sessão de equipe). Sessão de portal em rota de
+        # equipe, e vice-versa, gera WrongArea: nenhuma das áreas aceita a sessão da outra.
         def authenticate!(ctx, mode)
           case mode
           when :public then load_session(ctx)
@@ -42,6 +43,7 @@ module Locentra
         def staff!(ctx)
           require_login!(ctx)
           session = ctx.session
+          raise WrongArea, "/portal" if session["kind"] == "portal" && session["organization_id"]
           raise Unauthenticated, "selecione uma organização" unless session["kind"] == "staff" && session["organization_id"]
 
           membership = @system.uow.anonymous(tenant_id: session["organization_id"], user_id: session["user_id"]) do |tx|
@@ -59,7 +61,8 @@ module Locentra
         def portal!(ctx)
           require_login!(ctx)
           session = ctx.session
-          raise Unauthenticated unless session["kind"] == "portal" && session["organization_id"]
+          raise WrongArea, "/" if session["kind"] == "staff" && session["organization_id"]
+          raise Unauthenticated, "selecione uma organização" unless session["kind"] == "portal" && session["organization_id"]
 
           access, org = @system.uow.anonymous(tenant_id: session["organization_id"], user_id: session["user_id"]) do |tx|
             [@system.repos[:access].active_portal_access(tx, session["organization_id"], session["user_id"]),

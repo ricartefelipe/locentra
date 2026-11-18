@@ -7,8 +7,11 @@ module Locentra
         # Entrada, cadastro, seleção de organização, saída, confirmação de e-mail, recuperação de
         # senha e aceite de convite.
         class AuthController < Controller
+          # Página de aceite do convite do portal: pública, preservada após a entrada para vincular a conta.
+          PORTAL_INVITATION = "/portal/convite"
+
           def login_form(ctx)
-            return redirect(ctx, "/") if ctx.session && ctx.session["organization_id"]
+            return redirect(ctx, home_of(ctx.session["kind"])) if ctx.session && ctx.session["organization_id"]
 
             render(ctx, "auth/login", title: "Entrar", layout: "layouts/public", values: {}, error: nil, back: safe_back(ctx.query("voltar")))
           end
@@ -18,7 +21,7 @@ module Locentra
             memberships = uc(:list_memberships).call(user["id"])
             token, = @system.services[:sessions].create(user_id: user["id"], organization_id: single_org(memberships), kind: kind_for(memberships),
                                                         ip: ctx.ip, user_agent: ctx.user_agent, rotate_from: ctx.session&.fetch("id"))
-            target = memberships.size == 1 ? landing(memberships.first, safe_back(ctx.form["voltar"])) : "/organizacoes"
+            target = login_target(memberships, safe_back(ctx.form["voltar"]))
             redirect(ctx, target) { |response| session_cookie(response, token) }
           rescue Application::Identity::AuthenticationFailed, Application::Identity::TooManyRequests => e
             render(ctx, "auth/login", title: "Entrar", layout: "layouts/public", status: e.is_a?(Application::Identity::TooManyRequests) ? 429 : 401,
@@ -36,9 +39,11 @@ module Locentra
           end
 
           def switch(ctx)
-            org_id = ctx.form["organizacao_id"]
+            org_id = ctx.form["organizacao_id"].to_s
+            kind = ctx.form["tipo"].to_s
             memberships = uc(:list_memberships).call(ctx.session["user_id"])
-            membership = memberships.find { |m| m["organization_id"] == org_id.to_s }
+            # O mesmo usuário pode ter vínculo de equipe e acesso ao portal na mesma organização.
+            membership = memberships.find { |m| m["organization_id"] == org_id && (kind.empty? || m["kind"] == kind) }
             raise Domain::AccessDenied, "sem acesso à organização" unless membership
 
             token, = @system.services[:sessions].create(user_id: ctx.session["user_id"], organization_id: membership["organization_id"],
@@ -113,11 +118,23 @@ module Locentra
           def single_org(memberships) = memberships.size == 1 ? memberships.first["organization_id"] : nil
           def kind_for(memberships) = memberships.size == 1 ? memberships.first["kind"] : "staff"
 
-          def landing(membership, back)
-            return "/portal" if membership["kind"] == "portal"
+          def login_target(memberships, back)
+            return back if back&.start_with?(PORTAL_INVITATION)
+            return "/organizacoes" unless memberships.size == 1
 
-            back || "/"
+            landing(memberships.first, back)
           end
+
+          # Retorno solicitado somente quando pertence à área da sessão criada (portal ou equipe).
+          def landing(membership, back)
+            portal = membership["kind"] == "portal"
+            return back if back && portal_path?(back) == portal
+
+            home_of(membership["kind"])
+          end
+
+          def home_of(kind) = kind == "portal" ? "/portal" : "/"
+          def portal_path?(path) = path == "/portal" || path.start_with?("/portal/", "/portal?")
 
           def safe_back(value)
             text = value.to_s

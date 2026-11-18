@@ -96,6 +96,7 @@
           <summary>Registrar rejeição</summary>
           <form method="post" action="/orcamentos/<%= q.id %>/rejeitar" class="stack">
             <%= csrf_field %>
+            <input type="hidden" name="versao" value="<%= q.current_version %>">
             <label for="motivo-rejeicao">Motivo</label>
             <input id="motivo-rejeicao" name="motivo" required maxlength="500"<%= invalid(@errors, "motivo") %>>
             <%= field_errors(@errors, "motivo") %>

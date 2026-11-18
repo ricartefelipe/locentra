@@ -9,6 +9,7 @@
           <form method="post" action="/organizacoes/ativar">
             <%= csrf_field %>
             <input type="hidden" name="organizacao_id" value="<%= m["organization_id"] %>">
+            <input type="hidden" name="tipo" value="<%= m["kind"] %>">
             <button type="submit" class="choice">
               <strong><%= m["name"] %></strong>
               <span class="muted"><%= m["kind"] == "portal" ? "Portal do cliente" : Locentra::Domain::Identity.role_label(m["role"]) %></span>

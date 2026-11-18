@@ -78,10 +78,12 @@ module Locentra
           end
 
           def reject(ctx)
-            uc(:reject_quote).call(ctx.actor, ctx.param(:id), reason: ctx.form["motivo"])
+            uc(:reject_quote).call(ctx.actor, ctx.param(:id), version: ctx.form["versao"], reason: ctx.form["motivo"])
             redirect(ctx, "/orcamentos/#{ctx.param(:id)}", notice: "Rejeição registrada.")
           rescue Domain::ValidationError, Domain::InvalidTransition => e
             show(ctx, errors: errors_of(e), status: 422)
+          rescue Domain::Conflict => e
+            show(ctx, errors: errors_of(e), status: 409)
           end
 
           def convert(ctx)
