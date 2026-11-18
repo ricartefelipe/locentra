@@ -249,7 +249,7 @@ module Locentra
                                                   audit: audit, events: s[:events], clock: clock)
       uc[:ingest_payment_webhook] = ingest
       uc[:process_payment_webhook] = fn::ProcessWebhook.new(uow: uow, inbound: r[:inbound_webhooks], payments: r[:payments], providers: providers,
-                                                            settlement: settlement, clock: clock)
+                                                            settlement: settlement, alert_book: alert_book, clock: clock)
       uc[:simulate_payment] = fn::SimulateProviderEvent.new(uow: uow, payments: r[:payments], **accounts, simulator: simulator, ingest: ingest)
       uc[:open_deposit] = fn::OpenDeposit.new(uow: uow, reservations: r[:reservations], deposits: r[:deposits], audit: audit, clock: clock, ids: ids)
       uc[:move_deposit] = fn::MoveDeposit.new(uow: uow, deposits: r[:deposits], receivables: r[:receivables], **money)

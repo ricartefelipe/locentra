@@ -160,6 +160,24 @@ class FinanceDomainTest < UnitTest
     assert_equal "payment_amount_mismatch", F::Review.amount_mismatch(money(100), money(90)).first
     assert_nil F::Review.reason_text([])
     assert_equal "a b", F::Review.reason_text([%w[x a], %w[y b]])
+    duplicate, text = F::Review.paid_through_duplicate("sim_1", "sim_2")
+
+    assert_equal "duplicate_provider_charge", duplicate
+    assert_match(/sim_2.*sim_1/, text)
+  end
+
+  def test_unmatched_provider_receipts
+    confirmed = online_payment.begin_submission(Time.utc(2026, 3, 2)).adopt("sim_1", nil).confirm(Time.utc(2026, 3, 3))
+    kind, message = F::Review.unmatched_receipt(confirmed, "sim_2", money(5_000))
+
+    assert_equal "duplicate_provider_charge", kind
+    assert_match(/sim_2 também foi paga.*R\$ 50,00.*sim_1/, message)
+    kind, message = F::Review.unmatched_receipt(online_payment.cancel("removida"), "sim_3", nil)
+
+    assert_equal "unmatched_provider_receipt", kind
+    assert_match(/valor não informado.*cancelado/, message)
+    assert_match(/marcado como falho/, F::Review.unmatched_receipt(online_payment.fail("recusada"), "sim_4", money(1)).last)
+    assert_equal "Recebimento sem pagamento em aberto", F::ALERT_KINDS.fetch(kind)
   end
 
   def test_refund_policy_and_state_machine

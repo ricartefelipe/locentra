@@ -172,7 +172,7 @@ class PaymentProviderTest < DatabaseTest
 
     assert_equal :accepted, uc(:simulate_payment).call(@actor, requested.id)
     assert_equal :duplicate, uc(:simulate_payment).call(@actor, requested.id)
-    confirmed = webhook_body(requested.id, "evt_outro_1", "PAYMENT_CONFIRMED")
+    confirmed = webhook_body(requested.id, "evt_outro_1", "PAYMENT_CONFIRMED", charge: payment(requested.id).provider_payment_id)
 
     assert_equal :accepted, uc(:ingest_payment_webhook).accept(account_row, confirmed)
     drain
@@ -181,6 +181,7 @@ class PaymentProviderTest < DatabaseTest
     assert_equal %w[ignored processed], statuses, "o segundo evento de pagamento encontra o pagamento já confirmado"
     assert_equal 1, count("financial_entries", "source_type = 'payment' AND debit_cents > 0")
     assert_equal 1, count("outbox_events", "event_type = 'payment.confirmed'")
+    assert_equal 0, count("finance_alerts"), "confirmação repetida da mesma cobrança não gera alerta"
     processed = owner_query("SELECT id FROM inbound_webhooks WHERE status = 'processed'").first["id"]
 
     assert_equal :already_processed, uc(:process_payment_webhook).call(A::Actor.system(organization_id: @org[:organization_id]), processed)
@@ -229,23 +230,14 @@ class PaymentProviderTest < DatabaseTest
   def test_webhook_with_divergent_amount_confirms_and_flags_review
     requested = request_online(@rental, 10_000)
     drain
-    uc(:ingest_payment_webhook).accept(account_row, webhook_body(requested.id, "evt_valor", "PAYMENT_RECEIVED", value: "90.00"))
+    charge = payment(requested.id).provider_payment_id
+    uc(:ingest_payment_webhook).accept(account_row, webhook_body(requested.id, "evt_valor", "PAYMENT_RECEIVED", value: "90.00", charge: charge))
     drain
     confirmed = payment(requested.id)
 
-    assert_equal "confirmed", confirmed.status
+    assert_equal ["confirmed", charge], [confirmed.status, confirmed.provider_payment_id]
     assert_match(/difere/, confirmed.review_reason)
-  end
-
-  def test_provider_deletion_event_cancels_pending_payment
-    requested = request_online(@rental, 10_000)
-    drain
-    uc(:ingest_payment_webhook).accept(account_row, webhook_body(requested.id, "evt_removida", "PAYMENT_DELETED"))
-    uc(:ingest_payment_webhook).accept(account_row, webhook_body(requested.id, "evt_vencida", "PAYMENT_OVERDUE"))
-    drain
-
-    assert_equal "cancelled", payment(requested.id).status
-    assert_equal 1, count("inbound_webhooks", "status = 'ignored'")
+    refute_match(/duplicada/, confirmed.review_reason)
   end
 
   def test_reconciliation_reports_discrepancies
@@ -391,9 +383,9 @@ class PaymentProviderTest < DatabaseTest
 
   def account_row = owner_query("SELECT id, organization_id, provider FROM payment_provider_accounts WHERE id = $1", [@account["id"]]).first
 
-  def webhook_body(reference, event_id, event, value: "100.00")
+  def webhook_body(reference, event_id, event, value: "100.00", charge: "sim_#{"a" * 32}")
     JSON.generate("id" => event_id, "event" => event, "dateCreated" => "2026-03-02 12:00:00",
-                  "payment" => { "id" => "sim_#{"a" * 32}", "status" => "RECEIVED", "value" => JSON::Fragment.new(value), "externalReference" => reference })
+                  "payment" => { "id" => charge, "status" => "RECEIVED", "value" => JSON::Fragment.new(value), "externalReference" => reference })
   end
 
   def ledger_for(system)

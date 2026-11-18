@@ -137,7 +137,8 @@ module Locentra
       ALERT_KINDS = {
         "payment_after_expiration" => "Pagamento após expiração", "payment_after_cancellation" => "Pagamento após cancelamento",
         "payment_amount_mismatch" => "Valor divergente", "reservation_closed_with_charges" => "Reserva encerrada com cobranças",
-        "duplicate_provider_charge" => "Cobrança duplicada no provedor"
+        "duplicate_provider_charge" => "Cobrança duplicada no provedor",
+        "unmatched_provider_receipt" => "Recebimento sem pagamento em aberto"
       }.freeze
       ALERT_RESOLUTIONS = { "refund" => "Reembolso", "new_reservation" => "Nova reserva", "no_action" => "Sem ação" }.freeze
 
@@ -162,6 +163,29 @@ module Locentra
 
         def reason_text(findings)
           findings.empty? ? nil : findings.map(&:last).join(" ")
+        end
+
+        # Pagamento em aberto quitado por uma cobrança duplicada (mesma referência, outro identificador).
+        def paid_through_duplicate(linked, paid)
+          ["duplicate_provider_charge",
+           "Pago pela cobrança duplicada #{paid} no provedor; a cobrança #{linked} continua no provedor e deve ser cancelada."]
+        end
+
+        # Recebimento informado pelo provedor que não pode ser lançado: o pagamento local já está
+        # concluído (confirmado por outra cobrança, cancelado ou falho). O valor não é lançado; a equipe
+        # decide entre reembolso no provedor e registro manual.
+        def unmatched_receipt(payment, charge_id, amount)
+          value = amount ? amount.format_brl : "valor não informado"
+          decision = "O valor não foi lançado; decida entre reembolso no provedor e registro manual do pagamento."
+          if payment.confirmed?
+            ["duplicate_provider_charge",
+             "A cobrança #{charge_id} também foi paga no provedor (#{value}), mas o pagamento já foi confirmado pela cobrança " \
+             "#{payment.provider_payment_id}. #{decision}"]
+          else
+            ["unmatched_provider_receipt",
+             "O provedor confirmou o recebimento da cobrança #{charge_id} (#{value}) para um pagamento " \
+             "#{payment.status == "cancelled" ? "cancelado" : "marcado como falho"} no Locentra. #{decision}"]
+          end
         end
       end
 

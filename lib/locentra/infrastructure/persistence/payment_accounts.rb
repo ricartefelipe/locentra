@@ -43,9 +43,9 @@ module Locentra
       # Webhooks recebidos: persistidos e deduplicados antes do processamento.
       class InboundWebhookRepository
         def insert(tx, row)
-          tx.execute(<<~SQL, [row["id"], tx.tenant_id!, *row.values_at("provider", "event_id", "event_type", "payload", "received_at")]) == 1
-            INSERT INTO inbound_webhooks (id, organization_id, provider, event_id, event_type, payload, received_at)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+          tx.execute(<<~SQL, [row["id"], tx.tenant_id!, *row.values_at("provider", "event_id", "event_type", "payload", "received_at", "provider_account_id")]) == 1
+            INSERT INTO inbound_webhooks (id, organization_id, provider, event_id, event_type, payload, received_at, provider_account_id)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
             ON CONFLICT (organization_id, provider, event_id) DO NOTHING
           SQL
         end
@@ -53,7 +53,7 @@ module Locentra
         # O corpo é lido como texto para que valores decimais sejam convertidos sem Float.
         def lock(tx, id)
           tx.query_one(<<~SQL, [tx.tenant_id!, id])
-            SELECT id, provider, event_id, event_type, status, payload::text AS payload_text, received_at
+            SELECT id, provider, provider_account_id, event_id, event_type, status, payload::text AS payload_text, received_at
               FROM inbound_webhooks WHERE organization_id = $1 AND id = $2 FOR UPDATE
           SQL
         end

@@ -125,11 +125,12 @@ module Locentra
           [F::Review.for_reservation(reservation&.status), expected && F::Review.amount_mismatch(expected, received)].compact
         end
 
-        # Confirma um pagamento já bloqueado (FOR UPDATE) pelo chamador.
-        def confirm(tx, actor, payment, from:, received: nil)
+        # Confirma um pagamento já bloqueado (FOR UPDATE) pelo chamador. `extra`: achados adicionais
+        # ([tipo de alerta, motivo]) que também exigem revisão.
+        def confirm(tx, actor, payment, from:, received: nil, extra: [])
           return payment if payment.confirmed?
 
-          found = findings(tx, payment.reservation_id, expected: payment.amount, received: received)
+          found = findings(tx, payment.reservation_id, expected: payment.amount, received: received) + extra
           confirmed = payment.confirm(@clock.now, review_reason: F::Review.reason_text(found))
           @payments.update(tx, confirmed, from: from, now: @clock.now)
           effects(tx, actor, confirmed, found)

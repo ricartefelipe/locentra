@@ -27,7 +27,12 @@ module Locentra
 
         def find(tx, id) = one(tx, "p.id = $2", id)
         def lock(tx, id) = one(tx, "p.id = $2", id, lock: true)
-        def lock_by_provider_id(tx, provider_payment_id) = one(tx, "p.provider_payment_id = $2", provider_payment_id.to_s, lock: true)
+
+        def lock_by_provider_id(tx, account_id, provider_payment_id)
+          row = tx.query_one("SELECT #{COLUMNS} FROM payments p WHERE p.organization_id = $1 AND p.provider_account_id = $2 AND p.provider_payment_id = $3 " \
+                             "FOR UPDATE", [tx.tenant_id!, account_id, provider_payment_id.to_s])
+          row && self.class.map(row)
+        end
 
         def update(tx, payment, from:, now:)
           count = tx.execute(<<~SQL, [tx.tenant_id!, payment.id, payment.status, payment.provider_payment_id, payment.invoice_url, payment.requires_review, payment.review_reason, payment.failure_reason, payment.submission_attempts, payment.submission_started_at, payment.paid_at, payment.confirmed_at, now, from])

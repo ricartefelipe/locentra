@@ -51,6 +51,11 @@ CREATE TABLE payment_provider_accounts (
 CREATE UNIQUE INDEX payment_provider_accounts_active_key ON payment_provider_accounts (organization_id) WHERE active;
 REVOKE DELETE ON payment_provider_accounts FROM locentra_app, locentra_worker;
 
+-- Conta que recebeu cada webhook de pagamento: o processamento só altera pagamentos dessa conta.
+ALTER TABLE inbound_webhooks ADD COLUMN provider_account_id uuid;
+ALTER TABLE inbound_webhooks ADD CONSTRAINT inbound_webhooks_provider_account_fkey
+  FOREIGN KEY (organization_id, provider_account_id) REFERENCES payment_provider_accounts (organization_id, id);
+
 -- ---------------------------------------------------------------------------
 -- Contas a receber. A origem (source_type, source_id) é única: a sincronização com reservas e
 -- ajustes é idempotente. O valor nunca muda; cancelamento é uma operação compensatória registrada.
@@ -360,7 +365,7 @@ CREATE TABLE finance_alerts (
   id uuid PRIMARY KEY,
   organization_id uuid NOT NULL REFERENCES organizations (id),
   kind text NOT NULL CHECK (kind IN ('payment_after_expiration', 'payment_after_cancellation', 'payment_amount_mismatch',
-                                     'reservation_closed_with_charges', 'duplicate_provider_charge')),
+                                     'reservation_closed_with_charges', 'duplicate_provider_charge', 'unmatched_provider_receipt')),
   status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
   reservation_id uuid,
   payment_id uuid,
