@@ -1,4 +1,8 @@
 <% totals = @data[:totals] %>
+<% receivables = @data[:receivables] %>
+<% deposits = @data[:deposits] %>
+<% receivables_query = @paging.slice("limite", "caucoes_limite", "caucoes_inicio") %>
+<% deposits_query = @paging.slice("caucoes_limite", "limite", "inicio") %>
 <header class="page-header">
   <h1>Cobranças e saldos</h1>
   <p class="muted">Saldos calculados a partir dos pagamentos confirmados, reembolsos e cauções aplicadas. Pagamentos em processamento aparecem depois da confirmação.</p>
@@ -15,14 +19,15 @@
 </section>
 <section class="panel" aria-labelledby="cobrancas-titulo">
   <h2 id="cobrancas-titulo">Cobranças</h2>
-  <% if @data[:receivables].empty? %>
+  <% if receivables.total.zero? %>
     <p class="empty">Nenhuma cobrança registrada.</p>
   <% else %>
+    <p class="muted">Cobranças em aberto aparecem primeiro, das mais antigas para as mais recentes; em seguida, as demais.</p>
     <table class="table">
       <caption class="sr-only">Cobranças com valor, valor quitado e saldo</caption>
       <thead><tr><th scope="col">Descrição</th><th scope="col">Reserva</th><th scope="col">Vencimento</th><th scope="col">Situação</th><th scope="col" class="num">Valor</th><th scope="col" class="num">Quitado</th><th scope="col" class="num">Saldo</th></tr></thead>
       <tbody>
-        <% @data[:receivables].each do |row| %>
+        <% receivables.items.each do |row| %>
           <% rec = row[:receivable] %>
           <% bal = row[:balance] %>
           <tr>
@@ -37,17 +42,20 @@
         <% end %>
       </tbody>
     </table>
+    <%= partial("shared/pagination", page: receivables, base_path: "/portal/financeiro", query: receivables_query, label: "Paginação das cobranças") %>
   <% end %>
 </section>
 <section class="panel" aria-labelledby="caucoes-titulo">
   <h2 id="caucoes-titulo">Cauções</h2>
-  <% if @data[:deposits].empty? %>
+  <% if deposits.total.zero? %>
     <p class="empty">Nenhuma caução registrada.</p>
   <% else %>
+    <p class="muted">Cauções com saldo retido aparecem primeiro.</p>
     <table class="table">
+      <caption class="sr-only">Cauções com valores previsto, recebido, aplicado, devolvido e retido</caption>
       <thead><tr><th scope="col">Reserva</th><th scope="col">Tipo</th><th scope="col">Situação</th><th scope="col" class="num">Prevista</th><th scope="col" class="num">Recebida</th><th scope="col" class="num">Aplicada</th><th scope="col" class="num">Devolvida</th><th scope="col" class="num">Retida</th></tr></thead>
       <tbody>
-        <% @data[:deposits].each do |row| %>
+        <% deposits.items.each do |row| %>
           <% dep = row[:deposit] %>
           <% led = row[:ledger] %>
           <tr>
@@ -63,6 +71,8 @@
         <% end %>
       </tbody>
     </table>
+    <%= partial("shared/pagination", page: deposits, base_path: "/portal/financeiro", query: deposits_query, offset_param: "caucoes_inicio",
+                                     label: "Paginação das cauções") %>
     <p class="muted">A caução é separada das cobranças: o saldo retido é devolvido após a conferência da devolução, deduzidos os valores aplicados.</p>
   <% end %>
 </section>

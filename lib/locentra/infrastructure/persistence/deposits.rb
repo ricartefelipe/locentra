@@ -62,17 +62,21 @@ module Locentra
           SQL
         end
 
-        # Cauções de um cliente com o saldo derivado dos movimentos (extrato do portal).
-        def for_customer(tx, customer_id, limit: 100)
-          tx.query(<<~SQL, [tx.tenant_id!, customer_id, limit]).map { |row| { deposit: self.class.map(row), ledger: self.class.ledger(row), reservation_code: row["reservation_code"] } }
+        # Cauções de um cliente com o saldo derivado dos movimentos (extrato do portal), paginadas: as
+        # com saldo retido primeiro; depois as demais, das mais recentes para as mais antigas.
+        def for_customer(tx, customer_id, limit:, offset:)
+          total = tx.query_value("SELECT count(*) FROM deposits d WHERE d.organization_id = $1 AND d.customer_id = $2", [tx.tenant_id!, customer_id])
+          rows = tx.query(<<~SQL, [tx.tenant_id!, customer_id, limit, offset])
             SELECT #{COLUMNS}, r.code AS reservation_code, #{SUMS}
               FROM deposits d
               JOIN reservations r ON r.organization_id = d.organization_id AND r.id = d.reservation_id
               LEFT JOIN deposit_entries e ON e.organization_id = d.organization_id AND e.deposit_id = d.id
              WHERE d.organization_id = $1 AND d.customer_id = $2
              GROUP BY d.id, r.code
-             ORDER BY d.created_at DESC LIMIT $3
+             ORDER BY COALESCE(sum(CASE WHEN e.kind = 'receive' THEN e.amount_cents ELSE -e.amount_cents END), 0) > 0 DESC, d.created_at DESC, d.id DESC
+             LIMIT $3 OFFSET $4
           SQL
+          [rows.map { |row| { deposit: self.class.map(row), ledger: self.class.ledger(row), reservation_code: row["reservation_code"] } }, total]
         end
 
         def self.map(row)

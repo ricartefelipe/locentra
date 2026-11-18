@@ -151,18 +151,47 @@ class PortalOperationsFlowTest < PortalFlowCase
     uc(:register_payment).call(@actor, { purpose: "deposit", deposit_id: deposit.id, method: "pix", amount: D::Money.new(20_000) })
     statement = uc(:finance).customer_statement(alfa)
 
-    assert_equal([own.id], statement[:receivables].map { |row| row[:receivable].reservation_id })
-    assert_equal [10_000, "partial"], [statement[:receivables].first[:balance].outstanding.cents, statement[:receivables].first[:balance].status]
+    assert_equal([own.id], statement[:receivables].items.map { |row| row[:receivable].reservation_id })
+    assert_equal [10_000, "partial"], [statement[:receivables].items.first[:balance].outstanding.cents, statement[:receivables].items.first[:balance].status]
     assert_equal [10_000, 1], [statement[:totals][:open].cents, statement[:totals][:open_count]]
-    assert_equal([[own.id, 20_000]], statement[:deposits].map { |row| [row[:deposit].reservation_id, row[:ledger].balance.cents] })
+    assert_equal([[own.id, 20_000]], statement[:deposits].items.map { |row| [row[:deposit].reservation_id, row[:ledger].balance.cents] })
     assert_equal %i[deposits receivables totals], statement.keys.sort, "sem diário, alertas ou dados do provedor"
     staff = uc(:finance).customer_statement(@actor, customer_id: @other.id)
 
-    assert_equal([other.id], staff[:receivables].map { |row| row[:receivable].reservation_id })
+    assert_equal([other.id], staff[:receivables].items.map { |row| row[:receivable].reservation_id })
     auditor = staff_member(@org, "auditor@alfa.test", "auditor")
 
     assert uc(:finance).customer_statement(auditor, customer_id: @customer.id)
     assert_raises(D::AccessDenied) { uc(:finance).customer_statement(staff_member(@org, "atende@alfa.test", "attendant"), customer_id: @customer.id) }
     assert_equal 10_000, uc(:portal_home).call(alfa)[:totals][:open].cents
+  end
+
+  # Extrato paginado com cobranças em aberto primeiro (as mais antigas antes), seguidas das demais
+  # das mais recentes para as mais antigas; os totais consideram todas as cobranças.
+  def test_statement_pages_list_open_charges_first_and_totals_cover_every_page
+    alfa = portal_customer(@actor, @customer, email: "paginas@cliente.test")
+    reservations = [12, 14, 16, 18].map do |day|
+      reserve(@actor, @customer, @branch, period(format("2026-03-%02dT08:00:00Z", day), format("2026-03-%02dT08:00:00Z", day + 1)),
+              [line(@camera, 1)], mode: "confirm").tap { |r| uc(:sync_reservation_charges).call(@actor, r.id) }
+    end
+    charge = ->(reservation) { uc(:finance).reservation(@actor, reservation.id)[:receivables].first[:receivable] }
+    [reservations[0], reservations[3]].each do |paid|
+      uc(:register_payment).call(@actor, { purpose: "receivable", receivable_id: charge.call(paid).id, method: "pix", amount: D::Money.new(15_000) })
+    end
+    deposits = reservations.first(3).map { |r| uc(:open_deposit).call(@actor, r.id, kind: "paid_deposit", amount: D::Money.new(20_000)) }
+    held = deposits[1]
+    uc(:register_payment).call(@actor, { purpose: "deposit", deposit_id: held.id, method: "pix", amount: D::Money.new(20_000) })
+    pages = [0, 2].map { |offset| uc(:finance).customer_statement(alfa, limit: "2", offset: offset.to_s) }
+    order = pages.flat_map { |page| page[:receivables].items.map { |row| row[:receivable].reservation_id } }
+
+    assert_equal [reservations[1], reservations[2], reservations[3], reservations[0]].map(&:id), order
+    assert_equal([[4, 2, 0], [4, 2, 2]], pages.map { |p| [p[:receivables].total, p[:receivables].limit, p[:receivables].offset] })
+    assert_equal([[30_000, 2]] * 2, pages.map { |p| [p[:totals][:open].cents, p[:totals][:open_count]] })
+    first, last = [0, 2].map { |offset| uc(:finance).customer_statement(alfa, deposits_limit: 1, deposits_offset: offset)[:deposits] }
+
+    assert_equal [held.id, 3], [first.items.first[:deposit].id, first.total], "caução com saldo retido primeiro"
+    assert_equal [deposits[0].id], last.items.map { |row| row[:deposit].id }, "demais cauções das mais recentes para as mais antigas"
+    assert_raises(D::ValidationError) { uc(:finance).customer_statement(alfa, limit: "0") }
+    assert_raises(D::ValidationError) { uc(:finance).customer_statement(alfa, deposits_offset: "-1") }
   end
 end

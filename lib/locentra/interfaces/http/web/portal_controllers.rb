@@ -8,6 +8,8 @@ module Locentra
         # acesso; os casos de uso filtram cada recurso pelo cliente e respondem "não encontrado" para
         # recursos de outros clientes ou organizações.
         class PortalController < Controller
+          STATEMENT_PARAMS = %w[limite inicio caucoes_limite caucoes_inicio].freeze
+
           def home(ctx)
             render(ctx, "portal/home", title: "Início", data: uc(:portal_home).call(ctx.actor))
           end
@@ -41,8 +43,13 @@ module Locentra
             availability(ctx, errors: errors_of(e), status: 422, values: f)
           end
 
+          # Extrato com paginação própria para cobranças (`inicio`/`limite`) e cauções
+          # (`caucoes_inicio`/`caucoes_limite`).
           def finance(ctx)
-            render(ctx, "portal/finance", title: "Cobranças e saldos", data: uc(:finance).customer_statement(ctx.actor))
+            params = STATEMENT_PARAMS.to_h { |name| [name, ctx.query(name).to_s] }
+            data = uc(:finance).customer_statement(ctx.actor, limit: params["limite"], offset: params["inicio"],
+                                                              deposits_limit: params["caucoes_limite"], deposits_offset: params["caucoes_inicio"])
+            render(ctx, "portal/finance", title: "Cobranças e saldos", data: data, paging: params)
           end
 
           private

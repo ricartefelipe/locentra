@@ -88,11 +88,17 @@ module Locentra
         # Extrato de um cliente: cobranças com saldo derivado, totais em aberto e cauções. O cliente do
         # portal consulta somente o próprio extrato (`portal.access`, cliente do acesso); a equipe usa
         # `finance.read`. Diário contábil, alertas, conciliação e dados do provedor não fazem parte dele.
-        def customer_statement(actor, customer_id: nil)
+        # Cobranças e cauções são páginas independentes (Page); os totais consideram todas as cobranças.
+        def customer_statement(actor, customer_id: nil, limit: nil, offset: nil, deposits_limit: nil, deposits_offset: nil)
+          lim, off = Page.params(limit: limit, offset: offset)
+          deposits_lim, deposits_off = Page.params(limit: deposits_limit, offset: deposits_offset)
           @uow.run(actor, actor.customer? ? "portal.access" : "finance.read") do |tx, current|
             id = current.customer? ? current.customer_id : Domain::Identifier.parse(customer_id, "cliente")
-            { receivables: @receivables.for_customer(tx, id), totals: @receivables.customer_totals(tx, id),
-              deposits: @deposits.for_customer(tx, id) }
+            receivables, receivables_total = @receivables.for_customer(tx, id, limit: lim, offset: off)
+            deposits, deposits_total = @deposits.for_customer(tx, id, limit: deposits_lim, offset: deposits_off)
+            { receivables: Page.new(items: receivables, limit: lim, offset: off, total: receivables_total),
+              totals: @receivables.customer_totals(tx, id),
+              deposits: Page.new(items: deposits, limit: deposits_lim, offset: deposits_off, total: deposits_total) }
           end
         end
 

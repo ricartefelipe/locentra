@@ -103,10 +103,17 @@ module Locentra
           [rows.map { |row| self.class.listed(row) }, total]
         end
 
-        # Cobranças de um cliente, mais recentes primeiro (extrato do portal).
-        def for_customer(tx, customer_id, limit: 200)
-          tx.query("#{LISTING} SELECT * FROM listing WHERE customer_id = $2 ORDER BY due_on DESC, created_at DESC, id LIMIT $3",
-                   [tx.tenant_id!, customer_id, limit]).map { |row| self.class.listed(row) }
+        # Cobranças de um cliente (extrato do portal), paginadas: as em aberto primeiro, das mais antigas
+        # para as mais recentes; depois as demais, das mais recentes para as mais antigas.
+        def for_customer(tx, customer_id, limit:, offset:)
+          total = tx.query_value("#{LISTING} SELECT count(*) FROM listing WHERE customer_id = $2", [tx.tenant_id!, customer_id])
+          rows = tx.query(<<~SQL, [tx.tenant_id!, customer_id, limit, offset])
+            #{LISTING}
+            SELECT * FROM listing WHERE customer_id = $2
+             ORDER BY status IN ('open', 'partial') DESC, CASE WHEN status IN ('open', 'partial') THEN due_on END, due_on DESC, created_at DESC, id
+             LIMIT $3 OFFSET $4
+          SQL
+          [rows.map { |row| self.class.listed(row) }, total]
         end
 
         def customer_totals(tx, customer_id)

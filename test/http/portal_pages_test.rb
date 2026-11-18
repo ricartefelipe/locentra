@@ -156,6 +156,41 @@ class PortalPagesTest < PortalHttpTest
     SQL
   end
 
+  # Extrato paginado: cobranças em aberto primeiro, totais coerentes com as páginas e cauções em
+  # paginação própria.
+  def test_statement_is_paginated_with_open_charges_first
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    reservations = [12, 14, 16].map do |day|
+      reserve(@actor, @customer, @branch, period(format("2026-03-%02dT08:00:00Z", day), format("2026-03-%02dT08:00:00Z", day + 1)),
+              [line(@camera, 1)], mode: "confirm").tap { |r| uc(:sync_reservation_charges).call(@actor, r.id) }
+    end
+    newest = uc(:finance).reservation(@actor, reservations.last.id)[:receivables].first[:receivable]
+    uc(:register_payment).call(@actor, { purpose: "receivable", receivable_id: newest.id, method: "pix", amount: D::Money.new(15_000) })
+    reservations.first(2).each { |r| uc(:open_deposit).call(@actor, r.id, kind: "paid_deposit", amount: D::Money.new(20_000)) }
+    portal_login
+    charges_table = %r{<h2 id="cobrancas-titulo">.*?</table>}m
+    first = get_ok("/portal/financeiro?limite=2")
+
+    assert_includes first, "Em aberto (2 cobranças)"
+    assert_includes first, "1–2 de 3"
+    assert_includes first, %(href="/portal/financeiro?limite=2&amp;inicio=2")
+    assert_includes first, reservations[0].code
+    assert_includes first, reservations[1].code
+    refute_includes first[charges_table], reservations[2].code, "a cobrança quitada fica para a página seguinte"
+    second = get_ok("/portal/financeiro?limite=2&inicio=2")
+
+    assert_includes second, "3–3 de 3"
+    assert_includes second[charges_table], reservations[2].code
+    assert_includes second, "Em aberto (2 cobranças)", "os totais não dependem da página"
+    deposits = get_ok("/portal/financeiro?caucoes_limite=1")
+
+    assert_includes deposits, %(aria-label="Paginação das cauções")
+    assert_includes deposits, %(href="/portal/financeiro?caucoes_limite=1&amp;caucoes_inicio=1")
+    get "/portal/financeiro?limite=500"
+
+    assert_equal 422, last_response.status
+  end
+
   def test_resources_of_other_customers_and_organizations_are_not_found
     portal_customer(@actor, @customer, email: "paula@cliente.test")
     other_reservation = reserve(@actor, @other, @branch, rental, [line(@camera, 1)], mode: "confirm")
