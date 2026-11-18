@@ -25,6 +25,14 @@ module Locentra
           SQL
         end
 
+        # Metadados da credencial, sem o hash do segredo.
+        def find(tx, id)
+          tx.query_one(<<~SQL, [tx.tenant_id!, id])
+            SELECT id, name, kind, scopes, created_at, expires_at, revoked_at, last_used_at FROM api_credentials
+             WHERE organization_id = $1 AND id = $2
+          SQL
+        end
+
         def revoke(tx, id, now)
           tx.execute("UPDATE api_credentials SET revoked_at = $3 WHERE organization_id = $1 AND id = $2 AND revoked_at IS NULL",
                      [tx.tenant_id!, id, now])

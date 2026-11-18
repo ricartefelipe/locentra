@@ -110,6 +110,23 @@ module Locentra
                            request_id: request_id, ip: ip, user_id: nil)
         end
       end
+
+      # Identidade autenticada, para conferência (CLI operacional). Não exige permissão: a
+      # UnitOfWork revalida a credencial ou o vínculo e devolve os escopos ou o papel atuais.
+      class WhoAmI
+        def initialize(uow:, credentials:, organizations:)
+          @uow = uow
+          @credentials = credentials
+          @organizations = organizations
+        end
+
+        def call(actor)
+          @uow.run(actor) do |tx, current|
+            { organization: @organizations.find(tx, tx.tenant_id!), actor: current,
+              credential: current.credential? ? @credentials.find(tx, current.credential_id) : nil }
+          end
+        end
+      end
     end
   end
 end

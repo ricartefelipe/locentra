@@ -99,6 +99,13 @@ module Locentra
           [base + jitter, 6 * 3600].min
         end
 
+        # Tarefa da organização bloqueada para a decisão de reprocessamento (com contexto de tenant).
+        def lock(tx, job_id)
+          tx.query_one(<<~SQL, [job_id, tx.tenant_id!])
+            SELECT id, kind, status, attempts, max_attempts, last_error FROM jobs WHERE id = $1 AND organization_id = $2 FOR UPDATE
+          SQL
+        end
+
         # Reprocessamento autorizado de tarefa morta (com contexto de tenant).
         def requeue(tx, job_id)
           now = @clock.now
