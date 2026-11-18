@@ -102,6 +102,41 @@ class PortalFlowTest < PortalFlowCase
     assert_equal "succeeded", owner_query("SELECT status FROM jobs WHERE kind = 'email.portal_invitation' ORDER BY created_at DESC LIMIT 1").first["status"]
   end
 
+  # Convites em aberto do mesmo e-mail: os do próprio cliente são substituídos com auditoria; o
+  # pendente de outro cliente bloqueia o novo convite até ser cancelado; o vencido é substituído.
+  def test_replaced_invitations_are_audited_and_other_customers_pending_invitations_are_kept
+    shared = "compartilhado@cliente.test"
+    own = portal_contact(@actor, @customer, email: shared)
+    first = uc(:invite_portal_contact).call(@actor, customer_id: @customer.id, contact_id: own.id)
+    @clock.advance(60)
+    second = uc(:invite_portal_contact).call(@actor, customer_id: @customer.id, contact_id: own.id)
+    cancelled = lambda do
+      owner_query(<<~SQL).map { |r| r.values_at("resource_id", "invitation_id", "reason", "replaced_by") }
+        SELECT resource_id, details->>'invitation_id' AS invitation_id, details->>'reason' AS reason, details->>'replaced_by' AS replaced_by
+          FROM audit_events WHERE action = 'portal.invitation_cancelled' ORDER BY occurred_at, id
+      SQL
+    end
+
+    assert_equal [[@customer.id, first.id, "replaced", second.id]], cancelled.call
+    invited = owner_query("SELECT details->>'replaced_invitation_ids' AS ids FROM audit_events WHERE action = 'portal.invited' ORDER BY occurred_at")
+
+    assert_equal([[], [first.id]], invited.map { |r| JSON.parse(r["ids"]) })
+    neighbour = portal_contact(@actor, @other, email: shared)
+    blocked = assert_raises(D::Conflict) { uc(:invite_portal_contact).call(@actor, customer_id: @other.id, contact_id: neighbour.id) }
+
+    assert_equal "portal_pending_other_customer", blocked.code
+    assert_includes blocked.message, "Cliente Alfa"
+    assert_equal({ first.id => true, second.id => false },
+                 owner_query("SELECT id, revoked_at IS NOT NULL AS revoked FROM portal_invitations").to_h { |r| [r["id"], r["revoked"] == "t"] })
+    @clock.advance(7 * 86_400)
+    third = uc(:invite_portal_contact).call(@actor, customer_id: @other.id, contact_id: neighbour.id)
+
+    assert_equal [@customer.id, second.id, "replaced", third.id], cancelled.call.last, "o convite vencido do outro cliente é substituído"
+    assert_equal([@other.id], owner_query(<<~SQL).map { |r| r["customer_id"] })
+      SELECT customer_id FROM portal_invitations WHERE accepted_at IS NULL AND revoked_at IS NULL
+    SQL
+  end
+
   def test_existing_account_is_linked_only_after_login_with_the_same_email
     beta = create_organization(name: "Locadora Beta", email: "compras@beta.test")
     contact = portal_contact(@actor, @customer, email: "compras@beta.test")

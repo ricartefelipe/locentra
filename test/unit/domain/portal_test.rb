@@ -82,4 +82,18 @@ class PortalDomainTest < UnitTest
     assert_equal "portal_other_customer", assert_raises(Domain::Conflict) { PT::Rules.grantable!("c2", "c1") }.code
     assert_includes PT::REQUEST_NOTICE, "não garante disponibilidade"
   end
+
+  def test_new_invitation_replaces_own_and_expired_invitations_but_not_pending_ones_of_other_customers
+    own = invitation
+    expired_elsewhere = invitation(id: "i2", customer_id: "c2", expires_at: now)
+    names = { "c2" => "Cliente Vizinho" }
+
+    assert_equal [own, expired_elsewhere], PT::Rules.replaceable!([own, expired_elsewhere], "c1", now) { |id| names.fetch(id) }
+    assert_empty PT::Rules.replaceable!([], "c1", now) { |id| names.fetch(id) }
+    pending_elsewhere = invitation(id: "i3", customer_id: "c2")
+    error = assert_raises(Domain::Conflict) { PT::Rules.replaceable!([own, pending_elsewhere], "c1", now) { |id| names.fetch(id) } }
+
+    assert_equal "portal_pending_other_customer", error.code
+    assert_includes error.message, "para o cliente Cliente Vizinho"
+  end
 end

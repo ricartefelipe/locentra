@@ -28,6 +28,19 @@ module Locentra
           raise Conflict.new("este e-mail já acessa o portal como outro cliente; revogue aquele acesso antes de convidar",
                              code: "portal_other_customer")
         end
+
+        # Convites em aberto (não aceitos nem cancelados) do mesmo e-mail na organização. O novo
+        # convite substitui os do próprio cliente e os já vencidos de qualquer cliente; um convite
+        # ainda válido de outro cliente não é cancelado implicitamente: a equipe o cancela na página
+        # daquele cliente. O bloco recebe o cliente do convite que impede o novo e devolve o nome
+        # exibido na mensagem. Devolve os convites a substituir.
+        def replaceable!(open_invitations, customer_id, now)
+          blocking = open_invitations.find { |invitation| invitation.customer_id != customer_id && invitation.pending?(now) }
+          return open_invitations unless blocking
+
+          raise Conflict.new("este e-mail tem convite pendente ao portal para o cliente #{yield(blocking.customer_id)}; cancele aquele " \
+                             "convite na página do cliente antes de convidar por este cadastro", code: "portal_pending_other_customer")
+        end
       end
 
       Invitation = Data.define(:id, :organization_id, :customer_id, :contact_id, :email, :invited_by, :expires_at, :accepted_at,

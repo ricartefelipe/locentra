@@ -56,6 +56,23 @@ class PortalAccessPagesTest < PortalHttpTest
     refute_includes page, "Enviar convite"
   end
 
+  # Convite pendente de outro cliente com o mesmo e-mail não é cancelado pela tela de outro cadastro.
+  def test_pending_invitation_of_another_customer_blocks_the_invitation_with_an_explanation
+    shared = "compartilhado@cliente.test"
+    pending = uc(:invite_portal_contact).call(@actor, customer_id: @customer.id, contact_id: portal_contact(@actor, @customer, email: shared).id)
+    neighbour = portal_contact(@actor, @other, email: shared, name: "Contato Compartilhado")
+    login("dona@alfa.test")
+    page = get_ok("/clientes/#{@other.id}")
+
+    assert_includes page, "Se o e-mail tiver convite pendente em outro cliente, cancele-o antes na página daquele cliente."
+    post_form "/clientes/#{@other.id}/portal/convites", { "contato_id" => neighbour.id }
+    follow_redirect!
+
+    assert_includes last_response.body, "Convite não enviado: este e-mail tem convite pendente ao portal para o cliente Cliente &lt;b&gt;Portal&lt;/b&gt;"
+    refute_includes last_response.body, "<b>Portal</b>"
+    assert_equal [[pending.id, "f"]], owner_query("SELECT id, revoked_at IS NOT NULL AS revoked FROM portal_invitations").map(&:values)
+  end
+
   def test_logged_in_account_links_the_invitation_with_csrf
     beta = create_organization(name: "Locadora Beta", email: "compras@beta.test")
     token = invite_and_deliver(@actor, @customer, portal_contact(@actor, @customer, email: "compras@beta.test"))

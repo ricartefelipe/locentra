@@ -24,7 +24,9 @@ module Locentra
       end
 
       # Convite de acesso ao portal para um contato do cliente. O token é emitido pelo worker no envio
-      # do e-mail; a coluna recebe um valor descartável até lá.
+      # do e-mail; a coluna recebe um valor descartável até lá. Convites em aberto do mesmo e-mail
+      # substituídos pelo novo são cancelados com auditoria própria (`reason: replaced`); um convite
+      # pendente de outro cliente impede o novo (Domain::Portal::Rules.replaceable!).
       class InviteContact
         def initialize(uow:, portal:, customers:, limits:, notifier:, audit:, clock:, ids:)
           @uow = uow
@@ -49,12 +51,26 @@ module Locentra
             invitation = PT::Invitation.issue(id: @ids.uuid, organization_id: tx.tenant_id!, customer: customer, contact: contact,
                                               invited_by: current.user_id, now: now)
             PT::Rules.grantable!(@portal.active_customer_for_email(tx, invitation.email), customer.id)
-            @portal.revoke_pending_invitations(tx, invitation.email, current.user_id, now)
+            replaced = replace(tx, current, invitation, now)
             @portal.insert_invitation(tx, invitation, Identity::Tokens.digest("#{tx.tenant_id!}.#{@ids.token(32)}"))
             @notifier.portal_invitation(tx, invitation)
             @audit.record(tx, current, "portal.invited", "customer", customer.id,
-                          "invitation_id" => invitation.id, "contact_id" => contact.id, "email" => invitation.email)
+                          "invitation_id" => invitation.id, "contact_id" => contact.id, "email" => invitation.email,
+                          "replaced_invitation_ids" => replaced.map(&:id))
             invitation
+          end
+        end
+
+        private
+
+        # Cancela os convites em aberto substituídos (liberando o índice de convite pendente único) e
+        # registra cada cancelamento no cliente do convite cancelado.
+        def replace(tx, current, invitation, now)
+          open = @portal.lock_open_invitations_for_email(tx, invitation.email)
+          PT::Rules.replaceable!(open, invitation.customer_id, now) { |id| @customers.find(tx, id).name }.each do |old|
+            @portal.revoke_invitation(tx, old.revoke(now), current.user_id)
+            @audit.record(tx, current, "portal.invitation_cancelled", "customer", old.customer_id,
+                          "invitation_id" => old.id, "email" => old.email, "reason" => "replaced", "replaced_by" => invitation.id)
           end
         end
       end
@@ -76,7 +92,7 @@ module Locentra
             cancelled = invitation.revoke(@clock.now)
             @portal.revoke_invitation(tx, cancelled, current.user_id)
             @audit.record(tx, current, "portal.invitation_cancelled", "customer", invitation.customer_id,
-                          "invitation_id" => invitation.id, "email" => invitation.email)
+                          "invitation_id" => invitation.id, "email" => invitation.email, "reason" => "cancelled")
             cancelled
           end
         end

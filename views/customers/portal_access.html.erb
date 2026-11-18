@@ -71,7 +71,7 @@
         <select id="portal-contato" name="contato_id" required>
           <% contacts.each do |contact| %><option value="<%= contact.id %>"><%= contact.name %> (<%= contact.email %>)</option><% end %>
         </select>
-        <p class="muted">O convite é enviado por e-mail com link válido por 7 dias.<% unless pending.empty? %> Um novo convite para o mesmo e-mail substitui o pendente.<% end %></p>
+        <p class="muted">O convite é enviado por e-mail com link válido por 7 dias.<% unless pending.empty? %> Um novo convite para o mesmo e-mail substitui o pendente deste cliente.<% end %> Se o e-mail tiver convite pendente em outro cliente, cancele-o antes na página daquele cliente.</p>
         <button type="submit" class="primary">Enviar convite</button>
       </form>
     <% end %>

@@ -17,12 +17,14 @@ module Locentra
           SQL
         end
 
-        # Cancela convites ainda não aceitos do e-mail na organização (inclusive os vencidos), liberando
-        # o índice de convite pendente único.
-        def revoke_pending_invitations(tx, email, by, now)
-          tx.execute(<<~SQL, [tx.tenant_id!, email, by, now])
-            UPDATE portal_invitations SET revoked_at = $4, revoked_by = $3
-             WHERE organization_id = $1 AND email = $2 AND accepted_at IS NULL AND revoked_at IS NULL
+        # Convites do e-mail na organização ainda não aceitos nem cancelados (inclusive os vencidos,
+        # que continuam ocupando o índice de convite pendente único), bloqueados para substituição.
+        def lock_open_invitations_for_email(tx, email)
+          tx.query(<<~SQL, [tx.tenant_id!, email]).map { |row| map_invitation(row) }
+            SELECT #{INVITATION_COLUMNS} FROM portal_invitations i
+             WHERE i.organization_id = $1 AND i.email = $2 AND i.accepted_at IS NULL AND i.revoked_at IS NULL
+             ORDER BY i.created_at, i.id
+               FOR UPDATE
           SQL
         end
 
