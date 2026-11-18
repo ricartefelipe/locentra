@@ -235,7 +235,8 @@ module Locentra
 
       # Cancelamento com política explícita: multa calculada com CancellationPolicy sobre o total
       # contratado, gravada como ajuste 'cancellation_fee' (quando positiva), reserva cancelada na
-      # mesma transação e contrato marcado como cancelado.
+      # mesma transação e contrato marcado como cancelado. Depois da retirada (reserva em andamento
+      # ou concluída), o cancelamento é recusado antes de qualquer cálculo ou gravação.
       class CancelContract
         def initialize(uow:, contracts:, reservations:, cancel_reservation:, audit:, events:, clock:, ids:)
           @uow = uow
@@ -253,8 +254,9 @@ module Locentra
             Authorizer.authorize!(current, "reservations.cancel")
             now = @clock.now
             contract = Scope.lock!(@contracts, tx, current, contract_id)
+            reservation = @reservations.lock(tx, contract.reservation_id)
             preview = Scope.cancellation_preview(contract, @contracts.amendments(tx, contract.id), now)
-            cancelled = contract.cancel(now: now, reason: reason, fee: preview.fee)
+            cancelled = contract.cancel(now: now, reason: reason, fee: preview.fee, reservation: reservation)
             record_fee(tx, current, contract, preview, now) if preview.fee.positive?
             @cancel_reservation.call(current, contract.reservation_id,
                                      reason: "Contrato #{contract.code} cancelado: #{cancelled.cancellation_reason}"[0, 500], tx: tx,
@@ -277,7 +279,8 @@ module Locentra
         end
       end
 
-      # Encerramento após a conclusão da reserva (devolução registrada).
+      # Encerramento após a conclusão da reserva (devolução registrada). Contrato sem aceite registrado
+      # também é encerrado, com essa indicação na auditoria.
       class CloseContract
         def initialize(uow:, contracts:, reservations:, audit:, clock:)
           @uow = uow
@@ -299,7 +302,8 @@ module Locentra
 
             closed = contract.close(now)
             @contracts.update(tx, closed, now)
-            @audit.record(tx, current, "contract.closed", "contract", contract.id, "code" => contract.code)
+            @audit.record(tx, current, "contract.closed", "contract", contract.id, "code" => contract.code,
+                                                                                   "accepted" => !contract.activated_at.nil?)
             closed
           end
         end
@@ -335,9 +339,10 @@ module Locentra
           @uow.run(actor, Scope.read_permission(actor)) do |tx, current|
             contract = Scope.find!(@contracts, tx, current, contract_id)
             amendments = @contracts.amendments(tx, contract.id)
+            reservation = @reservations.find(tx, contract.reservation_id)
             { contract: contract, documents: @contracts.documents(tx, contract.id), amendments: amendments,
-              reservation: @reservations.find(tx, contract.reservation_id), current_total: Scope.total_with_amendments(contract, amendments),
-              preview: contract.open? ? Scope.cancellation_preview(contract, amendments, @clock.now) : nil }
+              reservation: reservation, current_total: Scope.total_with_amendments(contract, amendments),
+              preview: contract.cancellable_with?(reservation) ? Scope.cancellation_preview(contract, amendments, @clock.now) : nil }
           end
         end
       end

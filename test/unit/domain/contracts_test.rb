@@ -59,14 +59,38 @@ class ContractsDomainTest < UnitTest
   end
 
   def test_cancellation_records_reason_and_fee
-    cancelled = issued.cancel(now: now, reason: " Evento   adiado ", fee: Domain::Money.new(6_000))
+    cancelled = issued.cancel(now: now, reason: " Evento   adiado ", fee: Domain::Money.new(6_000), reservation: reservation)
 
     assert_equal ["cancelled", "Evento adiado", 6_000, now], [cancelled.status, cancelled.cancellation_reason, cancelled.cancellation_fee_cents,
                                                               cancelled.cancelled_at]
-    assert_raises(Domain::ValidationError) { issued.cancel(now: now, reason: "", fee: Domain::Money.zero) }
-    assert_raises(Domain::InvalidTransition) { cancelled.cancel(now: now, reason: "de novo", fee: Domain::Money.zero) }
+    assert_raises(Domain::ValidationError) { issued.cancel(now: now, reason: "", fee: Domain::Money.zero, reservation: reservation) }
+    assert_raises(Domain::InvalidTransition) do
+      cancelled.cancel(now: now, reason: "de novo", fee: Domain::Money.zero, reservation: reservation(status: "cancelled"))
+    end
     assert_equal 20_000, issued.contracted_total.cents
     assert_equal rental.starts_at, issued.starts_at
+  end
+
+  # Depois da retirada o contrato não é cancelado (a reserva em andamento só pode ser concluída): a
+  # recusa é explícita e ocorre antes de qualquer gravação.
+  def test_cancellation_is_refused_after_pickup
+    %w[in_progress completed].each do |status|
+      started = reservation(status: status)
+
+      refute issued.cancellable_with?(started)
+      error = assert_raises(Domain::Conflict) { issued.cancel(now: now, reason: "Desistência", fee: Domain::Money.zero, reservation: started) }
+      assert_equal "contract_not_cancellable", error.code
+      assert_includes error.message, "encerrado após a devolução"
+    end
+    assert issued.cancellable_with?(reservation)
+    refute issued.close(now).cancellable_with?(reservation)
+  end
+
+  def test_issued_contract_without_acceptance_can_be_closed
+    closed = issued.close(now)
+
+    assert_equal ["closed", now, nil], [closed.status, closed.closed_at, closed.activated_at]
+    refute_predicate closed, :open?
   end
 
   def test_transition_table_is_enforced_for_every_pair

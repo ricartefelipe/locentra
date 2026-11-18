@@ -12,8 +12,10 @@ module Locentra
         "cancelled" => "Cancelado"
       }.freeze
 
+      # `issued -> closed`: locação concluída sem aceite registrado (o encerramento é auditado com essa
+      # indicação). O cancelamento exige reserva ainda cancelável (antes da retirada).
       TRANSITIONS = {
-        "issued" => %w[active cancelled],
+        "issued" => %w[active closed cancelled],
         "active" => %w[closed cancelled],
         "closed" => [],
         "cancelled" => []
@@ -90,9 +92,19 @@ module Locentra
           with(current_document_version: document_version, lock_version: lock_version + 1)
         end
 
-        def cancel(now:, reason:, fee:)
-          transition("cancelled").with(cancelled_at: now, cancellation_reason: Organizations::Text.required(reason, "motivo", max: 500),
-                                       cancellation_fee_cents: fee.cents)
+        # Depois da retirada (reserva em andamento ou concluída), o contrato não é mais cancelado: é
+        # encerrado após a devolução.
+        def cancellable_with?(reservation) = TRANSITIONS.fetch(status).include?("cancelled") && reservation.cancellable?
+
+        def cancel(now:, reason:, fee:, reservation:)
+          cancelled = transition("cancelled")
+          unless reservation.cancellable?
+            raise Conflict.new("A reserva #{reservation.code} está #{reservation.status_label.downcase}: o contrato não pode mais ser " \
+                               "cancelado e deve ser encerrado após a devolução", code: "contract_not_cancellable")
+          end
+
+          cancelled.with(cancelled_at: now, cancellation_reason: Organizations::Text.required(reason, "motivo", max: 500),
+                         cancellation_fee_cents: fee.cents)
         end
 
         def close(now) = transition("closed").with(closed_at: now)

@@ -170,7 +170,7 @@ CREATE TABLE contracts (
   FOREIGN KEY (organization_id, quote_id) REFERENCES quotes (organization_id, id),
   CHECK ((status = 'cancelled') = (cancelled_at IS NOT NULL)),
   CHECK ((status = 'closed') = (closed_at IS NOT NULL)),
-  CHECK (status = 'issued' OR status = 'cancelled' OR activated_at IS NOT NULL)
+  CHECK (status <> 'active' OR activated_at IS NOT NULL)
 );
 CREATE INDEX contracts_org_status_idx ON contracts (organization_id, status, issued_at DESC);
 CREATE INDEX contracts_customer_idx ON contracts (organization_id, customer_id, issued_at DESC);

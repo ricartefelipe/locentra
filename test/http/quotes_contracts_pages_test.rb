@@ -193,6 +193,31 @@ class QuotesContractsPagesTest < HttpTest
     refute_includes body, "não enviada (interna)"
   end
 
+  # Depois da retirada a tela do contrato explica que não há mais cancelamento; concluída a locação,
+  # o encerramento é oferecido mesmo sem aceite registrado.
+  def test_contract_screen_after_pickup_offers_closing_instead_of_cancelling
+    reservation = reserve(@actor, @customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
+    contract = uc(:issue_contract).call(@actor, reservation.id)
+    owner_query("UPDATE reservations SET status = 'in_progress' WHERE id = $1", [reservation.id])
+    body = get_ok("/contratos/#{contract.id}")
+
+    assert_includes body, "não pode mais ser cancelado"
+    refute_includes body, "Prévia para cancelamento"
+    refute_includes body, "Encerrar contrato"
+    post_form "/contratos/#{contract.id}/cancelar", { "motivo" => "Desistência" }
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "encerrado após a devolução"
+    owner_query("UPDATE reservations SET status = 'completed' WHERE id = $1", [reservation.id])
+    body = get_ok("/contratos/#{contract.id}")
+
+    assert_includes body, "Nenhum aceite eletrônico simples foi registrado"
+    post_form "/contratos/#{contract.id}/encerrar", {}
+    follow_redirect!
+
+    assert_includes last_response.body, "Contrato encerrado"
+  end
+
   def test_attendant_sees_quotes_and_contracts_without_cancellation
     reservation = reserve(@actor, @customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
     contract = uc(:issue_contract).call(@actor, reservation.id)

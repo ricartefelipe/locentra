@@ -224,6 +224,30 @@ class ContractsFlowTest < DatabaseTest
     end
   end
 
+  # Depois da retirada o contrato não é cancelado: a recusa é explícita e nada é gravado (sem multa).
+  # Concluída a locação, o contrato é encerrado, inclusive sem aceite registrado.
+  def test_contract_after_pickup_is_closed_instead_of_cancelled
+    contract = issue
+    owner_query("UPDATE reservations SET status = 'in_progress' WHERE id = $1", [@reservation.id])
+    @clock.travel_to(t("2026-03-10T09:00:00Z"))
+
+    error = assert_raises(D::Conflict) { uc(:cancel_contract).call(@actor, contract.id, reason: "Desistência") }
+    assert_equal "contract_not_cancellable", error.code
+    data = uc(:get_contract).call(@actor, contract.id)
+
+    assert_nil data[:preview], "sem prévia de multa para contrato que não pode mais ser cancelado"
+    assert_equal "issued", data[:contract].status
+    assert_empty uc(:get_reservation).call(@actor, @reservation.id)[:pricing][:adjustments]
+    assert_equal "in_progress", data[:reservation].status
+    owner_query("UPDATE reservations SET status = 'completed' WHERE id = $1", [@reservation.id])
+    closed = uc(:close_contract).call(@actor, contract.id)
+
+    assert_equal ["closed", nil], [closed.status, closed.activated_at]
+    details = JSON.parse(owner_query("SELECT details FROM audit_events WHERE action = 'contract.closed'").first["details"])
+
+    refute details["accepted"], "o encerramento registra que não houve aceite"
+  end
+
   def test_contract_from_converted_quote_carries_quote_terms
     other = period("2026-03-20T08:00:00Z", "2026-03-21T08:00:00Z")
     quote = uc(:create_quote).call(@actor, { customer_id: @customer.id, branch_id: @branch.id, period: other, lines: [line(@camera, 1)],

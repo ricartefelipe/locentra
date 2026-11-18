@@ -134,10 +134,16 @@
       <p class="muted">O cancelamento exige as permissões de contratos e de cancelamento de reservas.</p>
     <% end %>
   </section>
+<% elsif c.open? %>
+  <section class="panel" aria-labelledby="cancelamento-titulo">
+    <h2 id="cancelamento-titulo">Cancelamento</h2>
+    <p class="empty">A reserva está <%= r.status_label.downcase %>: depois da retirada o contrato não pode mais ser cancelado e é encerrado após a devolução.</p>
+  </section>
 <% end %>
-<% if c.status == "active" && r.status == "completed" && can?("contracts.write") %>
-  <section class="panel">
-    <h2>Encerramento</h2>
+<% if c.open? && r.status == "completed" && can?("contracts.write") %>
+  <section class="panel" aria-labelledby="encerramento-titulo">
+    <h2 id="encerramento-titulo">Encerramento</h2>
+    <% if c.status == "issued" %><p class="notice" role="status">Nenhum aceite eletrônico simples foi registrado para este contrato; o encerramento fica registrado sem aceite.</p><% end %>
     <form method="post" action="/contratos/<%= c.id %>/encerrar"><%= csrf_field %><button type="submit">Encerrar contrato</button></form>
   </section>
 <% end %>
