@@ -21,8 +21,8 @@ compostas para tabelas do mesmo tenant e RLS forçada (`app_enable_tenant_rls`).
 
 | Tabela | Conteúdo | Proteções |
 |---|---|---|
-| `quotes` | Código `Q-000001`, cliente, filial, situação, `current_version`, `approved_version`, `hold_policy`, `hold_minutes`, `hold_reservation_id` (bloqueio do envio), `reservation_id` (conversão), dados de aprovação (tipo, usuário, nome, IP, instante), rejeição e expiração, `lock_version` | CHECKs de coerência (aprovado ⇔ versão/instante/tipo de aprovação; convertido ⇔ reserva); `DELETE` revogado |
-| `quote_versions` | Número da versão, filial, período `[início, fim)`, `valid_until`, itens precificados (`items`), resumo de preços (`pricing`), condições (`terms`), desconto manual, caução e total | Somente inserção (`UPDATE`/`DELETE` revogados) |
+| `quotes` | Código `Q-000001`, cliente, filial, situação, `current_version`, `approved_version`, `hold_policy`, `hold_minutes`, `hold_reservation_id` (bloqueio do envio), `reservation_id` (conversão), dados de aprovação (tipo, usuário, nome, IP, instante), rejeição e expiração, `lock_version` | CHECKs de coerência (aprovado ⇔ versão/instante/tipo de aprovação; convertido ⇔ reserva); trigger `quotes_protect_history`: organização, cliente, criação e número definitivo fixos, versão atual só avança, aprovação registrada imutável (único destino: conversão) e orçamento convertido imutável; `DELETE` revogado |
+| `quote_versions` | Número da versão, filial, período `[início, fim)`, `valid_until`, itens precificados (`items`), resumo de preços (`pricing`), condições (`terms`), desconto manual, caução, total e `sent_at` (envio da versão) | Conteúdo imutável: `UPDATE` revogado exceto na coluna `sent_at`, e o trigger `quote_versions_protect` só permite preenchê-la uma vez; `DELETE` revogado |
 | `reservations` (alteração) | FK composta `(organization_id, quote_id)` para `quotes` e índice único parcial `reservations_quote_key (organization_id, quote_id) WHERE quote_id IS NOT NULL` | No máximo uma reserva por orçamento |
 | `contracts` | Código `C-000001`, `reservation_id` único, cliente, orçamento de origem, situação, `terms_snapshot`, `current_document_version`, instantes de emissão, vigência, encerramento e cancelamento, motivo e multa | Trigger `contracts_protect_terms`: termos, partes, reserva, emissão e número definitivo imutáveis; contrato encerrado ou cancelado não muda; `DELETE` revogado |
 | `contract_documents` | Versão, motivo (`issue`/`amendment`), `attachment_id` (FK composta para `attachments`), `sha256`, `data_snapshot`, `generated_at` e campos de aceite: `accepted_at`, `accepted_by_name`, `accepted_by_document`, `accepted_ip`, `user_agent`, `accepted_via`, `accepted_by_user_id`, `acceptance_statement` | Trigger `contract_documents_immutable`: somente os campos de aceite podem ser preenchidos, uma única vez; `DELETE` revogado |
@@ -48,8 +48,12 @@ Contrato (`Domain::Contracts::TRANSITIONS`):
 
 | De | Para |
 |---|---|
-| `issued` (emitido, aguardando aceite) | `active` (primeiro aceite), `cancelled` |
+| `issued` (emitido, aguardando aceite) | `active` (primeiro aceite), `closed` (locação concluída sem aceite registrado), `cancelled` |
 | `active` (vigente) | `closed` (após a conclusão da reserva), `cancelled` |
+
+O cancelamento (`issued`/`active` → `cancelled`) exige, além da transição, que a reserva ainda possa ser
+cancelada (solicitada, em bloqueio ou confirmada): depois da retirada o contrato é encerrado após a
+devolução.
 | `closed`, `cancelled` | — |
 
 ## Regras
@@ -74,7 +78,15 @@ Contrato (`Domain::Contracts::TRANSITIONS`):
 - `hold_on_send`: o envio cria, na mesma transação, uma reserva em bloqueio temporário (5 a 1440
   minutos) com o snapshot de preços da versão enviada, vinculada por `quotes.hold_reservation_id`. Sem
   disponibilidade, o envio é recusado e o orçamento continua em rascunho. Nova versão, rejeição e
-  expiração cancelam o bloqueio ainda ativo.
+  expiração cancelam o bloqueio ainda ativo; a decisão é tomada sobre a linha da reserva bloqueada
+  (`FOR UPDATE`), de modo que um bloqueio expirado pela varredura ou cancelado por outra transação
+  nesse meio-tempo é mantido como está, sem erro.
+- Enquanto o orçamento está enviado ou aprovado (ainda não convertido), a reserva de bloqueio pertence
+  a ele (`Reservations::ChangeGuard`): a confirmação direta é recusada (`Conflict` `quote_hold`; a
+  confirmação é feita pela conversão do orçamento aprovado), assim como o reagendamento e a extensão
+  (exigem nova versão do orçamento). O cancelamento direto é permitido e equivale ao vencimento do
+  bloqueio: a conversão cria uma reserva nova a partir do snapshot. A tela da reserva aponta o
+  orçamento e oculta as ações recusadas; a API (`POST /api/v1/reservations/{id}/confirm`) responde 409.
 
 ### Aprovação
 
@@ -86,6 +98,10 @@ Contrato (`Domain::Contracts::TRANSITIONS`):
   próprio cliente), usuário, nome, IP da requisição e instante. O caso de uso aceita ator `customer`
   com a permissão `portal.access`, restrito ao próprio `customer_id` (outro cliente recebe "não
   encontrado"). A rejeição segue a mesma regra de ator.
+- O envio registra `quote_versions.sent_at`. O ator `customer` só enxerga orçamentos com alguma versão
+  enviada (rascunho nunca enviado resulta em "não encontrado", inclusive para aprovar ou rejeitar) e,
+  deles, somente as versões enviadas: uma nova versão em preparação não aparece até ser enviada
+  (`GetQuote` devolve `current: nil`) e a lista do cliente mostra o total da última versão enviada.
 
 ### Conversão idempotente
 
@@ -95,8 +111,12 @@ Contrato (`Domain::Contracts::TRANSITIONS`):
    rejeita a segunda inserção; a criação roda sob savepoint, a tentativa é desfeita e a reserva já
    gravada é devolvida.
 3. Com bloqueio temporário vigente, a própria reserva bloqueada é confirmada (com revalidação) e
-   vinculada ao orçamento. Sem bloqueio vigente, uma reserva confirmada é criada com
-   `source = 'quote'`.
+   vinculada ao orçamento. A reserva de bloqueio é lida com `FOR UPDATE` e a decisão vale para a linha
+   bloqueada: expirada ou cancelada (inclusive por transação concluída enquanto a conversão aguardava
+   o lock), uma reserva confirmada é criada com `source = 'quote'`. Um bloqueio que diverge da versão
+   aprovada (período, itens ou total, o que só ocorre por alteração fora da aplicação) não é confirmado
+   com os preços dessa versão: `Conflict` `quote_hold_mismatch`, com orientação para cancelar o
+   bloqueio e converter novamente.
 4. `CreateReservation` aceita `pricing_snapshot: { items:, summary: }`: a reserva usa os itens e o resumo
    de preços da versão aprovada (inclusive após mudança de preço no catálogo), desde que itens e
    período coincidam exatamente com o snapshot.
@@ -126,10 +146,14 @@ Contrato (`Domain::Contracts::TRANSITIONS`):
   tabela contratada, o aditivo registra `amount_delta_cents` e uma nova versão do PDF é gerada.
 - Extensão que invade outra reserva gera `Unavailable` com a reserva conflitante e desfaz tudo: nenhum
   aditivo, ajuste, documento ou anexo é gravado.
-- Com contrato em aberto, `RescheduleReservation`, `ExtendReservation` e `CancelReservation` chamados
-  diretamente são recusados (`Conflict` `contract_amendment_required`) com mensagem para usar o
-  aditivo ou o cancelamento do contrato (`Contracts::ReservationGuard`). A composição com `tx:` pelos
-  casos de uso de contrato não passa por essa verificação.
+- Com contrato em aberto, `RescheduleReservation`, `ExtendReservation` e `CancelReservation` são
+  recusados (`Conflict` `contract_amendment_required`) com mensagem para usar o aditivo ou o
+  cancelamento do contrato (`Reservations::ChangeGuard`). A verificação vale para qualquer chamada,
+  com ou sem `tx:` (por exemplo, `POST /api/v1/reservations/{id}/cancel`, que compõe o caso de uso na
+  transação de idempotência). Somente os casos de uso do próprio contrato a dispensam, de forma
+  explícita: `AmendContract` chama `ExtendReservation` com `via: :contract` e `CancelContract` chama
+  `CancelReservation` com `via: :contract`. Da mesma forma, `ConvertQuote` e a liberação do bloqueio
+  usam `via: :quote`.
 
 ### Cancelamento
 
@@ -141,7 +165,12 @@ Contrato (`Domain::Contracts::TRANSITIONS`):
   cancela a reserva (`CancelReservation` com `tx:`, liberando alocações), marca o contrato como
   cancelado com motivo e multa, audita e publica `contract.cancelled`. A tela mostra a prévia
   (`PreviewCancellation`) e a multa é recalculada no instante da confirmação.
-- `CloseContract` encerra o contrato vigente somente quando a reserva está concluída.
+- Depois da retirada (reserva em andamento ou concluída), `CancelContract` recusa o cancelamento antes de
+  qualquer cálculo ou gravação (`Conflict` `contract_not_cancellable`); a tela do contrato deixa de
+  mostrar a prévia e o formulário e explica que o contrato é encerrado após a devolução.
+- `CloseContract` encerra o contrato em aberto somente quando a reserva está concluída. Contrato sem
+  aceite registrado também é encerrado (`issued` → `closed`); a auditoria registra `accepted: false` e a
+  tela avisa que o encerramento fica sem aceite.
 
 ## Permissões
 
@@ -199,6 +228,17 @@ A tela do cliente tem o atalho "Novo orçamento". Os formulários têm labels, m
 - **Número do contrato antes do PDF.** Diferente da reserva e do orçamento, o número do contrato é
   necessário no documento; o lock do contador dura da atribuição até o commit, que inclui a geração do
   PDF (operação local e curta).
+- **Dispensa explícita das verificações de vínculo.** Os casos de uso de reserva não deduzem da
+  presença de `tx:` que a chamada vem de um contrato ou orçamento: a API também compõe com `tx:`. O
+  parâmetro `via:` (`:quote` ou `:contract`) dispensa somente a verificação do próprio vínculo.
+- **Bloqueio do orçamento protegido em vez de liberado após confirmação.** Confirmar diretamente a
+  reserva de bloqueio contornaria a aprovação e deixaria uma reserva confirmada sem vínculo depois de
+  nova versão, rejeição ou expiração; por isso a confirmação só ocorre pela conversão.
+- **Envio registrado por versão.** `sent_at` em `quote_versions` (privilégio de coluna e trigger) mantém o
+  conteúdo da versão imutável e permite expor ao cliente somente o que lhe foi enviado.
+- **Encerramento sem aceite.** Sem o módulo de retirada não há como exigir o aceite antes da entrega;
+  o contrato emitido e nunca aceito pode ser encerrado após a conclusão, com a indicação auditada, para
+  não ficar aberto indefinidamente.
 - **Fontes padrão do PDF.** Sem dependência de fontes TrueType na imagem; textos são convertidos para
   Windows-1252 (cobre o português) e caracteres fora dela viram "?".
 
@@ -212,7 +252,8 @@ A tela do cliente tem o atalho "Novo orçamento". Os formulários têm labels, m
 - O único tipo de aditivo é a extensão de prazo. Antecipação, troca de itens ou de condições exigem
   cancelamento e novo contrato.
 - O encerramento depende da conclusão da reserva, que será registrada pelo módulo de retirada e
-  devolução.
+  devolução (nos testes, a situação é alterada diretamente no banco). O aceite antes da retirada não é
+  exigido.
 - Se a transação falhar depois de o PDF ser gravado no armazenamento (por exemplo, em uma nova tentativa
   após deadlock), o arquivo pode ficar sem registro em `attachments`; ele não é acessível pela aplicação.
 
@@ -228,6 +269,7 @@ docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/contr
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/quotes_contracts_worker_test.rb
 # Concorrência (duas threads sincronizadas por Barrier)
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/concurrency/quote_conversion_race_test.rb
+docker compose run --rm dev bundle exec ruby -Ilib -Itest test/concurrency/quote_hold_race_test.rb
 # Telas (Rack::Lint)
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/http/quotes_contracts_pages_test.rb
 # Suíte completa com metas de cobertura
@@ -236,9 +278,14 @@ docker compose run --rm -e COVERAGE_CHECK=1 dev bundle exec rake test:all
 
 Casos cobertos: versões imutáveis e aprovação da versão correta; orçamento expirado (aprovação e
 varredura); bloqueio no envio, liberação na nova versão e envio sem disponibilidade; conversão
-idempotente sequencial e concorrente (lock do orçamento e índice único); snapshot preservado após
-alteração de preço do catálogo; PDF iniciando com `%PDF` e SHA-256 registrado igual ao do arquivo;
+idempotente sequencial e concorrente (lock do orçamento e índice único); bloqueio do orçamento
+confirmado somente pela conversão, protegido contra reagendamento e extensão diretos (também pela
+API), liberado na rejeição e decidido sobre a linha bloqueada sob concorrência com a varredura e com o
+cancelamento direto; bloqueio divergente da versão aprovada recusado; snapshot de preços recusado
+quando itens ou período não correspondem; snapshot preservado após alteração de preço do catálogo; PDF iniciando com `%PDF` e SHA-256 registrado igual ao do arquivo;
 aditivo de extensão com ajuste e nova versão do documento; extensão que invade outra reserva recusada
-sem aditivo; reagendamento, extensão e cancelamento diretos recusados; faixas da política de
-cancelamento; aceite único; imutabilidade no banco; isolamento entre organizações; ator `customer`
-restrito ao próprio cadastro; e-mails e expiração pelo worker; renderização das telas sob Rack::Lint.
+sem aditivo; reagendamento, extensão e cancelamento diretos recusados (cancelamento também pela API);
+faixas da política de cancelamento; cancelamento recusado após a retirada e encerramento sem aceite;
+aceite único; imutabilidade no banco (documentos, termos, aditivos, envios de versão, aprovação e
+orçamento convertido); isolamento entre organizações; ator `customer` restrito ao próprio cadastro e às
+versões enviadas; e-mails e expiração pelo worker; renderização das telas sob Rack::Lint.
