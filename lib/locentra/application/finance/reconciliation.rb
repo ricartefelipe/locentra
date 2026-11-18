@@ -38,7 +38,7 @@ module Locentra
           context = @uow.run(actor, "finance.write") { |tx, _| start(tx) }
           return :no_account unless context
 
-          gathered = guarded(actor, context) { gather(context) }
+          gathered = guarded(actor, context) { gather(actor, context) }
           return context[:report_id] unless gathered
 
           begin
@@ -67,23 +67,24 @@ module Locentra
         end
 
         # Chamadas ao provedor, fora de transação.
-        def gather(context)
+        def gather(actor, context)
           account = context[:account]
           listed_at = @clock.now
-          listing = @providers.for(account["provider"]).list_charges(account, since: context[:since])
+          listing = @providers.for(account["provider"], actor: actor).list_charges(account, since: context[:since])
           listed = listing.charges.to_h { |c| [c.external_reference.to_s, true] }
           unknown = context[:rows].select { |p| p.status == "submission_unknown" && !listed.key?(p.external_reference) }
-          lookups = unknown.to_h { |p| [p.id, Lookup.perform(@providers, account, p, @clock)] }
-          legacy, failures = legacy_lookups(context)
+          lookups = unknown.to_h { |p| [p.id, Lookup.perform(@providers, account, p, @clock, actor: actor)] }
+          legacy, failures = legacy_lookups(actor, context)
           { listing: listing, listed_at: listed_at, lookups: lookups.merge(legacy), legacy_checked: legacy.size, legacy_failures: failures }
         end
 
         # Credenciais de conta desativada podem ter sido revogadas: a falha de uma consulta não
         # interrompe a conciliação da conta ativa.
-        def legacy_lookups(context)
+        def legacy_lookups(actor, context)
           failures = 0
           found = context[:legacy].each_with_object({}) do |payment, result|
-            result[payment.id] = Lookup.perform(@providers, context[:legacy_accounts].fetch(payment.provider_account_id), payment, @clock)
+            account = context[:legacy_accounts].fetch(payment.provider_account_id)
+            result[payment.id] = Lookup.perform(@providers, account, payment, @clock, actor: actor)
           rescue ProviderError
             failures += 1
           end

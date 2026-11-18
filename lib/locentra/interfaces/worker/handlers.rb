@@ -51,7 +51,7 @@ module Locentra
         end
 
         def deliver_webhook(job)
-          @system.services[:deliver_webhook].call(job.organization_id, job.payload.fetch("delivery_id"))
+          @system.services[:deliver_webhook].call(job.organization_id, job.payload.fetch("delivery_id"), correlation_id: job.correlation_id)
         end
 
         def email_confirmation(job)

@@ -224,7 +224,8 @@ module Locentra
         # persistido e deduplicado antes de qualquer processamento.
         class PaymentWebhooksController < Controller
           def receive(ctx)
-            result = uc(:ingest_payment_webhook).call(ctx.param(:conta_id), token: ctx.env["HTTP_ASAAS_ACCESS_TOKEN"].to_s, body: ctx.body_bytes)
+            result = uc(:ingest_payment_webhook).call(ctx.param(:conta_id), token: ctx.env["HTTP_ASAAS_ACCESS_TOKEN"].to_s, body: ctx.body_bytes,
+                                                                            request_id: ctx.request_id)
             json(200, { "status" => result.to_s })
           rescue Application::Finance::WebhookUnauthorized
             json(401, { "error" => { "code" => "unauthorized", "message" => "token de webhook inválido", "details" => {}, "request_id" => ctx.request_id } })

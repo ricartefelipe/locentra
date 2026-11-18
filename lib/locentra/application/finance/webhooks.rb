@@ -6,7 +6,8 @@ module Locentra
       # Recebimento de webhooks do provedor. O token é comparado em tempo constante com o resumo
       # armazenado da conta; o evento é persistido em inbound_webhooks (único por organização,
       # provedor e identificador do evento) ANTES de qualquer processamento, que ocorre na tarefa
-      # 'payments.process_webhook'. Eventos repetidos não geram nova tarefa.
+      # 'payments.process_webhook'. Eventos repetidos não geram nova tarefa. O request_id da requisição
+      # que entregou o evento (ou da operação que o simulou) vira o correlation_id da tarefa.
       class IngestWebhook
         def initialize(uow:, accounts:, inbound:, providers:, queue:, clock:, ids:)
           @uow = uow
@@ -19,7 +20,7 @@ module Locentra
         end
 
         # Requisição pública: retorna :accepted ou :duplicate; WebhookUnauthorized sem token válido.
-        def call(account_id, token:, body:)
+        def call(account_id, token:, body:, request_id: nil)
           raise WebhookUnauthorized, "conta inválida" unless Domain::Identifier.valid?(account_id)
 
           @uow.anonymous do |tx|
@@ -28,18 +29,18 @@ module Locentra
             raise WebhookUnauthorized, "token inválido" unless authorized && account["active"]
 
             tx.switch_tenant!(account["organization_id"])
-            store(tx, account, body)
+            store(tx, account, body, request_id)
           end
         end
 
         # Evento gerado internamente (simulador local), pelo mesmo caminho de persistência e deduplicação.
-        def accept(account, body)
-          @uow.anonymous(tenant_id: account["organization_id"]) { |tx| store(tx, account, body) }
+        def accept(account, body, request_id: nil)
+          @uow.anonymous(tenant_id: account["organization_id"]) { |tx| store(tx, account, body, request_id) }
         end
 
         private
 
-        def store(tx, account, body)
+        def store(tx, account, body, request_id)
           event = @providers.for(account["provider"]).parse_webhook(body)
           id = @ids.uuid
           inserted = @inbound.insert(tx, "id" => id, "provider" => account["provider"], "provider_account_id" => account["id"],
@@ -47,7 +48,7 @@ module Locentra
                                          "received_at" => @clock.now)
           return :duplicate unless inserted
 
-          @queue.enqueue(tx, "payments.process_webhook", { "inbound_webhook_id" => id }, priority: 25)
+          @queue.enqueue(tx, "payments.process_webhook", { "inbound_webhook_id" => id }, priority: 25, correlation_id: request_id)
           :accepted
         end
       end
@@ -158,7 +159,7 @@ module Locentra
 
             [found, @accounts.find(tx, found.provider_account_id)]
           end
-          @ingest.accept(account, @simulator.settle(account, payment.provider_payment_id))
+          @ingest.accept(account, @simulator.settle(account, payment.provider_payment_id), request_id: actor.request_id)
         end
       end
     end

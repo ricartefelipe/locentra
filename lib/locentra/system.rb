@@ -84,7 +84,9 @@ module Locentra
         storage: I::Storage::Local.new(root: config.storage_root),
         mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__)),
         contract_renderer: I::Documents::ContractPdf.new,
-        reservation_guard: A::Reservations::ChangeGuard.new(contracts: repos[:contracts], quotes: repos[:quotes])
+        reservation_guard: A::Reservations::ChangeGuard.new(contracts: repos[:contracts], quotes: repos[:quotes]),
+        # Chamadas a provedores de pagamento e webhooks enviados: log com correlação e métricas.
+        external_calls: A::ExternalCalls.new(logger: logger, metrics: metrics)
       }
       @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
                                                                            quotes: repos[:quotes], contracts: repos[:contracts])
@@ -92,7 +94,7 @@ module Locentra
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
                                                                   clock: clock, ids: ids, subscribers: [@services[:finance_subscriber]])
       @services[:deliver_webhook] = A::Webhooks::Deliver.new(transactor: transactor, webhooks: repos[:webhooks], http: @http, box: @services[:box],
-                                                             clock: clock, logger: logger)
+                                                             clock: clock, calls: @services[:external_calls])
     end
 
     def common = { uow: uow, clock: clock }
@@ -364,7 +366,7 @@ module Locentra
       fn = A::Finance
       simulator = I::Payments::Simulator.new(transactor: transactor, clock: clock, ids: ids)
       asaas = I::Payments::Asaas.new(http: @payment_http || I::Payments::HttpClient.new, box: s[:box], sandbox_url: config.asaas_base_url)
-      providers = fn::Providers.new("simulator" => simulator, "asaas" => asaas)
+      providers = fn::Providers.new({ "simulator" => simulator, "asaas" => asaas }, s[:external_calls])
       s[:payment_providers] = providers
       ledger = fn::Ledger.new(entries: r[:ledger_entries], ids: ids, clock: clock)
       alert_book = fn::AlertBook.new(alerts: r[:finance_alerts], ids: ids, clock: clock)
