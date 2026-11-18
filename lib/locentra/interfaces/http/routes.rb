@@ -5,6 +5,10 @@ require_relative "web/main_controllers"
 require_relative "web/operations_controllers"
 require_relative "web/integrations_controller"
 require_relative "web/finance_controllers"
+require_relative "web/fulfillment_controllers"
+require_relative "web/maintenance_controllers"
+require_relative "web/quotes_controller"
+require_relative "web/contracts_controller"
 require_relative "api/v1"
 require_relative "api/v1_finance"
 
@@ -85,6 +89,9 @@ module Locentra
           r.post "/reservas/:id/reagendar", reservations, :reschedule
           r.post "/reservas/:id/estender", reservations, :extend_period
 
+          draw_quotes(r, deps, w)
+          draw_contracts(r, deps, w)
+
           members = w::MembersController.new(deps)
           r.get "/usuarios", members, :index
           r.post "/usuarios/convites", members, :invite
@@ -111,6 +118,7 @@ module Locentra
           r.post "/anexos/:id/remover", attachments, :remove
 
           draw_finance(r, deps, w)
+          draw_operations(r, deps, w)
         end
 
         # Financeiro: cobranças, pagamentos, reembolsos, cauções, faturas, conciliação, provedor,
@@ -156,6 +164,82 @@ module Locentra
           r.post "/api/v1/payments", api, :create_payment, auth: :api
           r.get "/api/v1/payments/:id", api, :payment, auth: :api
           r.post "/api/v1/payments/:id/refunds", api, :create_refund, auth: :api
+        end
+
+        # Retirada, devolução, inspeção, avarias, manutenção e transferências.
+        def draw_operations(router, deps, web)
+          r = router
+          w = web
+          board = w::OperationsController.new(deps)
+          r.get "/operacao", board, :show
+          r.post "/operacao/alertas/:id/resolver", board, :resolve_alert
+
+          pickups = w::PickupsController.new(deps)
+          r.post "/operacao/reservas/:id/retirada", pickups, :start
+          r.get "/operacao/retiradas/:id", pickups, :show
+          r.post "/operacao/retiradas/:id/conferir", pickups, :check
+          r.post "/operacao/retiradas/:id/entregar", pickups, :deliver
+          r.post "/operacao/retiradas/:id/cancelar", pickups, :cancel
+
+          returns = w::ReturnsController.new(deps)
+          r.get "/operacao/reservas/:id/devolucao", returns, :new
+          r.post "/operacao/reservas/:id/devolucao", returns, :create
+          r.get "/operacao/devolucoes/:id", returns, :show
+
+          inspections = w::InspectionsController.new(deps)
+          r.get "/operacao/inspecoes", inspections, :index
+          r.post "/operacao/inspecoes/:id/aprovar", inspections, :approve
+          r.post "/operacao/inspecoes/:id/reprovar", inspections, :reject
+
+          damages = w::DamageReportsController.new(deps)
+          r.get "/operacao/avarias", damages, :index
+          r.post "/operacao/avarias", damages, :create
+          r.get "/operacao/avarias/:id", damages, :show
+          r.post "/operacao/avarias/:id", damages, :update
+          r.post "/operacao/avarias/:id/aprovar", damages, :approve
+          r.post "/operacao/avarias/:id/descartar", damages, :dismiss
+
+          maintenance = w::MaintenanceController.new(deps)
+          r.get "/manutencao", maintenance, :index
+          r.post "/manutencao", maintenance, :create
+          r.get "/manutencao/:id", maintenance, :show
+          r.post "/manutencao/:id/iniciar", maintenance, :start
+          r.post "/manutencao/:id/concluir", maintenance, :complete
+          r.post "/manutencao/:id/cancelar", maintenance, :cancel
+
+          transfers = w::TransfersController.new(deps)
+          r.get "/transferencias", transfers, :index
+          r.post "/transferencias", transfers, :create
+          r.post "/transferencias/:id/saida", transfers, :dispatch_transfer
+          r.post "/transferencias/:id/recebimento", transfers, :receive
+          r.post "/transferencias/:id/cancelar", transfers, :cancel
+        end
+
+        def draw_quotes(router, deps, web)
+          r = router
+          quotes = web::QuotesController.new(deps)
+          r.get "/orcamentos", quotes, :index
+          r.get "/orcamentos/novo", quotes, :new
+          r.post "/orcamentos", quotes, :create
+          r.get "/orcamentos/:id", quotes, :show
+          r.get "/orcamentos/:id/nova-versao", quotes, :revision
+          r.post "/orcamentos/:id/versoes", quotes, :revise
+          r.post "/orcamentos/:id/enviar", quotes, :send_to_customer
+          r.post "/orcamentos/:id/aprovar", quotes, :approve
+          r.post "/orcamentos/:id/rejeitar", quotes, :reject
+          r.post "/orcamentos/:id/converter", quotes, :convert
+        end
+
+        def draw_contracts(router, deps, web)
+          r = router
+          contracts = web::ContractsController.new(deps)
+          r.get "/contratos", contracts, :index
+          r.post "/contratos", contracts, :create
+          r.get "/contratos/:id", contracts, :show
+          r.post "/contratos/:id/aceite", contracts, :accept
+          r.post "/contratos/:id/aditivos", contracts, :amend
+          r.post "/contratos/:id/cancelar", contracts, :cancel
+          r.post "/contratos/:id/encerrar", contracts, :close
         end
 
         def draw_api(router, api)

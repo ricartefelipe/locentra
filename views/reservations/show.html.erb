@@ -1,5 +1,8 @@
 <% r = @data[:reservation] %>
 <% pricing = @data[:pricing][:summary] %>
+<% contract = @links[:contract] %>
+<% contract_open = contract&.open? %>
+<% quote_hold = @links[:quote]&.holds_reservation?(r.id) %>
 <header class="page-header">
   <h1>Reserva <%= r.code %> <%= status_badge(r.status, r.status_label) %></h1>
   <p class="muted">Cliente: <a href="/clientes/<%= @customer.id %>"><%= @customer.name %></a></p>
@@ -17,6 +20,33 @@
 <% elsif r.requested? %>
   <div class="notice" role="status">Solicitação sem garantia de disponibilidade. A alocação ocorre somente na confirmação.</div>
 <% end %>
+<% if quote_hold %>
+  <div class="notice" role="status">Esta reserva é o bloqueio temporário do orçamento <a href="/orcamentos/<%= @links[:quote].id %>"><%= @links[:quote].code %></a>: a confirmação é feita pela conversão do orçamento aprovado e alterações de período ou itens exigem uma nova versão do orçamento. O cancelamento libera a disponibilidade, como o vencimento do bloqueio.</div>
+<% end %>
+<% if contract_open %>
+  <div class="notice" role="status">Esta reserva possui o contrato <a href="/contratos/<%= contract.id %>"><%= contract.code %></a>: alterações de prazo são feitas por aditivo e o cancelamento pelo contrato, que aplica a política de cancelamento.</div>
+<% end %>
+<section class="panel" aria-labelledby="contrato-titulo">
+  <h2 id="contrato-titulo">Contrato e orçamento</h2>
+  <% if @links[:quote] %>
+    <% quote = @links[:quote] %>
+    <p><%= quote.reservation_id == r.id ? "Convertida do orçamento" : "Bloqueio temporário do orçamento" %> <a href="/orcamentos/<%= quote.id %>"><%= quote.code %></a> (<%= quote.status_label %>).</p>
+  <% end %>
+  <% if contract %>
+    <p>Contrato <a href="/contratos/<%= contract.id %>"><%= contract.code %></a> <%= status_badge(contract.status, contract.status_label) %> · documento versão <%= contract.current_document_version %>.</p>
+  <% elsif can?("contracts.write") && Locentra::Domain::Contracts::ISSUABLE_RESERVATION_STATUSES.include?(r.status) %>
+    <form method="post" action="/contratos" class="stack">
+      <%= csrf_field %>
+      <input type="hidden" name="reserva_id" value="<%= r.id %>">
+      <label for="contrato-condicoes">Condições específicas (opcional)</label>
+      <textarea id="contrato-condicoes" name="condicoes" rows="2" maxlength="5000"></textarea>
+      <p class="muted">O contrato congela itens, preços, caução, período e a política de cancelamento atual e gera o PDF para aceite eletrônico simples.</p>
+      <button type="submit" class="primary">Gerar contrato</button>
+    </form>
+  <% elsif can?("contracts.read") %>
+    <p class="empty">Sem contrato. O contrato pode ser gerado depois que a reserva for confirmada.</p>
+  <% end %>
+</section>
 <div class="grid-2">
   <section class="panel">
     <h2>Período</h2>
@@ -26,12 +56,13 @@
       <dt>Origem</dt><dd><%= r.source %></dd>
       <dt>Observações</dt><dd class="pre"><%= r.notes || "—" %></dd>
     </dl>
-    <% if can?("reservations.write") && %w[requested held confirmed].include?(r.status) %>
+    <% if can?("reservations.write") && %w[requested held confirmed].include?(r.status) && !quote_hold %>
       <div class="action-row">
         <% if %w[requested held].include?(r.status) %>
           <form method="post" action="/reservas/<%= r.id %>/confirmar"><%= csrf_field %><button type="submit" class="primary">Confirmar reserva</button></form>
         <% end %>
       </div>
+      <% unless contract_open %>
       <details>
         <summary>Reagendar</summary>
         <form method="post" action="/reservas/<%= r.id %>/reagendar" class="stack">
@@ -41,8 +72,9 @@
           <button type="submit">Reagendar</button>
         </form>
       </details>
+      <% end %>
     <% end %>
-    <% if can?("reservations.write") && %w[held confirmed in_progress].include?(r.status) %>
+    <% if can?("reservations.write") && %w[held confirmed in_progress].include?(r.status) && !contract_open && !quote_hold %>
       <details>
         <summary>Estender devolução</summary>
         <form method="post" action="/reservas/<%= r.id %>/estender" class="stack">
@@ -53,7 +85,7 @@
         </form>
       </details>
     <% end %>
-    <% if can?("reservations.cancel") && %w[requested held confirmed].include?(r.status) %>
+    <% if can?("reservations.cancel") && %w[requested held confirmed].include?(r.status) && !contract_open %>
       <details>
         <summary>Cancelar reserva</summary>
         <form method="post" action="/reservas/<%= r.id %>/cancelar" class="stack" data-confirm="Cancelar esta reserva e liberar a disponibilidade?">
@@ -81,6 +113,7 @@
   </section>
 </div>
 <% if @finance %><%= partial("finance/reservation_panel", reservation: r) %><% end %>
+<%= partial("operations/reservation_summary", reservation: r, operations: @operations) %>
 <section class="panel">
   <h2>Itens e alocações</h2>
   <table class="table">

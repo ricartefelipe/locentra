@@ -1,0 +1,19 @@
+<% if @rows.empty? %>
+  <p class="empty"><%= @empty %></p>
+<% else %>
+  <table class="table">
+    <thead><tr><th scope="col">Ordem</th><th scope="col">Item</th><th scope="col">Serviço</th><th scope="col">Aberta em</th><th scope="col" class="num">Custo</th><th scope="col">Situação</th></tr></thead>
+    <tbody>
+      <% @rows.each do |o| %>
+        <tr>
+          <td><a href="/manutencao/<%= o["id"] %>"><%= o["code"] %></a></td>
+          <td><%= o["product_name"] %> <span class="muted"><%= o["tag"] || "#{o["quantity"]} un." %> · <%= o["branch_code"] %></span></td>
+          <td><%= o["description"] %></td>
+          <td><%= datetime(o["opened_at"]) %></td>
+          <td class="num"><%= o["cost_cents"] ? money(o["cost_cents"]) : "—" %></td>
+          <td><%= status_badge(o["status"], @statuses.fetch(o["status"])) %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

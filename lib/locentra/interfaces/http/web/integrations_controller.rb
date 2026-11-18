@@ -48,7 +48,7 @@ module Locentra
             bytes = file[:tempfile].read(@system.config.max_upload_bytes + 1)
             uc(:upload_attachment).call(ctx.actor, owner_type: owner_type, owner_id: owner_id, filename: file[:filename], bytes: bytes)
             redirect(ctx, back, notice: "Anexo enviado.")
-          rescue Domain::ValidationError => e
+          rescue Domain::ValidationError, Domain::Conflict => e
             redirect(ctx, back || "/", alert: "Anexo recusado: #{e.message}")
           ensure
             file[:tempfile].close! if file.is_a?(Hash) && file[:tempfile].respond_to?(:close!)

@@ -8,6 +8,7 @@ module Locentra
       EVENTS = %w[
         reservation.requested reservation.held reservation.confirmed reservation.cancelled reservation.expired reservation.extended
         reservation.picked_up reservation.returned contract.issued payment.confirmed payment.refunded
+        quote.sent quote.approved quote.rejected quote.expired quote.converted contract.accepted contract.amended contract.cancelled
       ].freeze
 
       class CreateEndpoint

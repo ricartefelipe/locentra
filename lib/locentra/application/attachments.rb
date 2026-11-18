@@ -32,8 +32,21 @@ module Locentra
         end
       end
 
+      # Regras do dono executadas antes de anexar ou remover: `guards` mapeia o tipo de dono para um
+      # objeto com `editable!(tx, owner_id)`, que bloqueia o dono e recusa alterações quando o registro
+      # não aceita mais mudanças nas evidências (por exemplo, avaria já decidida).
+      module OwnerGuard
+        private
+
+        def guard!(tx, owner_type, owner_id)
+          @guards[owner_type]&.editable!(tx, owner_id)
+        end
+      end
+
       class Upload
-        def initialize(uow:, attachments:, storage:, audit:, clock:, ids:, max_bytes:)
+        include OwnerGuard
+
+        def initialize(uow:, attachments:, storage:, audit:, clock:, ids:, max_bytes:, guards: {})
           @uow = uow
           @attachments = attachments
           @storage = storage
@@ -41,6 +54,7 @@ module Locentra
           @clock = clock
           @ids = ids
           @max_bytes = max_bytes
+          @guards = guards
         end
 
         # O arquivo é gravado antes do registro; se a transação falhar, o arquivo é removido.
@@ -66,6 +80,7 @@ module Locentra
           row = { "id" => id, "owner_type" => owner_type, "owner_id" => Domain::Identifier.parse(owner_id, "dono"),
                   "filename" => Rules.sanitize_filename(filename), "content_type" => content_type, "storage_key" => key,
                   "created_by" => actor.audit_actor_id, "created_at" => now, "retain_until" => retain_days ? now + (retain_days * 86_400) : nil }
+          guard!(tx, owner_type, row["owner_id"])
           stats = @storage.put(key, bytes)
           begin
             row = row.merge("byte_size" => stats[:byte_size], "sha256" => stats[:sha256])
@@ -112,18 +127,22 @@ module Locentra
       end
 
       class Remove
-        def initialize(uow:, attachments:, storage:, audit:, clock:)
+        include OwnerGuard
+
+        def initialize(uow:, attachments:, storage:, audit:, clock:, guards: {})
           @uow = uow
           @attachments = attachments
           @storage = storage
           @audit = audit
           @clock = clock
+          @guards = guards
         end
 
         def call(actor, attachment_id)
           @uow.run(actor) do |tx, current|
             row = @attachments.find(tx, Domain::Identifier.parse(attachment_id)) || raise(Domain::NotFound, "anexo")
             Authorizer.authorize!(current, PERMISSIONS.fetch(row["owner_type"]).last)
+            guard!(tx, row["owner_type"], row["owner_id"])
             now = @clock.now
             if row["retain_until"] && row["retain_until"] > now
               raise Domain::Conflict.new("anexo em período de retenção até #{row["retain_until"].utc.iso8601}",

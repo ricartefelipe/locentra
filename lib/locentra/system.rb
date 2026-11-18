@@ -57,7 +57,12 @@ module Locentra
         receivables: P::ReceivableRepository.new, payments: P::PaymentRepository.new, deposits: P::DepositRepository.new,
         ledger_entries: P::LedgerRepository.new, finance_alerts: P::FinanceAlertRepository.new, invoices: P::InvoiceRepository.new,
         payment_accounts: P::PaymentAccountRepository.new, inbound_webhooks: P::InboundWebhookRepository.new,
-        reconciliation: P::ReconciliationRepository.new
+        reconciliation: P::ReconciliationRepository.new,
+        fulfillment: P::FulfillmentRepository.new, operational_allocations: P::OperationalAllocationRepository.new,
+        inspections: P::InspectionRepository.new, maintenance_orders: P::MaintenanceOrderRepository.new,
+        damage_reports: P::DamageReportRepository.new, transfers: P::TransferRepository.new, alerts: P::AlertRepository.new,
+        operations: P::OperationsRepository.new,
+        quotes: P::QuoteRepository.new, contracts: P::ContractRepository.new
       }
     end
 
@@ -77,9 +82,12 @@ module Locentra
         mailer: @mailer, http: @http,
         box: I::SecretBox.new(config.encryption_key),
         storage: I::Storage::Local.new(root: config.storage_root),
-        mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__))
+        mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__)),
+        contract_renderer: I::Documents::ContractPdf.new,
+        reservation_guard: A::Reservations::ChangeGuard.new(contracts: repos[:contracts], quotes: repos[:quotes])
       }
-      @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers])
+      @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
+                                                                           quotes: repos[:quotes], contracts: repos[:contracts])
       @services[:finance_subscriber] = A::Finance::ReservationChargesSubscriber.new(queue: queue)
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
                                                                   clock: clock, ids: ids, subscribers: [@services[:finance_subscriber]])
@@ -96,6 +104,9 @@ module Locentra
       build_reservation_use_cases(uc)
       build_integration_use_cases(uc)
       build_finance_use_cases(uc)
+      build_operations_use_cases(uc)
+      build_quote_use_cases(uc)
+      build_contract_use_cases(uc)
       @use_cases = UseCases.new(uc)
     end
 
@@ -178,14 +189,16 @@ module Locentra
       uc[:create_reservation] = A::Reservations::CreateReservation.new(uow: uow, customers: r[:customers], organizations: r[:organizations],
                                                                        allocator: s[:allocator], pricer: s[:pricer], events: s[:events], ids: ids,
                                                                        **reservation_deps)
-      uc[:confirm_reservation] =
-        A::Reservations::ConfirmReservation.new(uow: uow, allocator: s[:allocator], events: s[:events], **reservation_deps)
-      uc[:cancel_reservation] = A::Reservations::CancelReservation.new(uow: uow, events: s[:events], **reservation_deps)
+      uc[:confirm_reservation] = A::Reservations::ConfirmReservation.new(uow: uow, allocator: s[:allocator], events: s[:events],
+                                                                         guard: s[:reservation_guard], **reservation_deps)
+      uc[:cancel_reservation] = A::Reservations::CancelReservation.new(uow: uow, events: s[:events], guard: s[:reservation_guard],
+                                                                       **reservation_deps)
       uc[:reschedule_reservation] = A::Reservations::RescheduleReservation.new(uow: uow, organizations: r[:organizations],
-                                                                               allocator: s[:allocator], **reservation_deps)
+                                                                               allocator: s[:allocator], guard: s[:reservation_guard],
+                                                                               **reservation_deps)
       uc[:extend_reservation] = A::Reservations::ExtendReservation.new(uow: uow, organizations: r[:organizations], allocator: s[:allocator],
                                                                        availability: r[:availability], events: s[:events], ids: ids,
-                                                                       **reservation_deps)
+                                                                       guard: s[:reservation_guard], **reservation_deps)
       uc[:expire_holds] = A::Reservations::ExpireHolds.new(uow: uow, events: s[:events], **reservation_deps)
       uc[:list_reservations] = A::Reservations::ListReservations.new(uow: uow, reservations: r[:reservations])
       uc[:get_reservation] = A::Reservations::GetReservation.new(uow: uow, reservations: r[:reservations])
@@ -201,11 +214,145 @@ module Locentra
       uc[:disable_webhook] = A::Webhooks::DisableEndpoint.new(**common, webhooks: r[:webhooks], audit: audit)
       uc[:list_webhooks] = A::Webhooks::ListEndpoints.new(uow: uow, webhooks: r[:webhooks])
       uc[:redeliver_webhook] = A::Webhooks::Redeliver.new(uow: uow, webhooks: r[:webhooks], queue: queue, audit: audit)
+      # Evidências de avaria decidida não podem ser anexadas nem removidas.
+      guards = { "damage_report" => A::Inspections::EvidenceGuard.new(damage_reports: r[:damage_reports]) }
       uc[:upload_attachment] = A::Attachments::Upload.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit, ids: ids,
-                                                                    max_bytes: config.max_upload_bytes)
+                                                                    max_bytes: config.max_upload_bytes, guards: guards)
       uc[:download_attachment] = A::Attachments::Download.new(uow: uow, attachments: r[:attachments], storage: s[:storage],
                                                               portal_scope: s.fetch(:portal_scope) { NoPortalScope.new })
-      uc[:remove_attachment] = A::Attachments::Remove.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit)
+      uc[:remove_attachment] = A::Attachments::Remove.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit, guards: guards)
+    end
+
+    # Retirada, devolução, inspeção, avarias, manutenção, transferências e atrasos.
+    def build_operations_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      ops = A::Operations
+      allocations = r[:operational_allocations]
+      ledger = ops::AssetLedger.new(catalog: r[:catalog], ids: ids)
+      alert_book = ops::AlertBook.new(alerts: r[:alerts], clock: clock, ids: ids)
+      relocation = ops::AssetRelocation.new(availability: r[:availability], allocator: s[:allocator])
+      coverage = ops::StockCoverage.new(allocations: allocations)
+      desk = ops::MaintenanceDesk.new(orders: r[:maintenance_orders], inspections: r[:inspections], allocations: allocations,
+                                      organizations: r[:organizations], ids: ids)
+      pickup = { reservations: r[:reservations], fulfillment: r[:fulfillment] }
+
+      uc[:start_pickup] = A::Fulfillment::StartPickup.new(**common, **pickup, audit: audit, ids: ids)
+      uc[:check_pickup] = A::Fulfillment::CheckPickup.new(**common, **pickup, allocations: allocations, availability: r[:availability],
+                                                                              catalog: r[:catalog], audit: audit)
+      uc[:deliver_pickup] = A::Fulfillment::DeliverPickup.new(**common, **pickup, allocations: allocations, availability: r[:availability],
+                                                                                  customers: r[:customers], catalog: r[:catalog], ledger: ledger,
+                                                                                  audit: audit, events: s[:events])
+      uc[:cancel_pickup] = A::Fulfillment::CancelPickup.new(**common, **pickup, audit: audit)
+      uc[:get_pickup] = A::Fulfillment::GetPickup.new(uow: uow, **pickup, customers: r[:customers])
+
+      uc[:register_return] = A::Returns::RegisterReturn.new(
+        **common, **pickup, allocations: allocations, availability: r[:availability], catalog: r[:catalog], organizations: r[:organizations],
+                            desk: desk, damage_reports: r[:damage_reports], ledger: ledger, relocation: relocation, coverage: coverage,
+                            alert_book: alert_book, alerts: r[:alerts], audit: audit, events: s[:events], ids: ids
+      )
+      uc[:return_form] = A::Returns::ReturnForm.new(uow: uow, **pickup, customers: r[:customers])
+      uc[:get_return] = A::Returns::GetReturn.new(uow: uow, **pickup)
+
+      inspections = A::Inspections
+      uc[:approve_inspection] = inspections::ApproveInspection.new(**common, inspections: r[:inspections], catalog: r[:catalog],
+                                                                             allocations: allocations, ledger: ledger, audit: audit)
+      uc[:reject_inspection] = inspections::RejectInspection.new(**common, inspections: r[:inspections], catalog: r[:catalog], desk: desk,
+                                                                           ledger: ledger, relocation: relocation, alert_book: alert_book, audit: audit)
+      uc[:list_inspections] = inspections::ListInspections.new(uow: uow, inspections: r[:inspections])
+      uc[:create_damage_report] = inspections::CreateDamageReport.new(**common, fulfillment: r[:fulfillment], damage_reports: r[:damage_reports],
+                                                                                organizations: r[:organizations], audit: audit, ids: ids)
+      uc[:revise_damage_report] = inspections::ReviseDamageReport.new(**common, damage_reports: r[:damage_reports], audit: audit)
+      uc[:approve_damage_charge] = inspections::ApproveDamageCharge.new(**common, damage_reports: r[:damage_reports],
+                                                                                  reservations: r[:reservations], audit: audit, ids: ids)
+      uc[:dismiss_damage_report] = inspections::DismissDamageReport.new(**common, damage_reports: r[:damage_reports], audit: audit)
+      uc[:get_damage_report] = inspections::GetDamageReport.new(uow: uow, damage_reports: r[:damage_reports], attachments: r[:attachments])
+      uc[:list_damage_reports] = inspections::ListDamageReports.new(uow: uow, damage_reports: r[:damage_reports])
+
+      maintenance = A::Maintenance
+      orders = { orders: r[:maintenance_orders], catalog: r[:catalog] }
+      uc[:open_maintenance_order] = maintenance::OpenMaintenanceOrder.new(**common, catalog: r[:catalog], allocations: allocations,
+                                                                                    availability: r[:availability], desk: desk, ledger: ledger,
+                                                                                    relocation: relocation, audit: audit)
+      uc[:start_maintenance] = maintenance::StartMaintenance.new(**common, **orders, ledger: ledger, audit: audit)
+      uc[:complete_maintenance] = maintenance::CompleteMaintenance.new(**common, **orders, allocations: allocations, desk: desk, ledger: ledger,
+                                                                                           audit: audit)
+      uc[:cancel_maintenance] = maintenance::CancelMaintenance.new(**common, **orders, allocations: allocations, desk: desk, ledger: ledger,
+                                                                                       audit: audit)
+      uc[:list_maintenance_orders] = maintenance::ListMaintenanceOrders.new(uow: uow, orders: r[:maintenance_orders])
+      uc[:get_maintenance_order] = maintenance::GetMaintenanceOrder.new(uow: uow, **orders, attachments: r[:attachments])
+
+      transfers = A::Transfers
+      uc[:request_transfer] = transfers::RequestTransfer.new(**common, transfers: r[:transfers], catalog: r[:catalog], allocations: allocations,
+                                                                       organizations: r[:organizations], audit: audit, ids: ids)
+      uc[:dispatch_transfer] = transfers::DispatchTransfer.new(**common, transfers: r[:transfers], catalog: r[:catalog], allocations: allocations,
+                                                                         availability: r[:availability], ledger: ledger, audit: audit, ids: ids)
+      uc[:receive_transfer] = transfers::ReceiveTransfer.new(**common, transfers: r[:transfers], catalog: r[:catalog], ledger: ledger, audit: audit,
+                                                                       ids: ids)
+      uc[:cancel_transfer] = transfers::CancelTransfer.new(**common, transfers: r[:transfers], audit: audit)
+      uc[:list_transfers] = transfers::ListTransfers.new(uow: uow, transfers: r[:transfers])
+
+      overdue = A::Overdue
+      uc[:detect_overdue] = overdue::DetectOverdue.new(**common, operations: r[:operations], alerts: r[:alerts], alert_book: alert_book,
+                                                                 allocations: allocations, availability: r[:availability], coverage: coverage,
+                                                                 queue: queue, audit: audit)
+      uc[:resolve_alert] = overdue::ResolveAlert.new(**common, alerts: r[:alerts], audit: audit)
+      uc[:operations_board] = overdue::OperationsBoard.new(**common, operations: r[:operations], alerts: r[:alerts], inspections: r[:inspections],
+                                                                     damage_reports: r[:damage_reports], transfers: r[:transfers],
+                                                                     organizations: r[:organizations])
+      uc[:reservation_operations] = overdue::ReservationOperations.new(uow: uow, fulfillment: r[:fulfillment], alerts: r[:alerts],
+                                                                       damage_reports: r[:damage_reports])
+    end
+
+    # Orçamentos: compõem criação, confirmação e cancelamento de reservas na mesma transação.
+    def build_quote_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      builder = A::Quotes::VersionBuilder.new(organizations: r[:organizations], allocator: s[:allocator], pricer: s[:pricer], ids: ids)
+      hold_release = A::Quotes::HoldRelease.new(reservations: r[:reservations], cancel: uc[:cancel_reservation])
+      expirer = A::Quotes::Expirer.new(quotes: r[:quotes], hold_release: hold_release, audit: audit, events: s[:events])
+      quote_deps = { quotes: r[:quotes], audit: audit, clock: clock }
+      uc[:create_quote] = A::Quotes::CreateQuote.new(uow: uow, customers: r[:customers], organizations: r[:organizations], builder: builder, ids: ids,
+                                                     **quote_deps)
+      uc[:revise_quote] = A::Quotes::ReviseQuote.new(uow: uow, customers: r[:customers], organizations: r[:organizations], builder: builder,
+                                                     hold_release: hold_release, **quote_deps)
+      uc[:send_quote] = A::Quotes::SendQuote.new(uow: uow, create_reservation: uc[:create_reservation], events: s[:events], **quote_deps)
+      uc[:approve_quote] = A::Quotes::ApproveQuote.new(uow: uow, expirer: expirer, events: s[:events], **quote_deps)
+      uc[:reject_quote] = A::Quotes::RejectQuote.new(uow: uow, hold_release: hold_release, events: s[:events], **quote_deps)
+      uc[:expire_quotes] = A::Quotes::ExpireQuotes.new(uow: uow, quotes: r[:quotes], expirer: expirer, clock: clock)
+      uc[:convert_quote] = A::Quotes::ConvertQuote.new(uow: uow, reservations: r[:reservations], create_reservation: uc[:create_reservation],
+                                                       confirm_reservation: uc[:confirm_reservation], events: s[:events], **quote_deps)
+      uc[:list_quotes] = A::Quotes::ListQuotes.new(uow: uow, quotes: r[:quotes])
+      uc[:get_quote] = A::Quotes::GetQuote.new(uow: uow, quotes: r[:quotes], customers: r[:customers], reservations: r[:reservations])
+    end
+
+    # Contratos: documentos via Upload de anexos; aditivo e cancelamento compõem casos de uso de reserva.
+    def build_contract_use_cases(cases)
+      uc = cases
+      s = services
+      r = repos
+      audit = s[:audit]
+      documents = A::Contracts::DocumentGenerator.new(contracts: r[:contracts], organizations: r[:organizations], renderer: s[:contract_renderer],
+                                                      upload: uc[:upload_attachment], ids: ids)
+      contract_deps = { contracts: r[:contracts], audit: audit, clock: clock }
+      uc[:issue_contract] = A::Contracts::IssueContract.new(uow: uow, reservations: r[:reservations], customers: r[:customers],
+                                                            organizations: r[:organizations], quotes: r[:quotes], documents: documents,
+                                                            events: s[:events], ids: ids, **contract_deps)
+      uc[:accept_contract] = A::Contracts::AcceptContract.new(uow: uow, events: s[:events], **contract_deps)
+      uc[:amend_contract] = A::Contracts::AmendContract.new(uow: uow, reservations: r[:reservations], extend_reservation: uc[:extend_reservation],
+                                                            documents: documents, organizations: r[:organizations], events: s[:events], ids: ids,
+                                                            **contract_deps)
+      uc[:cancel_contract] = A::Contracts::CancelContract.new(uow: uow, reservations: r[:reservations], cancel_reservation: uc[:cancel_reservation],
+                                                              events: s[:events], ids: ids, **contract_deps)
+      uc[:close_contract] = A::Contracts::CloseContract.new(uow: uow, reservations: r[:reservations], **contract_deps)
+      uc[:preview_contract_cancellation] = A::Contracts::PreviewCancellation.new(uow: uow, contracts: r[:contracts], clock: clock)
+      uc[:list_contracts] = A::Contracts::ListContracts.new(uow: uow, contracts: r[:contracts])
+      uc[:get_contract] = A::Contracts::GetContract.new(uow: uow, contracts: r[:contracts], reservations: r[:reservations], clock: clock)
+      uc[:reservation_links] = A::Contracts::ReservationLinks.new(uow: uow, contracts: r[:contracts], quotes: r[:quotes])
     end
 
     # Financeiro: cobranças, pagamentos, reembolsos, cauções, diário, provedores, webhooks e conciliação.

@@ -1,0 +1,36 @@
+<header class="page-header">
+  <h1>Contratos</h1>
+  <p class="muted">Contratos são emitidos a partir de reservas confirmadas (botão "Gerar contrato" na tela da reserva). O aceite registrado é um aceite eletrônico simples.</p>
+</header>
+<form method="get" action="/contratos" class="filters" role="search">
+  <label for="busca">Contrato, reserva ou cliente</label>
+  <input id="busca" name="busca" value="<%= @search %>">
+  <label for="situacao">Situação</label>
+  <select id="situacao" name="situacao">
+    <option value="">Todas</option>
+    <% Locentra::Domain::Contracts::STATUSES.each do |key, label| %><option value="<%= key %>"<%= selected(@filter_status, key) %>><%= label %></option><% end %>
+  </select>
+  <button type="submit">Filtrar</button>
+</form>
+<% if @page.items.empty? %>
+  <p class="empty">Nenhum contrato encontrado. <a href="/reservas?situacao=confirmed">Veja as reservas confirmadas</a> para gerar contratos.</p>
+<% else %>
+  <table class="table">
+    <thead><tr><th scope="col">Contrato</th><th scope="col">Cliente</th><th scope="col">Reserva</th><th scope="col">Emitido em</th><th scope="col">Documento</th><th scope="col">Situação</th><th scope="col" class="num">Total na emissão</th></tr></thead>
+    <tbody>
+      <% @page.items.each do |row| %>
+        <% c = row[:contract] %>
+        <tr>
+          <td><a href="/contratos/<%= c.id %>"><%= c.code %></a></td>
+          <td><%= row[:customer_name] %></td>
+          <td><a href="/reservas/<%= c.reservation_id %>"><%= row[:reservation_code] %></a></td>
+          <td><%= datetime(c.issued_at) %></td>
+          <td>versão <%= c.current_document_version %></td>
+          <td><%= status_badge(c.status, c.status_label) %></td>
+          <td class="num"><%= money(c.contracted_total) %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+<%= partial("shared/pagination", page: @page, base_path: "/contratos", query: { "busca" => @search, "situacao" => @filter_status }) %>

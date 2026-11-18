@@ -34,13 +34,15 @@ class Barrier
 end
 
 # Decorador que pausa um método do objeto real numa barreira antes (ou depois) de executá-lo.
+# `skip` ignora as primeiras chamadas de cada thread (por exemplo, pausar só na segunda leitura).
 class PausingProxy < BasicObject
-  def initialize(target, method_name, barrier, after: false, times: 1)
+  def initialize(target, method_name, barrier, after: false, times: 1, skip: 0)
     @target = target
     @method_name = method_name
     @barrier = barrier
     @after = after
     @remaining = ::Hash.new(times)
+    @skipped = ::Hash.new(skip)
     @mutex = ::Thread::Mutex.new
   end
 
@@ -64,6 +66,10 @@ class PausingProxy < BasicObject
   def take_turn
     @mutex.synchronize do
       key = ::Thread.current.object_id
+      if @skipped[key].positive?
+        @skipped[key] -= 1
+        return false
+      end
       return false unless @remaining[key].positive?
 
       @remaining[key] -= 1
