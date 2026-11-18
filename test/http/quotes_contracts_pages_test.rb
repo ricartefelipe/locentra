@@ -151,6 +151,25 @@ class QuotesContractsPagesTest < HttpTest
     assert_equal 0, owner_query("SELECT count(*) AS n FROM contract_documents WHERE accepted_at IS NOT NULL").first["n"].to_i
   end
 
+  # O formulário de rejeição da equipe envia a versão exibida: um reenvio feito depois da abertura
+  # da página faz a rejeição ser recusada sem gravação.
+  def test_staff_rejection_refuses_a_quote_version_sent_after_the_page_was_opened
+    post_form "/orcamentos", form_quote
+    quote_id = last_id("quotes")
+    post_form "/orcamentos/#{quote_id}/enviar", {}
+
+    assert_equal 2, get_ok("/orcamentos/#{quote_id}").scan(%(name="versao" value="1")).size, "aprovação e rejeição enviam a versão"
+    uc(:revise_quote).call(@actor, quote_id, { customer_id: @customer.id, branch_id: @org[:branch].id, lines: [line(@camera, 1)],
+                                               period: period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"),
+                                               valid_until: t("2026-03-06T12:00:00Z"), terms: "Retirada na loja." })
+    uc(:send_quote).call(@actor, quote_id)
+    post_form "/orcamentos/#{quote_id}/rejeitar", { "versao" => "1", "motivo" => "Cliente desistiu" }
+
+    assert_equal 409, last_response.status
+    assert_includes last_response.body, "versão atual: 2"
+    assert_equal "sent", owner_query("SELECT status FROM quotes WHERE id = $1", [quote_id]).first["status"]
+  end
+
   def test_contract_screens_report_conflicts_and_versions
     reservation = reserve(@actor, @customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
     contract = uc(:issue_contract).call(@actor, reservation.id)

@@ -51,9 +51,18 @@ module PortalHelpers
 
   # Orçamento enviado ao cliente (versão 1, sem bloqueio).
   def sent_quote(actor, customer, branch, product, day)
-    quote = uc(:create_quote).call(actor, { customer_id: customer.id, branch_id: branch.id, lines: [line(product, 1)],
-                                            period: period(format("2026-03-%02dT08:00:00Z", day), format("2026-03-%02dT08:00:00Z", day + 1)),
-                                            valid_until: t("2026-03-06T12:00:00Z") })
+    quote = uc(:create_quote).call(actor, portal_quote_input(customer, branch, product, day))
     uc(:send_quote).call(actor, quote.id)
+  end
+
+  # Nova versão do orçamento (condições alteradas) já enviada ao cliente.
+  def resent_quote(actor, quote, customer, branch, product, day, terms:)
+    uc(:revise_quote).call(actor, quote.id, portal_quote_input(customer, branch, product, day).merge(terms: terms))
+    uc(:send_quote).call(actor, quote.id)
+  end
+
+  def portal_quote_input(customer, branch, product, day)
+    { customer_id: customer.id, branch_id: branch.id, lines: [line(product, 1)],
+      period: period(format("2026-03-%02dT08:00:00Z", day), format("2026-03-%02dT08:00:00Z", day + 1)), valid_until: t("2026-03-06T12:00:00Z") }
   end
 end

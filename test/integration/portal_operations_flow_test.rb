@@ -21,11 +21,11 @@ class PortalOperationsFlowTest < PortalFlowCase
     assert_equal([own_quote.id], uc(:list_quotes).call(alfa).items.map { |row| row[:quote].id })
     assert_raises(D::NotFound) { uc(:get_quote).call(alfa, draft.id) }
     assert_raises(D::NotFound) { uc(:approve_quote).call(alfa, other_quote.id, version: 1, approver_name: "Intruso") }
-    assert_raises(D::NotFound) { uc(:reject_quote).call(alfa, other_quote.id, reason: "Intruso") }
+    assert_raises(D::NotFound) { uc(:reject_quote).call(alfa, other_quote.id, version: 1, reason: "Intruso") }
     approved = uc(:approve_quote).call(alfa.with(ip: "203.0.113.30"), own_quote.id, version: 1, approver_name: "Paula Compras")
 
     assert_equal %w[customer 203.0.113.30], [approved.approved_by_type, approved.approved_ip]
-    assert_equal "rejected", uc(:reject_quote).call(neighbour, other_quote.id, reason: "Fora do orçamento").status
+    assert_equal "rejected", uc(:reject_quote).call(neighbour, other_quote.id, version: "1", reason: "Fora do orçamento").status
     cancelled = reserve(@actor, @customer, @branch, period("2026-03-15T08:00:00Z", "2026-03-16T08:00:00Z"), [line(@camera, 1)], mode: "hold")
     uc(:cancel_reservation).call(@actor, cancelled.id, reason: "Desistência")
     home = uc(:portal_home).call(alfa)
@@ -77,6 +77,21 @@ class PortalOperationsFlowTest < PortalFlowCase
     assert_equal 0, owner_query("SELECT count(*) AS n FROM contract_documents WHERE accepted_at IS NOT NULL").first["n"].to_i
     assert_equal "active", accept.call(alfa, version: "2").status
     assert_equal [%w[1 f], %w[2 t]], owner_query("SELECT version, accepted_at IS NOT NULL AS a FROM contract_documents ORDER BY version").map(&:values)
+  end
+
+  # A rejeição vale para a versão exibida: a versão reenviada depois disso é recusada como conflito e
+  # o orçamento continua enviado.
+  def test_quote_rejection_is_tied_to_the_version_shown
+    alfa = portal_customer(@actor, @customer, email: "versao@cliente.test")
+    quote = sent_quote(@actor, @customer, @branch, @camera, 20)
+    resent_quote(@actor, quote, @customer, @branch, @camera, 20, terms: "Retirada somente na loja.")
+    reject = ->(actor, **extra) { uc(:reject_quote).call(actor, quote.id, reason: "Mudou a data", **extra) }
+
+    assert_equal "stale_quote_version", assert_raises(D::Conflict) { reject.call(alfa, version: 1) }.code
+    assert_includes assert_raises(D::ValidationError) { reject.call(alfa) }.errors.fetch("versao").first, "versão"
+    assert_equal "stale_quote_version", assert_raises(D::Conflict) { reject.call(@actor, version: "1") }.code, "a equipe também é verificada"
+    assert_equal "sent", uc(:get_quote).call(alfa, quote.id)[:quote].status
+    assert_equal "rejected", reject.call(alfa, version: 2).status
   end
 
   def test_non_contract_attachments_are_not_downloadable_by_customers

@@ -58,7 +58,7 @@ class PortalPagesTest < PortalHttpTest
 
     assert_includes last_response.body, "Orçamento #{quote.code} aprovado (versão 1)"
     assert_equal "customer", owner_query("SELECT approved_by_type FROM quotes WHERE id = $1", [quote.id]).first["approved_by_type"]
-    portal_post "/portal/orcamentos/#{rejected.id}/rejeitar", { "motivo" => "Data alterada" }
+    portal_post "/portal/orcamentos/#{rejected.id}/rejeitar", { "versao" => "1", "motivo" => "Data alterada" }
     follow_redirect!
 
     assert_includes last_response.body, "Orçamento #{rejected.code} rejeitado"
@@ -126,6 +126,34 @@ class PortalPagesTest < PortalHttpTest
     audit = owner_query("SELECT details->>'document_version' AS version FROM audit_events WHERE action = 'contract.accepted'").map { |r| r["version"] }
 
     assert_equal ["2"], audit
+  end
+
+  # A rejeição vale para a versão exibida: uma versão reenviada depois exige nova leitura.
+  def test_quote_rejection_is_refused_for_a_version_the_customer_did_not_see
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    quote = sent_quote(@actor, @customer, @branch, @camera, 20)
+    portal_login
+    page = get_ok("/portal/orcamentos/#{quote.id}")
+
+    assert_equal 2, page.scan(%(name="versao" value="1")).size, "aprovação e rejeição enviam a versão exibida"
+    resent_quote(@actor, quote, @customer, @branch, @camera, 20, terms: "Retirada somente na loja.")
+    portal_post "/portal/orcamentos/#{quote.id}/rejeitar", { "versao" => "1", "motivo" => "Data alterada" }
+
+    assert_equal 409, last_response.status
+    assert_includes last_response.body, "A versão 1 não é a versão atual do orçamento (versão atual: 2)"
+    assert_includes last_response.body, "Retirada somente na loja."
+    assert_equal "sent", owner_query("SELECT status FROM quotes WHERE id = $1", [quote.id]).first["status"]
+    portal_post "/portal/orcamentos/#{quote.id}/rejeitar", { "motivo" => "Data alterada" }
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "informe a versão rejeitada"
+    portal_post "/portal/orcamentos/#{quote.id}/rejeitar", { "versao" => "2", "motivo" => "Data alterada" }
+
+    assert_equal 303, last_response.status
+    assert_equal %w[rejected 2], owner_query(<<~SQL, [quote.id]).first.values
+      SELECT q.status, a.details->>'version' AS version FROM quotes q JOIN audit_events a ON a.resource_id = q.id AND a.action = 'quote.rejected'
+       WHERE q.id = $1
+    SQL
   end
 
   def test_resources_of_other_customers_and_organizations_are_not_found

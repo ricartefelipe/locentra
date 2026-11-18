@@ -315,6 +315,9 @@ module Locentra
         end
       end
 
+      # Rejeição da versão atual. `version` é a versão exibida a quem rejeita: se o orçamento recebeu
+      # versão nova depois disso, a rejeição é recusada (`stale_quote_version`). O cliente sempre
+      # informa a versão; para a equipe ela é opcional (sem versão, vale a atual).
       class RejectQuote
         def initialize(uow:, quotes:, hold_release:, audit:, events:, clock:)
           @uow = uow
@@ -325,11 +328,12 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, quote_id, reason:)
+        def call(actor, quote_id, reason:, version: nil)
+          number = parse_version(version, required: actor.customer?)
           @uow.run(actor, Scope.decision_permission(actor)) do |tx, current|
             now = @clock.now
             quote = Scope.lock!(@quotes, tx, current, quote_id)
-            rejected = quote.reject(reason, now)
+            rejected = quote.reject(reason, now, version: number)
             @quotes.update(tx, rejected, now)
             @hold_release.call(tx, current, quote, "Orçamento rejeitado")
             @audit.record(tx, current, "quote.rejected", "quote", quote.id, "code" => quote.code, "version" => quote.current_version,
@@ -337,6 +341,16 @@ module Locentra
             @events.publish(tx, "quote.rejected", "quote", quote.id, "code" => quote.code, "version" => quote.current_version)
             rejected
           end
+        end
+
+        private
+
+        def parse_version(value, required:)
+          return nil if value.to_s.empty? && !required
+
+          Integer(value.to_s, 10)
+        rescue ArgumentError
+          raise Domain::ValidationError.field("versao", "informe a versão rejeitada")
         end
       end
 

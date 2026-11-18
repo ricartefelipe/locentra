@@ -65,9 +65,11 @@
         <button type="submit" class="primary">Aprovar versão <%= q.current_version %></button>
       </form>
       <details<%= open_if(@errors, "motivo") %>>
-        <summary>Rejeitar orçamento</summary>
+        <summary>Rejeitar a versão <%= q.current_version %></summary>
         <form method="post" action="/portal/orcamentos/<%= q.id %>/rejeitar" class="stack">
           <%= csrf_field %>
+          <input type="hidden" name="versao" value="<%= q.current_version %>">
+          <p>A rejeição vale para a <strong>versão <%= q.current_version %></strong>.</p>
           <label for="rejeicao-motivo">Motivo</label>
           <input id="rejeicao-motivo" name="motivo" required maxlength="500"<%= invalid(@errors, "motivo") %>>
           <%= field_errors(@errors, "motivo") %>

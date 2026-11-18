@@ -87,11 +87,13 @@ module Locentra
             show(ctx, errors: errors_of(e), status: e.is_a?(Domain::Conflict) ? 409 : 422)
           end
 
+          # A versão exibida acompanha a rejeição: se a locadora reenviou outra versão, a página volta
+          # com a versão atual (409) e nada é gravado.
           def reject(ctx)
-            quote = uc(:reject_quote).call(ctx.actor, ctx.param(:id), reason: ctx.form["motivo"])
-            redirect(ctx, "/portal/orcamentos/#{quote.id}", notice: "Orçamento #{quote.code} rejeitado.")
+            quote = uc(:reject_quote).call(ctx.actor, ctx.param(:id), version: ctx.form["versao"], reason: ctx.form["motivo"])
+            redirect(ctx, "/portal/orcamentos/#{quote.id}", notice: "Orçamento #{quote.code} rejeitado (versão #{quote.current_version}).")
           rescue Domain::ValidationError, Domain::InvalidTransition, Domain::Conflict => e
-            show(ctx, errors: errors_of(e), status: 422)
+            show(ctx, errors: errors_of(e), status: e.is_a?(Domain::Conflict) ? 409 : 422)
           end
 
           private
