@@ -237,6 +237,26 @@ module Locentra
           active ? raw(%( aria-current="page" class="active")) : raw("")
         end
 
+        # Navegação do portal do cliente (todas as seções exigem somente o acesso ao portal).
+        PORTAL_NAVIGATION = [
+          ["Início", "/portal"],
+          ["Disponibilidade e solicitação", "/portal/disponibilidade"],
+          ["Minhas reservas", "/portal/reservas"],
+          ["Orçamentos", "/portal/orcamentos"],
+          ["Contratos", "/portal/contratos"],
+          ["Cobranças e saldos", "/portal/financeiro"]
+        ].freeze
+
+        def portal_navigation = PORTAL_NAVIGATION
+
+        def portal_nav_class(prefix)
+          active = prefix == "/portal" ? request.path == "/portal" : request.path.start_with?(prefix)
+          active ? raw(%( aria-current="page" class="active")) : raw("")
+        end
+
+        # Nome de quem está conectado (sessão), para o cabeçalho.
+        def session_user_name = request.session && request.session["user_name"]
+
         private
 
         def instance_assigns
