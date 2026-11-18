@@ -32,8 +32,12 @@ module BrowserProcess
   module_function
 
   def browser
-    @browser ||= Ferrum::Browser.new(browser_path: ENV.fetch("BROWSER_PATH"), headless: true, timeout: 15, process_timeout: 30,
+    @browser ||= Ferrum::Browser.new(browser_path: executable, headless: true, timeout: 15, process_timeout: 30,
                                      window_size: [1280, 900], browser_options: { "no-sandbox" => nil, "disable-dev-shm-usage" => nil })
+  end
+
+  def executable
+    ENV.fetch("BROWSER_PATH") { raise "defina BROWSER_PATH com o executável do Chromium ou do Chrome" }
   end
 
   def quit
