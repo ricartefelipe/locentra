@@ -69,9 +69,12 @@ module Locentra
     # tem efeito na operação seguinte, mesmo com sessão aberta.
     #
     # Conflitos que encerram a operação (disponibilidade, bloqueio vencido, concorrência,
-    # idempotência) são contados em `domain_conflicts_total{code}` independentemente da interface
-    # (formulário web, API, worker ou CLI). `metrics` é uma porta com `increment(nome, **rótulos)`.
+    # idempotência e transição recusada pelo estado atual, que a interface também responde com 409)
+    # são contados em `domain_conflicts_total{code}` independentemente da interface (formulário web,
+    # API, worker ou CLI). `metrics` é uma porta com `increment(nome, **rótulos)`.
     class UnitOfWork
+      INVALID_TRANSITION = "invalid_transition"
+
       def initialize(transactor:, access:, clock:, metrics: nil)
         @transactor = transactor
         @access = access
@@ -102,6 +105,9 @@ module Locentra
         yield
       rescue Domain::Conflict => e
         @metrics&.increment("domain_conflicts_total", code: e.code)
+        raise
+      rescue Domain::InvalidTransition
+        @metrics&.increment("domain_conflicts_total", code: INVALID_TRANSITION)
         raise
       end
 

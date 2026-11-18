@@ -86,7 +86,8 @@ banco é coletado a cada leitura.
 - `route` é a rota modelo (`/reservas/:id`), `unmatched` para caminhos sem rota e `static` para
   arquivos estáticos; `method` fora de GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS vira `OTHER`.
 - `code` dos conflitos é o código fixo do erro de domínio (por exemplo `unavailable`, `hold_expired`,
-  `early_pickup_unavailable`, `concurrent_update`, `idempotency_key_reused`, `duplicate:<constraint>`).
+  `early_pickup_unavailable`, `concurrent_update`, `idempotency_key_reused`, `duplicate:<constraint>`)
+  ou `invalid_transition` para transições recusadas pela máquina de estados.
 
 ### Conflitos de disponibilidade
 
@@ -95,8 +96,12 @@ mostrou a lacuna: os formulários tratam `Domain::Unavailable` (criar, confirmar
 reserva, orçamentos, aditivos) e respondem 409 sem passar por esse tratamento, e conflitos no worker
 nunca eram contados. A contagem passou para `UnitOfWork#run`/`#anonymous`: todo `Domain::Conflict` que
 encerra uma operação é contado uma vez, por código, em qualquer interface. O tratamento central deixou
-de contar para não duplicar. Conflitos resolvidos dentro da própria transação (por exemplo, a troca de
-unidade após violação da exclusion constraint) não são contados, pois não encerram a operação.
+de contar para não duplicar. Como ele contava toda resposta 409, a `UnitOfWork` também conta
+`Domain::InvalidTransition` (código `invalid_transition`, por exemplo confirmar uma reserva cancelada
+ou aceitar um contrato encerrado), que não herda de `Domain::Conflict`; assim nenhuma recusa contada
+antes deixou de ser contada, e as tratadas pelos formulários passaram a ser. Conflitos resolvidos
+dentro da própria transação (por exemplo, a troca de unidade após violação da exclusion constraint)
+não são contados, pois não encerram a operação.
 
 ### Fila, retentativas e falhas permanentes
 
@@ -193,8 +198,8 @@ esperando duas linhas `skipped`).
 | Arquivo | O que prova |
 |---|---|
 | `test/unit/infrastructure/metrics_test.rb` | HELP/TYPE únicos por família, formato das amostras, histogramas cumulativos, descarte de rótulos, redação de identificadores, escape e truncamento, totais absolutos, substituição de famílias, método `OTHER` e request_id no middleware |
-| `test/unit/application/observability_test.rb` | `ExternalCalls` (sucesso, desfecho classificado, erro mapeado e propagado), provedores com e sem ator, conflitos contados pela `UnitOfWork` (inclusive `anonymous` e conflito do coordenador), `CollectMetrics` com agregados da fila e totais |
-| `test/http/observability_test.rb` | Correlação de ponta a ponta (eventos, auditoria, tarefas, `job.finished`, `external.call` do webhook e do simulador, simulação e webhook público); `/metrics` válido no formato do Prometheus com todos os sinais (inclusive conflito tratado por formulário, retentativa e falha permanente agregadas) e nenhum rótulo com UUID ou identificador do tenant; token de métricas |
+| `test/unit/application/observability_test.rb` | `ExternalCalls` (sucesso, desfecho classificado, erro mapeado e propagado), provedores com e sem ator, conflitos e transições inválidas contados pela `UnitOfWork` (inclusive `anonymous` e conflito do coordenador), `CollectMetrics` com agregados da fila e totais |
+| `test/http/observability_test.rb` | Correlação de ponta a ponta (eventos, auditoria, tarefas, `job.finished`, `external.call` do webhook e do simulador, simulação e webhook público); `/metrics` válido no formato do Prometheus com todos os sinais (inclusive conflito e transição inválida tratados por formulário, retentativa e falha permanente agregadas) e nenhum rótulo com UUID ou identificador do tenant; token de métricas |
 | `test/integration/demo_flow_test.rb` | Roteiro completo |
 | `test/integration/seed_test.rb` | Seed idempotente, preparo completado em banco semeado antes e, ao repetir o seed, conta Asaas, conta desativada e vínculo revogado mantidos |
 | `test/browser/*` | Tabela da seção de testes de navegador |

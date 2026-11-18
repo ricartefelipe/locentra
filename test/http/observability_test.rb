@@ -111,8 +111,9 @@ class ObservabilityTest < HttpTest
   end
 
   # Tráfego com identificadores nos caminhos, rota inexistente, conflito tratado pelo formulário,
-  # conciliação no processo web, uma entrega de webhook recusada (retentativa) e uma tarefa sem
-  # handler (falha permanente); a rotina de manutenção grava os agregados da fila.
+  # conciliação no processo web, uma entrega de webhook recusada (retentativa), a confirmação de uma
+  # reserva já cancelada (transição inválida) e uma tarefa sem handler (falha permanente); a rotina de
+  # manutenção grava os agregados da fila.
   def generate_signals(reservation)
     get "/reservas/#{reservation.id}"
     get "/clientes/#{@customer.id}"
@@ -125,6 +126,9 @@ class ObservabilityTest < HttpTest
     @capture = CaptureServer.new(status: 500)
     uc(:create_webhook).call(@actor, url: @capture.url, events: ["reservation.cancelled"])
     uc(:cancel_reservation).call(@actor, reservation.id, reason: "Cliente desistiu")
+    post "/reservas/#{reservation.id}/confirmar", { "_csrf" => csrf }
+
+    assert_includes last_response.body, "Transição inválida", "o formulário trata a transição recusada e ainda assim ela é contada"
     worker_system.transactor.call(tenant_id: @org[:organization_id]) do |tx|
       worker_system.queue.enqueue(tx, "tarefa.desconhecida", {}, priority: 10)
       worker_system.queue.enqueue(tx, "platform.housekeeping", {}, priority: 99)
@@ -148,6 +152,7 @@ class ObservabilityTest < HttpTest
     assert_operator value.call("locentra_http_request_duration_seconds_count", route: "/reservas"), :>=, 1
     assert_operator value.call("locentra_db_pool_wait_seconds_count", pool: "web"), :>=, 1
     assert_operator value.call("locentra_domain_conflicts_total", code: "unavailable"), :>=, 1
+    assert_in_delta 1, value.call("locentra_domain_conflicts_total", code: "invalid_transition").to_f, "transição recusada contada uma vez"
     assert_operator value.call("locentra_external_calls_total", provider: "simulator", kind: "list_charges", outcome: "ok"), :>=, 1
     assert_operator value.call("locentra_jobs_queue_size", queue: "default", status: "pending"), :>=, 1, "entrega reagendada"
     assert_in_delta 1, value.call("locentra_jobs_queue_size", queue: "default", status: "dead")

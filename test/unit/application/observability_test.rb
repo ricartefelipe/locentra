@@ -122,11 +122,13 @@ class ApplicationObservabilityTest < UnitTest
     assert_raises(Domain::HoldExpired) { uow.run(user) { raise Domain::HoldExpired } }
     assert_raises(Domain::Conflict) { uow.anonymous { raise Domain::Conflict.new("duplicado", code: "duplicate:users_email_key") } }
     assert_raises(Domain::ValidationError) { uow.run(user) { raise Domain::ValidationError.field("x", "inválido") } }
+    assert_raises(Domain::InvalidTransition) { uow.run(user, "reservations.write") { raise Domain::InvalidTransition.new("reserva", "cancelled", "confirmed") } }
+    assert_raises(Domain::InvalidTransition) { uow.anonymous { raise Domain::InvalidTransition.new("convite", "accepted", "accepted") } }
     concurrent = A::UnitOfWork.new(transactor: FakeTransactor.new(error: Domain::Conflict.new("concorrente", code: "concurrent_update")),
                                    access: access, clock: TestClock.new, metrics: metrics)
 
     assert_raises(Domain::Conflict) { concurrent.run(user) { :nunca } }
-    assert_equal({ "unavailable" => 1, "hold_expired" => 1, "duplicate:users_email_key" => 1, "concurrent_update" => 1 },
+    assert_equal({ "unavailable" => 1, "hold_expired" => 1, "duplicate:users_email_key" => 1, "invalid_transition" => 2, "concurrent_update" => 1 },
                  metrics.counters.filter_map { |(name, labels), value| [labels[:code], value] if name == "domain_conflicts_total" }.to_h)
     assert_equal :ok, A::UnitOfWork.new(transactor: FakeTransactor.new, access: access, clock: TestClock.new).run(user) { :ok }
   end
