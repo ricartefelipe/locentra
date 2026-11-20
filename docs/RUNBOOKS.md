@@ -3,7 +3,7 @@
 Cada procedimento indica se foi **exercitado** (executado de ponta a ponta com resultado registrado) ou se é
 **procedimento escrito** (ainda não executado em ambiente real).
 
-## 1. Subir o ambiente local — procedimento escrito (o healthcheck do worker mudou depois do último exercício)
+## 1. Subir o ambiente local — exercitado em 20/11/2026 (esquema da 1.0.0)
 
 ```bash
 bin/setup        # build, PostgreSQL + Mailpit, migrations, seed, web e worker
@@ -16,7 +16,15 @@ O healthcheck da imagem consulta `/health/live` e vale para o processo web. O wo
 serviço `worker` do Compose usa `ruby bin/worker --check`, que confere o arquivo de vida
 (`WORKER_HEALTH_FILE`, padrão `/app/tmp/worker.alive`) atualizado a cada 20 s pela thread de heartbeat
 (vencido após 90 s). Em outro orquestrador, configure o mesmo comando como liveness do worker. Web e worker
-têm `stop_grace_period` de 30 s, acima dos 25 s de encerramento gracioso de cada um.
+têm `stop_grace_period` de 30 s, acima dos 25 s de encerramento gracioso de cada um. Os dois terminam com
+código 0 depois da parada graciosa por TERM (o Puma não relança o sinal: `raise_exception_on_sigterm false`).
+
+Registro do exercício (20/11/2026): `bin/setup` executado a partir de uma cópia limpa da árvore commitada, sem
+`.env` nem volumes. Imagens construídas, 14 migrations aplicadas, seed carregado e `web`, `worker`,
+`postgres` e `mailpit` `healthy`. `/health/live` e `/health/ready` responderam 200, `ruby bin/worker --check`
+saiu com 0 e a entrada com `ana@alfa.demo` redirecionou para a escolha de organização. O envio do
+formulário de entrada com `Sec-Fetch-Site: cross-site` foi recusado com 403. `docker compose stop web worker`
+concluiu em menos de 2 s, com código de saída 0 nos dois serviços.
 
 ## 2. Aplicar migrations — exercitado (CI "Reconstrução do banco e seed" a cada PR)
 

@@ -10,11 +10,13 @@ webhooks, fila, financeiro, backup, configuração e interface), em 20/11/2026:
 
 | Verificação | Resultado |
 |---|---|
-| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 623 testes, 0 falhas |
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 624 testes, 0 falhas |
 | Cobertura de domínio + aplicação | 99,10% de linhas, 92,10% de branches (metas 90% / 80%) |
 | `rake test:browser` (Ferrum, Chrome headless) | 9 testes, 0 falhas |
 | `rubocop` (árvore da branch, com os modos de arquivo do repositório), actionlint | sem ofensas |
 | Backup e restauração com o esquema final (14 migrations) | exercitados; registro em `RUNBOOKS.md` |
+| `bin/setup` completo a partir de diretório limpo, com healthchecks e parada graciosa | exercitado; registro em `RUNBOOKS.md` §1 |
+| CI do PR da release (#11) | 7 checks aprovados |
 
 Verificação anterior, na integração do PR #9: 553 testes, 0 falhas; 7 checks de CI aprovados.
 
