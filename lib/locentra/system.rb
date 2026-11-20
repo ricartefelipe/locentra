@@ -132,8 +132,6 @@ module Locentra
       uc[:reset_password] = A::Identity::ResetPassword.new(uow: uow, users: r[:users], tokens: s[:tokens], hasher: s[:hasher],
                                                            sessions_repository: r[:sessions], clock: clock)
       uc[:list_memberships] = A::Identity::ListMemberships.new(uow: uow, organizations: r[:organizations])
-      uc[:switch_organization] =
-        A::Organizations::SwitchOrganization.new(uow: uow, organizations: r[:organizations], sessions: s[:sessions])
       uc[:create_branch] =
         A::Organizations::CreateBranch.new(**common, organizations: r[:organizations], limits: s[:limits], audit: audit, ids: ids)
       uc[:invite_member] = A::Organizations::InviteMember.new(**common, organizations: r[:organizations], limits: s[:limits],

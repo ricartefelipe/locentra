@@ -142,16 +142,6 @@ class IdentityFlowTest < DatabaseTest
     assert_raises(D::NotFound) { uc(:revoke_membership).call(@actor, membership_id: SecureRandom.uuid) }
   end
 
-  def test_switch_organization_requires_active_membership
-    _, session = sessions.create(user_id: @org[:user_id])
-    other = create_organization(name: "Locadora Delta", email: "delta@example.test")
-
-    assert_raises(D::AccessDenied) { uc(:switch_organization).call(session, other[:organization_id]) }
-    token, = uc(:switch_organization).call(session, @org[:organization_id])
-
-    assert_equal @org[:organization_id], sessions.resolve(token)["organization_id"]
-  end
-
   def test_plan_limits_are_enforced
     small = create_organization(name: "Locadora Pequena", email: "pequena@example.test", plan: "essencial")
     assert_raises(D::PlanLimitExceeded) { uc(:create_branch).call(small[:actor], name: "Filial 2", code: "F2") }

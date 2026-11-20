@@ -79,25 +79,6 @@ module Locentra
         end
       end
 
-      # Troca de organização ativa: exige vínculo ativo e rotaciona a sessão.
-      class SwitchOrganization
-        def initialize(uow:, organizations:, sessions:)
-          @uow = uow
-          @organizations = organizations
-          @sessions = sessions
-        end
-
-        def call(session, organization_id)
-          org_id = Domain::Identifier.parse(organization_id, "organizacao")
-          membership = @uow.anonymous(tenant_id: org_id, user_id: session["user_id"]) do |tx|
-            @organizations.active_membership(tx, org_id, session["user_id"])
-          end
-          raise Domain::AccessDenied, "sem acesso à organização" unless membership
-
-          @sessions.rotate(session, organization_id: org_id)
-        end
-      end
-
       class InviteMember
         TTL = 7 * 86_400
 
