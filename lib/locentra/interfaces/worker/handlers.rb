@@ -90,7 +90,8 @@ module Locentra
             next nil unless row
 
             secret = "#{tx.tenant_id!}.#{@system.ids.token(32)}"
-            tx.execute("UPDATE invitations SET token_digest = $2 WHERE id = $1", [row["id"], Application::Identity::Tokens.digest(secret)])
+            tx.execute("UPDATE invitations SET token_digest = $2 WHERE organization_id = $3 AND id = $1",
+                       [row["id"], Application::Identity::Tokens.digest(secret), tx.tenant_id!])
             [row, @system.repos[:organizations].find(tx, tx.tenant_id!), secret]
           end
           return :invitation_closed unless invitation

@@ -138,7 +138,8 @@ module Locentra
         end
 
         def mark_invitation_accepted(tx, id, user_id, now)
-          tx.execute("UPDATE invitations SET accepted_at = $3, accepted_user_id = $2 WHERE id = $1", [id, user_id, now])
+          tx.execute("UPDATE invitations SET accepted_at = $3, accepted_user_id = $2 WHERE organization_id = $4 AND id = $1",
+                     [id, user_id, now, tx.tenant_id!])
         end
 
         def pending_invitations(tx)

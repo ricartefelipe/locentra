@@ -10,8 +10,9 @@ atualizado.
 - **Decisão:** Ruby 4.0.9, fixado em `.ruby-version`, no `Gemfile` (`ruby file:`) e na imagem
   `ruby:4.0.9-slim-trixie`.
 - **Consequências:** no Ruby 4.0, `bigdecimal`, `csv`, `logger`, `net-smtp`, `minitest` e `rake` são
-  bundled gems e precisam ser declaradas no `Gemfile`. `json`, `erb`, `date`, `time`, `securerandom`,
-  `openssl`, `optparse`, `net-http`, `uri` e `ipaddr` continuam default gems e não são declaradas.
+  bundled gems e precisam ser declaradas no `Gemfile`. `erb`, `date`, `time`, `securerandom`, `openssl`,
+  `optparse`, `net-http`, `uri` e `ipaddr` continuam default gems e não são declaradas; `json` passou a ser
+  declarada na versão corrigida (ADR-011).
 
 ## ADR-002 — Sem framework de aplicação e sem ORM
 
@@ -79,12 +80,14 @@ atualizado.
 
 - **Decisão:** toda operação de negócio abre transação com `set_config('app.tenant_id', ..., true)`
   (escopo local) a partir do ator autenticado. Políticas RLS (`ENABLE` e `FORCE`) comparam
-  `organization_id` com `app_tenant_id()`; ausência de contexto resulta em nenhuma linha. Três papéis:
-  `locentra_owner` (migrations, proprietário), `locentra_app` (web/CLI) e `locentra_worker` (fila),
-  todos sem superuser e sem `BYPASSRLS`. Chaves estrangeiras compostas `(organization_id, id)`
+  `organization_id` com `app_tenant_id()`; ausência de contexto resulta em nenhuma linha. Três papéis de
+  operação: `locentra_owner` (migrations, proprietário), `locentra_app` (web/CLI) e `locentra_worker`
+  (fila), todos sem superuser e sem `BYPASSRLS`; o papel de backup `locentra_backup`, com `BYPASSRLS`, foi
+  acrescentado pela ADR-024. Chaves estrangeiras compostas `(organization_id, id)`
   impedem relações entre tenants mesmo com SQL incorreto.
-- **Exceções globais documentadas:** `users`, `sessions`, `user_tokens`, `rate_limits`, `plans` e
-  `queue_stats`. `organizations` tem RLS com leitura pelo próprio tenant, por membros ativos e pelo
+- **Exceções globais documentadas:** `users`, `sessions`, `user_tokens`, `rate_limits`, `plans`,
+  `queue_stats` e `job_outcome_totals` (ADR-025); as políticas além do isolamento por tenant estão
+  consolidadas em `ISOLAMENTO.md`. `organizations` tem RLS com leitura pelo próprio tenant, por membros ativos e pelo
   worker. Tarefas de e-mail de identidade sem organização podem ser inseridas, mas não lidas, pela
   aplicação.
 

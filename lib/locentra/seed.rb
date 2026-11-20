@@ -125,7 +125,8 @@ module Locentra
       invitation = uc(:invite_member).call(actor, email: email, role: role)
       token = "#{actor.organization_id}.seed-#{@system.ids.token(24)}"
       @system.uow.run(actor) do |tx, _|
-        tx.execute("UPDATE invitations SET token_digest = $1 WHERE id = $2", [Application::Identity::Tokens.digest(token), invitation["id"]])
+        tx.execute("UPDATE invitations SET token_digest = $1 WHERE organization_id = $3 AND id = $2",
+                   [Application::Identity::Tokens.digest(token), invitation["id"], tx.tenant_id!])
       end
       token
     end

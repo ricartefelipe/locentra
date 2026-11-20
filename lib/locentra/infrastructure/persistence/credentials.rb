@@ -31,9 +31,9 @@ module Locentra
         end
 
         def touch(tx, id, now)
-          tx.execute(<<~SQL, [id, now])
+          tx.execute(<<~SQL, [id, now, tx.tenant_id!])
             UPDATE api_credentials SET last_used_at = $2
-             WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < $2::timestamptz - interval '1 minute')
+             WHERE organization_id = $3 AND id = $1 AND (last_used_at IS NULL OR last_used_at < $2::timestamptz - interval '1 minute')
           SQL
         end
 

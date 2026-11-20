@@ -151,8 +151,9 @@ module Locentra
         end
 
         def attempts(tx, job_id)
-          tx.query("SELECT attempt, worker, started_at, finished_at, outcome, error FROM job_attempts WHERE job_id = $1 ORDER BY attempt",
-                   [job_id])
+          tx.query(<<~SQL, [job_id, tx.tenant_id!])
+            SELECT attempt, worker, started_at, finished_at, outcome, error FROM job_attempts WHERE job_id = $1 AND organization_id = $2 ORDER BY attempt
+          SQL
         end
 
         def self.worker_name
