@@ -23,6 +23,19 @@ class InputValidationTest < HttpTest
       "modalidade_diaria" => "rolling_24h" }.merge(extra)
   end
 
+  def test_api_reservation_items_must_be_objects
+    token = uc(:create_credential).call(@org[:actor], name: "ERP", scopes: %w[reservations.write], expires_in_days: 1)["token"]
+    base = { "customer_id" => @customer.id, "branch_id" => @org[:branch].id, "starts_at" => "2026-03-10T08:00:00Z",
+             "ends_at" => "2026-03-10T12:00:00Z" }
+    [["x"], 5, "x", [5], { "product_id" => @camera.id, "quantity" => 1 }].each_with_index do |items, i|
+      post "/api/v1/reservations", JSON.generate(base.merge("items" => items)),
+           { "HTTP_AUTHORIZATION" => "Bearer #{token}", "CONTENT_TYPE" => "application/json", "HTTP_IDEMPOTENCY_KEY" => "itens-invalidos-#{i}" }
+
+      assert_equal 422, last_response.status, items.inspect
+      assert_equal ["items"], json_body["error"]["details"]["fields"].keys
+    end
+  end
+
   def test_pagination_offset_beyond_the_limit_is_a_validation_error
     token = uc(:create_credential).call(@org[:actor], name: "ERP", scopes: %w[customers.read], expires_in_days: 1)["token"]
     get "/api/v1/customers", { "offset" => "99999999999999999999" }, { "HTTP_AUTHORIZATION" => "Bearer #{token}" }
