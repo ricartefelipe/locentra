@@ -235,6 +235,28 @@ class WorkerTest < DatabaseTest
     end
   end
 
+  # Retenção: tarefas concluídas saem depois de 14 dias, com as tentativas; mortas e recentes ficam.
+  def test_housekeeping_purges_old_finished_jobs_with_their_attempts
+    old = Array.new(2) { |i| wtx { |tx| queue.enqueue(tx, "email.send", { "n" => i }) } }
+    old.each { worker_system.transactor.call { |tx| queue.complete(tx, queue.claim(tx, worker: "w", limit: 1).first) } }
+    dead = wtx { |tx| queue.enqueue(tx, "email.send", { "n" => "morta" }) }
+    worker_system.transactor.call { |tx| queue.kill(tx, queue.claim(tx, worker: "w", limit: 1).first, "falha") }
+    @clock.advance(Locentra::Interfaces::Worker::Handlers::JOB_RETENTION + 60)
+    recent = wtx { |tx| queue.enqueue(tx, "email.send", { "n" => "recente" }) }
+    worker_system.transactor.call { |tx| queue.complete(tx, queue.claim(tx, worker: "w", limit: 1).first) }
+    handlers = Locentra::Interfaces::Worker::Handlers.new(worker_system, mailer: @mailer, templates: worker_system.services[:mail_templates])
+
+    purged = handlers.send(:platform_housekeeping, nil)["jobs_purged"]
+
+    assert_operator purged, :>=, 2, "as duas antigas (e as concluídas no setup)"
+    remaining = PG.connect(TestDatabase.worker_url).then do |c|
+      [c.exec("SELECT id FROM jobs WHERE kind = 'email.send'").column_values(0).sort,
+       c.exec_params("SELECT count(*) FROM job_attempts WHERE job_id = ANY($1::uuid[])", ["{#{old.join(",")}}"]).getvalue(0, 0).to_i].tap { c.close }
+    end
+
+    assert_equal [[dead, recent].sort, 0], remaining
+  end
+
   def test_unknown_job_kind_fails_permanently
     wtx { |tx| queue.enqueue(tx, "desconhecido.tipo", {}) }
     drain

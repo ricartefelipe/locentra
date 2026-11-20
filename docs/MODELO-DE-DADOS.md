@@ -181,3 +181,7 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 | `webhook_deliveries` | sim/sim | id:uuid!, organization_id:uuid!, endpoint_id:uuid!, event_id:uuid!, event_type:text!, status:text!, attempts:integer!, last_status_code:integer, last_error:text, created_at:timestamptz!, last_attempt_at:timestamptz, delivered_at:timestamptz |
 | `inbound_webhooks` | sim/sim | id:uuid!, organization_id:uuid!, provider:text!, event_id:text!, event_type:text!, payload:jsonb!, status:text!, received_at:timestamptz!, processed_at:timestamptz, error:text, provider_account_id:uuid |
 | `attachments` | sim/sim | id:uuid!, organization_id:uuid!, owner_type:text!, owner_id:uuid!, filename:text!, content_type:text!, byte_size:bigint!, sha256:text!, storage_key:text!, created_by:uuid, created_at:timestamptz!, retain_until:timestamptz, deleted_at:timestamptz |
+
+Retenção: tarefas `succeeded`/`cancelled` e suas tentativas são removidas 14 dias após a conclusão pelo
+housekeeping do worker (índice parcial `jobs_finished_idx`, migration 0014); tarefas `dead`, eventos da
+outbox, entregas de webhook e webhooks recebidos são mantidos (ver `RUNBOOKS.md`, seção 9).

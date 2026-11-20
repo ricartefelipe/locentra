@@ -11,6 +11,10 @@ module Locentra
       # Tabela explícita tipo de tarefa → handler. Cada handler recebe a tarefa reivindicada e abre
       # transações curtas com o tenant da própria tarefa. Chamadas de rede ocorrem fora de transação.
       class Handlers
+        # Retenção de tarefas concluídas (platform.housekeeping) e tamanho de cada lote removido.
+        JOB_RETENTION = 14 * 86_400
+        PURGE_BATCH = 5_000
+
         def initialize(system, mailer:, templates:)
           @system = system
           @mailer = mailer
@@ -137,15 +141,22 @@ module Locentra
           orgs.size
         end
 
+        # Limpeza periódica. Tarefas concluídas (succeeded, cancelled) saem depois de JOB_RETENTION, em
+        # lotes, com as tentativas; tarefas mortas ficam até serem reprocessadas ou tratadas. Eventos da
+        # outbox, entregas de webhook e webhooks recebidos são histórico do negócio e não são removidos.
         def platform_housekeeping(_job)
           now = @system.clock.now
-          @system.transactor.call do |tx|
+          purged = @system.transactor.call do |tx|
             @system.repos[:reports].refresh_queue_stats(tx, now)
             tx.execute("DELETE FROM rate_limits WHERE window_start < $1", [now - 86_400])
             tx.execute("DELETE FROM sessions WHERE absolute_expires_at < $1", [now - (30 * 86_400)])
             tx.execute("DELETE FROM user_tokens WHERE expires_at < $1", [now - (30 * 86_400)])
+            tx.execute(<<~SQL, [now - JOB_RETENTION, PURGE_BATCH])
+              DELETE FROM jobs WHERE id IN (
+                SELECT id FROM jobs WHERE status IN ('succeeded', 'cancelled') AND finished_at < $1 ORDER BY finished_at LIMIT $2)
+            SQL
           end
-          :ok
+          { "jobs_purged" => purged }
         end
 
         # Rotina por organização: expira bloqueios e orçamentos vencidos, detecta atrasos e limpa

@@ -157,14 +157,25 @@ tentativa permitida termina `dead`.
   webhook (novo endpoint) e as chaves de API no provedor, porque os valores antigos podem ter sido lidos.
 - Senhas dos papéis do banco: `ALTER ROLE ... PASSWORD` e atualização das URLs; reiniciar processos.
 
-## 9. Dimensionamento de conexões — procedimento escrito
+## 9. Retenção de dados operacionais
+
+- Tarefas concluídas (`succeeded`, `cancelled`) e suas tentativas (`job_attempts`) são removidas pelo
+  `platform.housekeeping` do worker 14 dias depois de concluídas, em lotes de 5.000 por minuto (índice
+  `jobs_finished_idx`). Tarefas `dead` ficam até serem reprocessadas.
+- Sessões e tokens de uso único vencidos há 30 dias e janelas de limite de taxa com mais de um dia também
+  são removidos.
+- Eventos da outbox, entregas de webhook e webhooks recebidos são histórico do negócio (reenvio manual,
+  conciliação, auditoria) e não são removidos automaticamente; acompanhe o tamanho dessas tabelas no
+  backup e defina, se necessário, um arquivamento conforme a política de retenção da operação.
+
+## 10. Dimensionamento de conexões — procedimento escrito
 
 Conexões máximas = processos web × `DB_POOL_SIZE` (≥ `PUMA_THREADS`) + workers × (`WORKER_CONCURRENCY` +
 `WEBHOOK_CONCURRENCY` + 2) +
 execuções de CLI/migrations. Mantenha abaixo de `max_connections` com folga. Espera por conexão aparece em
 `locentra_db_pool_wait_seconds` e esgotamento em `locentra_db_pool_timeouts_total` (resposta 503).
 
-## 10. Proxy reverso e IP do cliente — procedimento escrito
+## 11. Proxy reverso e IP do cliente — procedimento escrito
 
 O IP do cliente alimenta os limites de taxa por IP, as sessões, a auditoria e o aceite de contratos. Sem
 `TRUSTED_PROXIES`, a aplicação usa o par da conexão e ignora `X-Forwarded-For` e `Forwarded`. Atrás de um
@@ -180,7 +191,7 @@ proxy reverso (nginx, balanceador):
 Limites por IP e por credencial (ADR-026) respondem `429` com `Retry-After`; `API_RATE_LIMIT` ajusta o
 limite da API por credencial por minuto.
 
-## 11. Implantação de uma versão publicada — procedimento escrito
+## 12. Implantação de uma versão publicada — procedimento escrito
 
 A publicação está descrita em `CONTRIBUTING.md` (tag anotada `vX.Y.Z`, CI completa e `PUBLISH_IMAGE=true`).
 A imagem publicada é `ghcr.io/<repositório>:X.Y.Z`; não existe tag `latest`, então a versão é sempre
