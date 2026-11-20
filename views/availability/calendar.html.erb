@@ -1,0 +1,39 @@
+<header class="page-header">
+  <h1>Disponibilidade</h1>
+  <a class="button" href="/disponibilidade/consulta">Consultar período específico</a>
+</header>
+<form method="get" action="/disponibilidade" class="filters">
+  <label for="filial">Filial</label>
+  <select id="filial" name="filial"><% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@branch.id, b.id) %>><%= b.name %></option><% end %></select>
+  <label for="inicio">A partir de</label><input id="inicio" name="inicio" type="date" value="<%= @start.iso8601 %>">
+  <label for="dias">Dias</label>
+  <select id="dias" name="dias"><% [7, 14, 31].each do |d| %><option value="<%= d %>"<%= selected(@days, d) %>><%= d %></option><% end %></select>
+  <button type="submit">Atualizar</button>
+</form>
+<p class="muted">Unidades livres durante todo o dia local (<%= @data[:zone].identifier %>), já descontando reservas, bloqueios, preparação e ativos indisponíveis.</p>
+<% products = @data[:columns].first ? @data[:columns].first[:rows].map { |r| r["product"] } : [] %>
+<% if products.empty? %>
+  <p class="empty">Nenhum produto ativo. <a href="/produtos/novo">Cadastre o catálogo</a>.</p>
+<% else %>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Calendário de disponibilidade">
+    <table class="table calendar">
+      <thead>
+        <tr><th scope="col">Produto</th>
+          <% @data[:dates].each do |d| %><th scope="col"><%= d.strftime("%d/%m") %><br><span class="muted"><%= %w[dom seg ter qua qui sex sáb][d.wday] %></span></th><% end %>
+        </tr>
+      </thead>
+      <tbody>
+        <% products.each_with_index do |product, index| %>
+          <tr>
+            <th scope="row"><a href="/produtos/<%= product.id %>"><%= product.name %></a> <span class="muted"><%= product.tracking_label %></span></th>
+            <% @data[:columns].each do |col| %>
+              <% row = col[:rows][index] %>
+              <% tone = row["total"].zero? ? "none" : (row["available"].zero? ? "full" : (row["available"] < row["total"] ? "partial" : "free")) %>
+              <td class="cell-<%= tone %>"><span class="sr-only">Disponíveis: </span><%= row["available"] %><span class="muted">/<%= row["total"] %></span></td>
+            <% end %>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% end %>

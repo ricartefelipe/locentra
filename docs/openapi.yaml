@@ -1,0 +1,434 @@
+openapi: 3.1.0
+info:
+  title: Locentra API
+  version: "1.0"
+  description: |
+    API versionada do Locentra. Autenticação por credencial de integração (`Authorization: Bearer lcn_...`)
+    com escopos por permissão. O tenant é determinado pela credencial, nunca por parâmetros.
+
+    Instantes usam ISO 8601 com offset; períodos são semiabertos `[starts_at, ends_at)`.
+    Valores monetários são objetos `Money` com centavos inteiros.
+
+    Operações de reserva e financeiras exigem `Idempotency-Key`. A mesma chave com o mesmo conteúdo
+    devolve o resultado gravado (cabeçalho `Idempotent-Replayed: true`); com conteúdo diferente, `409`.
+servers:
+  - url: /api/v1
+security:
+  - bearer: []
+paths:
+  /availability:
+    get:
+      summary: Disponibilidade por período
+      operationId: getAvailability
+      parameters:
+        - { name: branch_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: starts_at, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: ends_at, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: product_ids, in: query, required: false, description: Lista separada por vírgulas, schema: { type: string } }
+      responses:
+        "200":
+          description: Unidades disponíveis (pico de ocupação simultânea descontado da capacidade)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period: { $ref: "#/components/schemas/Period" }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        product_id: { type: string, format: uuid }
+                        sku: { type: string }
+                        tracking: { type: string, enum: [serialized, bulk, kit] }
+                        available: { type: integer }
+                        total: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /customers:
+    get:
+      summary: Lista clientes
+      operationId: listCustomers
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [active, blocked, inactive] } }
+        - { name: sort, in: query, schema: { type: string, enum: [name, created_at, -created_at] } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de clientes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerPage" }
+        "422": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Cadastra cliente
+      operationId: createCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, name, document]
+              properties:
+                kind: { type: string, enum: [individual, company] }
+                name: { type: string }
+                trade_name: { type: string }
+                document: { type: string, description: CPF ou CNPJ com dígitos verificadores válidos }
+                email: { type: string, format: email }
+                phone: { type: string }
+      responses:
+        "201":
+          description: Cliente criado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /customers/{id}:
+    get:
+      summary: Detalha cliente
+      operationId: getCustomer
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Cliente
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "404": { $ref: "#/components/responses/Error" }
+  /products:
+    get:
+      summary: Lista produtos e kits
+      operationId: listProducts
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: tracking, in: query, schema: { type: string, enum: [serialized, bulk, kit] } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de produtos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Product" } }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+  /reservations:
+    get:
+      summary: Lista reservas
+      operationId: listReservations
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [requested, held, confirmed, in_progress, completed, cancelled, expired] } }
+        - { name: customer_id, in: query, schema: { type: string, format: uuid } }
+        - { name: sort, in: query, schema: { type: string, enum: [starts_at, -starts_at, created_at, -created_at, code] } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de reservas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Reservation" } }
+                  pagination: { $ref: "#/components/schemas/Pagination" }
+    post:
+      summary: Cria reserva (solicitação, bloqueio temporário ou confirmação imediata)
+      operationId: createReservation
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, branch_id, starts_at, ends_at, items]
+              properties:
+                customer_id: { type: string, format: uuid }
+                branch_id: { type: string, format: uuid }
+                starts_at: { type: string, format: date-time }
+                ends_at: { type: string, format: date-time }
+                mode:
+                  type: string
+                  enum: [request, hold, confirm]
+                  default: hold
+                  description: "request não garante disponibilidade; hold bloqueia até expirar; confirm aloca e confirma."
+                hold_minutes: { type: integer, minimum: 5, maximum: 1440 }
+                coupon_code: { type: string }
+                notes: { type: string }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [product_id, quantity]
+                    properties:
+                      product_id: { type: string, format: uuid }
+                      quantity: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: Reserva criada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reservation" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /reservations/{id}:
+    get:
+      summary: Detalha reserva com itens, alocações e preços congelados
+      operationId: getReservation
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Reserva
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reservation" }
+        "404": { $ref: "#/components/responses/Error" }
+  /reservations/{id}/confirm:
+    post:
+      summary: Confirma reserva revalidando a disponibilidade atomicamente
+      description: >-
+        O bloqueio temporário criado no envio de um orçamento é confirmado somente pela conversão do
+        orçamento aprovado; a confirmação direta responde 409 com o código `quote_hold`.
+      operationId: confirmReservation
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200":
+          description: Reserva confirmada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reservation" }
+        "409": { $ref: "#/components/responses/Error" }
+  /reservations/{id}/cancel:
+    post:
+      summary: Cancela reserva e libera as alocações
+      description: >-
+        Reserva com contrato em aberto é cancelada somente pelo contrato, que aplica a política de
+        cancelamento; o cancelamento direto responde 409 com o código `contract_amendment_required`.
+      operationId: cancelReservation
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Reserva cancelada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reservation" }
+        "409": { $ref: "#/components/responses/Error" }
+  /payments:
+    post:
+      summary: Registra pagamento recebido fora do provedor (manual), confirmado na hora
+      description: |
+        Informe `receivable_id` (cobrança, escopo `finance.write`) ou `deposit_id` (caução, escopo `deposits.manage`).
+        O valor não pode exceder o saldo em aberto da cobrança ou o restante previsto da caução. Pagamento de reserva
+        expirada ou cancelada é confirmado com `requires_review: true` e gera alerta; a reserva não é reativada.
+      operationId: createPayment
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method, amount_cents]
+              properties:
+                receivable_id: { type: string, format: uuid }
+                deposit_id: { type: string, format: uuid }
+                method: { type: string, enum: [pix, boleto, card, cash, transfer] }
+                amount_cents: { type: integer, minimum: 1, description: Centavos inteiros (valores decimais são recusados) }
+                paid_at: { type: string, format: date-time, description: Instante do recebimento; padrão é o instante atual }
+                notes: { type: string, maxLength: 500 }
+      responses:
+        "201":
+          description: Pagamento confirmado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /payments/{id}:
+    get:
+      summary: Detalha pagamento com reembolsos e saldo reembolsável
+      operationId: getPayment
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Pagamento
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Payment" }
+                  - type: object
+                    properties:
+                      refunds: { type: array, items: { $ref: "#/components/schemas/Refund" } }
+                      refundable: { $ref: "#/components/schemas/Money" }
+        "404": { $ref: "#/components/responses/Error" }
+  /payments/{id}/refunds:
+    post:
+      summary: Reembolsa pagamento de cobrança
+      description: |
+        O pagamento é bloqueado e a soma dos reembolsos pendentes e confirmados não pode exceder o valor confirmado
+        (`409 refund_exceeds_eligible`). Pagamentos manuais têm o reembolso confirmado na hora; pagamentos de provedor
+        ficam `pending` até o estorno ser concluído pelo worker. Escopo `finance.refund`.
+      operationId: createRefund
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount_cents, reason]
+              properties:
+                amount_cents: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        "201":
+          description: Reembolso registrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Refund" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: >-
+        Token `lcn_<organização>_<segredo>` criado em Usuários e permissões, com escopos e validade. Somente
+        credenciais do tipo `api` de organização ativa são aceitas; credenciais da CLI operacional (tipo `cli`)
+        e de organização suspensa ou encerrada recebem 401.
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+    Offset: { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 } }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 255, pattern: "^[A-Za-z0-9_.:-]+$" }
+  responses:
+    Error:
+      description: Erro estruturado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Money:
+      type: object
+      properties:
+        amount_cents: { type: integer }
+        currency: { type: string, enum: [BRL] }
+        formatted: { type: string, example: "R$ 1.234,56" }
+    Period:
+      type: object
+      properties:
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+    Pagination:
+      type: object
+      properties:
+        limit: { type: integer }
+        offset: { type: integer }
+        total: { type: integer }
+        next_offset: { type: [integer, "null"] }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: unavailable }
+            message: { type: string }
+            details: { type: object }
+            request_id: { type: string }
+    Customer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [individual, company] }
+        name: { type: string }
+        document: { type: string }
+        email: { type: [string, "null"] }
+        phone: { type: [string, "null"] }
+        status: { type: string }
+    CustomerPage:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Customer" } }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    Product:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        sku: { type: string }
+        name: { type: string }
+        tracking: { type: string, enum: [serialized, bulk, kit] }
+        buffer_before_minutes: { type: integer }
+        buffer_after_minutes: { type: integer }
+        deposit: { $ref: "#/components/schemas/Money" }
+        pricing: { type: object }
+        active: { type: boolean }
+    Reservation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: R-000001 }
+        status: { type: string, enum: [requested, held, confirmed, in_progress, completed, cancelled, expired] }
+        source: { type: string }
+        customer_id: { type: string, format: uuid }
+        branch_id: { type: string, format: uuid }
+        period: { $ref: "#/components/schemas/Period" }
+        hold_expires_at: { type: [string, "null"], format: date-time }
+        total: { $ref: "#/components/schemas/Money" }
+        deposit: { $ref: "#/components/schemas/Money" }
+        version: { type: integer }
+    Payment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string, enum: [receivable, deposit] }
+        receivable_id: { type: [string, "null"], format: uuid }
+        deposit_id: { type: [string, "null"], format: uuid }
+        reservation_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        method: { type: string, enum: [pix, boleto, card, cash, transfer] }
+        provider: { type: string, enum: [manual, simulator, asaas] }
+        status: { type: string, enum: [pending_submission, submission_unknown, pending, confirmed, failed, cancelled] }
+        amount: { $ref: "#/components/schemas/Money" }
+        external_reference: { type: string, description: Referência estável enviada ao provedor (igual ao id) }
+        provider_payment_id: { type: [string, "null"] }
+        requires_review: { type: boolean }
+        review_reason: { type: [string, "null"] }
+        paid_at: { type: [string, "null"], format: date-time }
+        confirmed_at: { type: [string, "null"], format: date-time }
+    Refund:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        payment_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, confirmed, failed] }
+        amount: { $ref: "#/components/schemas/Money" }
+        reason: { type: string }
+        confirmed_at: { type: [string, "null"], format: date-time }

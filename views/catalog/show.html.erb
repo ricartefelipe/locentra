@@ -1,0 +1,107 @@
+<% p = @data[:product] %>
+<header class="page-header">
+  <h1><%= p.name %> <span class="muted"><%= p.sku %></span></h1>
+  <p><%= badge(p.tracking_label, "info") %> · Preparação: <%= p.buffer_before_minutes %> min antes / <%= p.buffer_after_minutes %> min depois · Caução: <%= money(p.deposit) %></p>
+</header>
+<%= partial("shared/errors") %>
+<div class="grid-2">
+  <% if p.serialized? %>
+    <section class="panel">
+      <h2>Ativos individuais</h2>
+      <% if @data[:assets].empty? %><p class="empty">Nenhum ativo cadastrado.</p><% else %>
+        <table class="table">
+          <thead><tr><th scope="col">Patrimônio</th><th scope="col">Série</th><th scope="col">Condição</th><th scope="col">Situação</th></tr></thead>
+          <tbody>
+            <% @data[:assets].each do |a| %>
+              <tr><td><a href="/ativos/<%= a.id %>"><%= a.tag %></a></td><td><%= a.serial_number || "—" %></td><td><%= a.condition_label %></td>
+                <td><%= status_badge(a.status, a.status_label) %></td></tr>
+            <% end %>
+          </tbody>
+        </table>
+      <% end %>
+      <% if can?("assets.write") %>
+        <details<%= open_after_failure("/produtos/#{p.id}/ativos") %>>
+          <summary>Cadastrar ativo</summary>
+          <form method="post" action="/produtos/<%= p.id %>/ativos" class="stack">
+            <%= csrf_field %>
+            <label for="patrimonio">Patrimônio</label><input id="patrimonio" name="patrimonio" required>
+            <label for="numero_serie">Número de série</label><input id="numero_serie" name="numero_serie">
+            <label for="filial_id">Filial</label>
+            <select id="filial_id" name="filial_id"><% @branches.each do |b| %><option value="<%= b.id %>"><%= b.name %></option><% end %></select>
+            <label for="condicao">Condição</label>
+            <select id="condicao" name="condicao"><% Locentra::Domain::Catalog::CONDITIONS.each do |k, l| %><option value="<%= k %>"<%= selected("good", k) %>><%= l %></option><% end %></select>
+            <label for="custo_aquisicao">Custo de aquisição (R$)</label><input id="custo_aquisicao" name="custo_aquisicao" inputmode="decimal"<%= invalid(@errors, "custo_aquisicao") %>><%= field_errors(@errors, "custo_aquisicao") %>
+            <label for="data_aquisicao">Data de aquisição</label><input id="data_aquisicao" name="data_aquisicao" type="date">
+            <button type="submit">Cadastrar ativo</button>
+          </form>
+        </details>
+      <% end %>
+    </section>
+  <% elsif p.bulk? %>
+    <section class="panel">
+      <h2>Estoque quantitativo por filial</h2>
+      <% if @data[:pools].empty? %><p class="empty">Sem estoque registrado.</p><% else %>
+        <ul class="row-list"><% @data[:pools].each do |pool| %><li><strong><%= pool["branch_name"] %></strong>: <%= pool["total_quantity"] %> unidades</li><% end %></ul>
+      <% end %>
+      <% if can?("assets.write") %>
+        <form method="post" action="/produtos/<%= p.id %>/estoque" class="stack">
+          <%= csrf_field %>
+          <label for="filial_id">Filial</label>
+          <select id="filial_id" name="filial_id"><% @branches.each do |b| %><option value="<%= b.id %>"><%= b.name %></option><% end %></select>
+          <label for="movimento">Movimento</label>
+          <select id="movimento" name="movimento"><option value="acquisition">Entrada</option><option value="write_off">Baixa</option><option value="loss">Perda</option></select>
+          <label for="quantidade">Quantidade</label><input id="quantidade" name="quantidade" type="number" min="1" required>
+          <label for="motivo">Motivo</label><input id="motivo" name="motivo">
+          <button type="submit">Registrar movimento</button>
+        </form>
+      <% end %>
+    </section>
+  <% else %>
+    <section class="panel">
+      <h2>Composição do kit</h2>
+      <% if @data[:components].empty? %><p class="empty">Kit sem componentes.</p><% else %>
+        <ul class="row-list"><% @data[:components].each do |c| %><li><%= c["quantity"] %> × <%= c["name"] %> <span class="muted"><%= c["sku"] %></span></li><% end %></ul>
+      <% end %>
+      <% if can?("catalog.write") %>
+        <form method="post" action="/produtos/<%= p.id %>/componentes" class="stack">
+          <%= csrf_field %>
+          <% rows = [@data[:components].size + 1, 3].max %>
+          <% rows.times do |i| %>
+            <% current = @data[:components][i] %>
+            <div class="line">
+              <label for="componente-<%= i %>">Componente</label>
+              <select id="componente-<%= i %>" name="componente[]"><option value="">—</option>
+                <% @candidates.each do |c| %><option value="<%= c.id %>"<%= selected(current && current["product_id"], c.id) %>><%= c.name %></option><% end %>
+              </select>
+              <label for="qtd-<%= i %>">Qtd.</label><input id="qtd-<%= i %>" name="quantidade[]" type="number" min="1" value="<%= current && current["quantity"] %>">
+            </div>
+          <% end %>
+          <button type="submit">Salvar composição</button>
+        </form>
+      <% end %>
+    </section>
+  <% end %>
+  <section class="panel">
+    <h2>Preços</h2>
+    <% table = p.pricing %>
+    <% if table.empty? %><p class="empty">Sem tabela de preços.</p><% else %>
+      <dl class="details">
+        <% if table["hourly_cents"] %><dt>Hora</dt><dd><%= money(table["hourly_cents"]) %></dd><% end %>
+        <% if table["daily_cents"] %><dt>Diária</dt><dd><%= money(table["daily_cents"]) %> (<%= Locentra::Domain::Pricing::DAILY_MODES[table["daily_mode"]] %>)</dd><% end %>
+        <% if table["weekly_cents"] %><dt>Semana</dt><dd><%= money(table["weekly_cents"]) %></dd><% end %>
+        <dt>Mínimo</dt><dd><%= table["minimum_minutes"].to_i %> min</dd>
+        <dt>Tolerância</dt><dd><%= table["grace_minutes"].to_i %> min</dd>
+      </dl>
+    <% end %>
+    <% if can?("catalog.write") %>
+      <details<%= open_after_failure("/produtos/#{p.id}/precos") %>>
+        <summary>Alterar tabela de preços</summary>
+        <form method="post" action="/produtos/<%= p.id %>/precos" class="form-grid">
+          <%= csrf_field %>
+          <%= partial("catalog/pricing_fields", table: table, values: {}, deposit: p.deposit.to_decimal_string) %>
+          <div class="full"><button type="submit">Salvar preços</button></div>
+        </form>
+      </details>
+    <% end %>
+  </section>
+</div>

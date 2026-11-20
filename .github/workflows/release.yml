@@ -1,0 +1,78 @@
+name: Publicação da imagem
+
+# Publica a imagem somente para tags de versão (vX.Y.Z), depois de executar a CI completa (ci.yml: análise,
+# segredos, suítes com cobertura, navegador, reconstrução do banco com seed e inicialização da imagem), e
+# somente quando a publicação estiver habilitada explicitamente na variável de repositório PUBLISH_IMAGE=true.
+# A imagem recebe apenas a tag da versão (ghcr.io/<repositório>:X.Y.Z), nunca `latest`.
+# Não há deploy automático: a implantação usa a imagem publicada e os runbooks.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  versao:
+    name: Versão da tag
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+      - name: Versão da tag corresponde a Locentra::VERSION
+        run: test "v$(ruby -Ilib -e 'require "locentra/version"; print Locentra::VERSION')" = "${GITHUB_REF_NAME}"
+
+  verificacoes:
+    name: CI da versão
+    uses: ./.github/workflows/ci.yml
+
+  publicar:
+    name: Publicar imagem no GHCR
+    needs: [versao, verificacoes]
+    if: vars.PUBLISH_IMAGE == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: type=semver,pattern={{version}}
+          flavor: latest=false
+      - name: Somente a tag da versão (sem latest)
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          printf '%s\n' "$TAGS"
+          test "$(printf '%s\n' "$TAGS" | grep -c .)" = "1"
+          if printf '%s\n' "$TAGS" | grep -q ':latest$'; then exit 1; fi
+      - name: Build e análise antes da publicação
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: runtime
+          load: true
+          push: false
+          tags: locentra:verificacao
+      - name: Trivy
+        run: >
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.70.0
+          image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln locentra:verificacao
+      - name: Publicar
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

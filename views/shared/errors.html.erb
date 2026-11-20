@@ -1,0 +1,10 @@
+<% if @errors && !@errors.empty? %>
+  <div class="form-errors" role="alert" tabindex="-1" data-autofocus>
+    <p><strong>Não foi possível concluir a operação.</strong></p>
+    <ul>
+      <% @errors.each do |field, messages| %>
+        <li><%= field == "base" ? "" : "#{label(:field, field)}: " %><%= Array(messages).join("; ") %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>

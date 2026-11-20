@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Backup do banco e dos anexos.
+#
+# Banco: pg_dump em formato custom com o papel locentra_backup (somente leitura, BYPASSRLS). O cliente
+# pg_dump precisa ser da mesma versão principal do servidor ou mais nova (use a imagem postgres:18.7).
+# Anexos: arquivo tar do STORAGE_ROOT. Um manifesto registra tamanhos e SHA-256 para verificação.
+#
+# STORAGE_ROOT é obrigatório e precisa existir: um backup sem os anexos só é feito com
+# BACKUP_SKIP_ATTACHMENTS=1 explícito, e o manifesto registra a omissão.
+#
+# Uso: BACKUP_DATABASE_URL=postgres://locentra_backup:...@host/locentra STORAGE_ROOT=/app/storage bin/backup <destino>
+set -euo pipefail
+dest="${1:?uso: bin/backup <diretório de destino>}"
+: "${BACKUP_DATABASE_URL:?defina BACKUP_DATABASE_URL (papel locentra_backup)}"
+
+attachments=1
+if [ -n "${STORAGE_ROOT:-}" ]; then
+  if [ ! -d "$STORAGE_ROOT" ]; then
+    echo "erro: STORAGE_ROOT=$STORAGE_ROOT não existe; monte o volume dos anexos (nenhum backup foi gravado)" >&2
+    exit 1
+  fi
+elif [ "${BACKUP_SKIP_ATTACHMENTS:-}" = "1" ]; then
+  attachments=0
+  echo "aviso: anexos NÃO incluídos neste backup (BACKUP_SKIP_ATTACHMENTS=1)" >&2
+else
+  echo "erro: defina STORAGE_ROOT com o diretório dos anexos, ou BACKUP_SKIP_ATTACHMENTS=1 para omiti-los" >&2
+  exit 1
+fi
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+out="$dest/$stamp"
+mkdir -p "$out"
+umask 077
+
+pg_dump --format=custom --compress=6 --file="$out/banco.dump" "$BACKUP_DATABASE_URL"
+pg_restore --list "$out/banco.dump" > "$out/banco.indice"
+
+if [ "$attachments" = 1 ]; then
+  tar -C "$STORAGE_ROOT" -czf "$out/anexos.tar.gz" .
+  echo "anexos: $(tar -tzf "$out/anexos.tar.gz" | grep -vc '/$') arquivo(s) de $STORAGE_ROOT"
+else
+  echo "anexos omitidos por BACKUP_SKIP_ATTACHMENTS=1" > "$out/SEM-ANEXOS"
+fi
+
+( cd "$out" && sha256sum ./* > MANIFESTO.sha256 )
+echo "Backup gravado em $out"

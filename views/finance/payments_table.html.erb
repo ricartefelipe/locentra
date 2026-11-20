@@ -1,0 +1,27 @@
+<% fin = Locentra::Domain::Finance %>
+<% if @rows.empty? %>
+  <p class="empty">Nenhum pagamento registrado.</p>
+<% else %>
+  <div class="table-scroll">
+    <table class="table">
+      <caption class="sr-only">Pagamentos</caption>
+      <thead>
+        <tr><th scope="col">Registrado em</th><th scope="col">Reserva</th><th scope="col">Finalidade</th><th scope="col">Método</th><th scope="col">Provedor</th><th scope="col" class="num">Valor</th><th scope="col">Situação</th></tr>
+      </thead>
+      <tbody>
+        <% @rows.each do |row| %>
+          <% payment = row[:payment] %>
+          <tr>
+            <td><a href="/financeiro/pagamentos/<%= payment.id %>"><%= datetime(row[:created_at]) %></a></td>
+            <td><a href="/reservas/<%= payment.reservation_id %>"><%= row[:reservation_code] %></a></td>
+            <td><%= fin::PAYMENT_PURPOSES.fetch(payment.purpose) %></td>
+            <td><%= payment.method_label %></td>
+            <td><%= payment.provider_label %></td>
+            <td class="num"><%= money(payment.amount) %></td>
+            <td><%= finance_badge(payment.status, payment.status_label) %><% if payment.requires_review %> <%= badge("Revisão", "danger") %><% end %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% end %>

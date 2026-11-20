@@ -1,0 +1,54 @@
+<% statuses = Locentra::Domain::Maintenance::ORDER_STATUSES %>
+<header class="page-header">
+  <h1>Manutenção</h1>
+  <nav class="actions" aria-label="Áreas relacionadas">
+    <a class="button" href="/operacao/inspecoes">Inspeções</a>
+    <a class="button" href="/transferencias">Transferências</a>
+  </nav>
+</header>
+<%= partial("shared/errors") %>
+<% if can?("maintenance.write") %>
+  <div class="grid-2">
+    <section class="panel" aria-labelledby="h-ativo">
+      <h2 id="h-ativo">Abrir ordem para ativo</h2>
+      <form method="post" action="/manutencao" class="stack">
+        <%= csrf_field %>
+        <label for="patrimonio">Patrimônio</label>
+        <input id="patrimonio" name="patrimonio" required autocomplete="off" value="<%= @values["patrimonio"] || @values["ativo"] %>">
+        <label for="descricao-ativo">Serviço a executar</label>
+        <textarea id="descricao-ativo" name="descricao" rows="2" required minlength="3" maxlength="2000"><%= @values["patrimonio"] ? @values["descricao"] : "" %></textarea>
+        <p class="muted">O ativo deve estar disponível. Reservas futuras são transferidas para outra unidade; sem substituto, a abertura é recusada.</p>
+        <button type="submit" class="primary">Abrir ordem</button>
+      </form>
+    </section>
+    <section class="panel" aria-labelledby="h-estoque">
+      <h2 id="h-estoque">Abrir ordem para estoque</h2>
+      <% if @products.empty? %>
+        <p class="empty">Nenhum produto de estoque quantitativo cadastrado.</p>
+      <% else %>
+        <form method="post" action="/manutencao" class="stack">
+          <%= csrf_field %>
+          <label for="produto_id">Produto</label>
+          <select id="produto_id" name="produto_id" required>
+            <% @products.each do |p| %><option value="<%= p.id %>"<%= selected(@values["produto_id"], p.id) %>><%= p.name %> (<%= p.sku %>)</option><% end %>
+          </select>
+          <label for="filial_id">Filial</label>
+          <select id="filial_id" name="filial_id"><% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["filial_id"], b.id) %>><%= b.name %></option><% end %></select>
+          <label for="quantidade">Quantidade</label><input id="quantidade" name="quantidade" type="number" min="1" required value="<%= @values["quantidade"] %>">
+          <label for="descricao-estoque">Serviço a executar</label>
+          <textarea id="descricao-estoque" name="descricao" rows="2" required minlength="3" maxlength="2000"></textarea>
+          <p class="muted">As unidades ficam bloqueadas até a conclusão; a abertura é recusada se faltarem unidades para reservas futuras.</p>
+          <button type="submit">Abrir ordem</button>
+        </form>
+      <% end %>
+    </section>
+  </div>
+<% end %>
+<section class="panel" aria-labelledby="h-ativas">
+  <h2 id="h-ativas">Ordens em aberto</h2>
+  <%= partial("maintenance/table", rows: @active, empty: "Nenhuma ordem de manutenção em aberto.", statuses: statuses) %>
+</section>
+<section class="panel" aria-labelledby="h-encerradas">
+  <h2 id="h-encerradas">Encerradas</h2>
+  <%= partial("maintenance/table", rows: @closed, empty: "Nenhuma ordem encerrada.", statuses: statuses) %>
+</section>

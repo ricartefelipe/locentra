@@ -1,0 +1,61 @@
+<% fin = Locentra::Domain::Finance %>
+<header class="page-header">
+  <h1>Provedor de pagamentos</h1>
+  <p class="muted">Uma conta ativa por organização. A chave de API é guardada cifrada; o token dos webhooks é exibido uma única vez. <a href="/financeiro">Voltar ao financeiro</a></p>
+</header>
+<%= partial("shared/errors") %>
+<% if @created %>
+  <div class="notice" role="status">
+    <p><strong>Conta configurada.</strong> Cadastre no provedor o webhook abaixo, com o token de autenticação. Ele não será exibido novamente.</p>
+    <p>URL: <code class="token" data-copy><%= @base_url %><%= @created["webhook_path"] %></code></p>
+    <p>Token (cabeçalho <code>asaas-access-token</code>): <code class="token" data-copy><%= @created["webhook_token"] %></code></p>
+  </div>
+<% end %>
+<section class="panel" aria-labelledby="titulo-contas">
+  <h2 id="titulo-contas">Contas</h2>
+  <% if @accounts.empty? %><p class="empty">Nenhuma conta configurada.</p><% else %>
+    <table class="table">
+      <caption class="sr-only">Contas de provedores de pagamento</caption>
+      <thead><tr><th scope="col">Nome</th><th scope="col">Provedor</th><th scope="col">Ambiente</th><th scope="col">Chave</th><th scope="col">Webhook</th><th scope="col">Situação</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
+      <tbody>
+        <% @accounts.each do |account| %>
+          <tr>
+            <td><%= account["name"] %></td>
+            <td><%= fin::PROVIDERS.fetch(account["provider"]) %></td>
+            <td><%= label(:environment, account["environment"]) %></td>
+            <td><%= account["api_key_hint"] || "—" %></td>
+            <td><code class="small">/webhooks/pagamentos/<%= account["id"] %></code> <span class="muted">token <%= account["webhook_token_hint"] %></span></td>
+            <td><%= account["active"] ? badge("Ativa", "success") : badge("Desativada em #{date(account["deactivated_at"])}", "muted") %></td>
+            <td><% if account["active"] %><form method="post" action="/financeiro/provedor/<%= account["id"] %>/desativar" class="inline" data-confirm="Desativar esta conta? Cobranças pendentes ainda não enviadas falharão."><%= csrf_field %><button type="submit" class="danger">Desativar</button></form><% end %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>
+<section class="panel narrow" aria-labelledby="titulo-nova-conta">
+  <h2 id="titulo-nova-conta">Configurar conta</h2>
+  <form method="post" action="/financeiro/provedor" class="stack" autocomplete="off">
+    <%= csrf_field %>
+    <label for="provedor">Provedor</label>
+    <select id="provedor" name="provedor"<%= invalid(@errors, "provedor") %>>
+      <option value="simulator">Simulador local (sem cobrança real)</option>
+      <option value="asaas">Asaas</option>
+    </select>
+    <%= field_errors(@errors, "provedor") %>
+    <label for="nome-conta">Nome</label>
+    <input id="nome-conta" name="nome" required minlength="2" maxlength="80"<%= invalid(@errors, "nome") %>>
+    <%= field_errors(@errors, "nome") %>
+    <label for="ambiente">Ambiente (Asaas)</label>
+    <select id="ambiente" name="ambiente">
+      <option value="sandbox">Sandbox (testes)</option>
+      <option value="production">Produção</option>
+    </select>
+    <label for="chave-api">Chave de API do Asaas</label>
+    <input id="chave-api" name="chave_api" type="password" maxlength="300"<%= invalid(@errors, "chave_api", describedby: "ajuda-chave") %>>
+    <p class="muted" id="ajuda-chave">Obrigatória para o Asaas: chaves de sandbox começam com <code>$aact_hmlg_</code> e de produção com <code>$aact_prod_</code>.</p>
+    <%= field_errors(@errors, "chave_api") %>
+    <p class="muted">Configurar uma nova conta desativa a conta atual.</p>
+    <button type="submit" class="primary">Salvar conta</button>
+  </form>
+</section>

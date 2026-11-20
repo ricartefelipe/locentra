@@ -1,0 +1,17 @@
+<header class="page-header"><h1>Novo orçamento</h1></header>
+<section class="panel">
+  <%= partial("shared/errors") %>
+  <form method="post" action="/orcamentos" class="form-grid" data-line-items>
+    <%= csrf_field %>
+    <div><label for="cliente_id">Cliente</label>
+      <select id="cliente_id" name="cliente_id" required<%= invalid(@errors, "cliente") %>>
+        <option value="">Selecione</option>
+        <% @customers.each do |c| %><option value="<%= c.id %>"<%= selected(@values["cliente_id"], c.id) %>><%= c.name %> (<%= c.formatted_document %>)</option><% end %>
+      </select>
+      <%= field_errors(@errors, "cliente") %>
+      <% if @customers.empty? %><p class="muted"><a href="/clientes/novo">Cadastre um cliente</a> antes de orçar.</p><% end %>
+    </div>
+    <%= partial("quotes/fields") %>
+    <div class="full actions"><button type="submit" class="primary">Salvar rascunho</button> <a href="/orcamentos">Cancelar</a></div>
+  </form>
+</section>

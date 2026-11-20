@@ -1,0 +1,51 @@
+<header class="page-header"><h1>Integrações</h1><p class="muted">Webhooks assinados (HMAC-SHA256) enviados a partir de eventos de negócio.</p></header>
+<%= partial("shared/errors") %>
+<% if @secret %>
+  <div class="notice" role="status">
+    <p><strong>Endpoint criado.</strong> Guarde o segredo de assinatura; ele não será exibido novamente.</p>
+    <p><code class="token" data-copy><%= @secret %></code></p>
+    <p class="muted">Valide o cabeçalho <code>X-Locentra-Signature: t=&lt;timestamp&gt;,v1=&lt;HMAC-SHA256(segredo, "timestamp.corpo")&gt;</code> e rejeite timestamps com mais de 5 minutos.</p>
+  </div>
+<% end %>
+<section class="panel">
+  <h2>Endpoints</h2>
+  <% if @data[:endpoints].empty? %><p class="empty">Nenhum endpoint configurado.</p><% else %>
+    <table class="table">
+      <thead><tr><th scope="col">URL</th><th scope="col">Eventos</th><th scope="col">Situação</th><th scope="col"></th></tr></thead>
+      <tbody>
+        <% @data[:endpoints].each do |e| %>
+          <tr><td><code><%= e["url"] %></code><br><span class="muted"><%= e["description"] %></span></td><td><%= Array(e["events"]).join(", ") %></td>
+            <td><%= e["active"] ? badge("Ativo", "success") : badge("Desativado", "muted") %></td>
+            <td><% if e["active"] %><form method="post" action="/integracoes/<%= e["id"] %>/desativar" class="inline"><%= csrf_field %><button type="submit" class="danger">Desativar</button></form><% end %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+  <form method="post" action="/integracoes" class="stack">
+    <%= csrf_field %>
+    <label for="url">URL (https)</label><input id="url" name="url" type="url" required placeholder="https://erp.exemplo.com/webhooks/locentra">
+    <label for="descricao">Descrição</label><input id="descricao" name="descricao">
+    <fieldset><legend>Eventos</legend>
+      <div class="checkbox-grid">
+        <% @events.each do |event| %><label class="checkbox"><input type="checkbox" name="eventos[]" value="<%= event %>"> <code><%= event %></code></label><% end %>
+      </div>
+    </fieldset>
+    <button type="submit" class="primary">Criar endpoint</button>
+  </form>
+</section>
+<section class="panel">
+  <h2>Entregas recentes</h2>
+  <% if @data[:deliveries].empty? %><p class="empty">Nenhuma entrega registrada.</p><% else %>
+    <table class="table">
+      <thead><tr><th scope="col">Evento</th><th scope="col">Destino</th><th scope="col">Situação</th><th scope="col">Tentativas</th><th scope="col">Último retorno</th><th scope="col"></th></tr></thead>
+      <tbody>
+        <% @data[:deliveries].each do |d| %>
+          <tr><td><code><%= d["event_type"] %></code><br><span class="muted"><%= datetime(d["created_at"]) %></span></td><td><code class="small"><%= d["url"] %></code></td>
+            <td><%= status_badge(d["status"] == "delivered" ? "confirmed" : (d["status"] == "failed" ? "cancelled" : "held"), label(:delivery_status, d["status"])) %></td>
+            <td><%= d["attempts"] %></td><td><%= d["last_status_code"] || d["last_error"] || "—" %></td>
+            <td><% if d["status"] == "failed" %><form method="post" action="/integracoes/entregas/<%= d["id"] %>/reenviar" class="inline"><%= csrf_field %><button type="submit">Reenviar</button></form><% end %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>

@@ -1,0 +1,37 @@
+<% ret = @data[:return] %>
+<% outcomes = Locentra::Domain::Fulfillment::OUTCOMES %>
+<header class="page-header">
+  <h1>Devolução da reserva <a href="/reservas/<%= ret["reservation_id"] %>"><%= ret["reservation_code"] %></a></h1>
+  <p class="muted">Recebida em <%= datetime(ret["returned_at"]) %> por <%= ret["received_by_name"] || "—" %>
+    <% if ret["completes_reservation"] %> · <%= badge("Reserva concluída", "success") %><% else %> · <%= badge("Devolução parcial", "info") %><% end %></p>
+</header>
+<section class="panel" aria-labelledby="h-itens">
+  <h2 id="h-itens">Itens</h2>
+  <table class="table">
+    <thead><tr><th scope="col">Item</th><th scope="col">Quantidade</th><th scope="col">Resultado</th><th scope="col">Inspeção</th><th scope="col">Avaria ou falta</th></tr></thead>
+    <tbody>
+      <% @data[:lines].each do |l| %>
+        <tr>
+          <td><%= l["product_name"] %> <span class="muted"><%= l["tag"] || l["sku"] %></span><% if l["notes"] %><br><span class="muted"><%= l["notes"] %></span><% end %></td>
+          <td><%= l["quantity"] %></td>
+          <td><%= badge(outcomes.fetch(l["outcome"]), l["outcome"] == "ok" ? "success" : "danger") %></td>
+          <td><%= l["requires_inspection"] ? "Sim" : "Não" %></td>
+          <td><% if l["damage_report_id"] %><a href="/operacao/avarias/<%= l["damage_report_id"] %>"><%= l["damage_report_code"] %></a><% else %>—<% end %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</section>
+<section class="panel" aria-labelledby="h-multa">
+  <h2 id="h-multa">Multa por atraso</h2>
+  <% if @data[:late_fees].empty? %>
+    <p class="empty">Devolução sem atraso.</p>
+  <% else %>
+    <ul class="row-list">
+      <% @data[:late_fees].each do |fee| %><li><%= money(fee["amount_cents"]) %> · <%= fee["details"]["quantity"] %> un. · fim previsto <%= datetime(Time.iso8601(fee["details"]["scheduled_end"])) %></li><% end %>
+    </ul>
+    <p><strong>Total: <%= money(ret["late_fee_cents"]) %></strong></p>
+  <% end %>
+</section>
+<% if ret["notes"] %><section class="panel"><h2>Observações</h2><p class="pre"><%= ret["notes"] %></p></section><% end %>
+<p><a href="/reservas/<%= ret["reservation_id"] %>">Voltar para a reserva</a> · <a href="/operacao">Painel da operação</a></p>

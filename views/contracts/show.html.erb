@@ -1,0 +1,160 @@
+<% c = @data[:contract] %>
+<% terms = c.terms %>
+<% r = @data[:reservation] %>
+<% current_doc = @data[:documents].find { |d| d["version"] == c.current_document_version } %>
+<header class="page-header">
+  <h1>Contrato <%= c.code %> <%= status_badge(c.status, c.status_label) %></h1>
+  <p class="muted">Locatário: <a href="/clientes/<%= c.customer_id %>"><%= terms.dig("customer", "name") %></a> ·
+    reserva <a href="/reservas/<%= r.id %>"><%= r.code %></a> (<%= r.status_label %>)<% if terms["quote"] %> · orçamento <a href="/orcamentos/<%= terms.dig("quote", "id") %>"><%= terms.dig("quote", "code") %></a> versão <%= terms.dig("quote", "version") %><% end %></p>
+</header>
+<%= partial("shared/errors") %>
+<%= partial("shared/shortages") %>
+<div class="notice" role="note"><%= Locentra::Domain::Contracts::ACCEPTANCE_NOTICE %></div>
+<div class="grid-2">
+  <section class="panel" aria-labelledby="termos-titulo">
+    <h2 id="termos-titulo">Termos contratados</h2>
+    <dl class="details">
+      <dt>Emitido em</dt><dd><%= datetime(c.issued_at) %></dd>
+      <dt>Retirada</dt><dd><%= datetime(r.period.starts_at) %></dd>
+      <dt>Devolução vigente</dt><dd><%= datetime(r.period.ends_at) %></dd>
+      <dt>Valor na emissão</dt><dd><%= money(c.contracted_total) %></dd>
+      <% unless @data[:amendments].empty? %><dt>Diferenças de aditivos</dt><dd><%= money(@data[:current_total] - c.contracted_total) %></dd><% end %>
+      <dt>Total contratado vigente</dt><dd><strong><%= money(@data[:current_total]) %></strong></dd>
+      <dt>Caução prevista</dt><dd><%= money(terms["deposit_cents"]) %></dd>
+      <% if c.cancelled_at %>
+        <dt>Cancelado em</dt><dd><%= datetime(c.cancelled_at) %> · <%= c.cancellation_reason %></dd>
+        <dt>Multa aplicada</dt><dd><%= money(c.cancellation_fee_cents.to_i) %></dd>
+      <% end %>
+      <% if c.closed_at %><dt>Encerrado em</dt><dd><%= datetime(c.closed_at) %></dd><% end %>
+    </dl>
+    <h3>Itens</h3>
+    <ul class="row-list">
+      <% terms["items"].each do |item| %><li><%= item["quantity"] %> × <%= item["name"] %> <span class="muted"><%= item["sku"] %> · <%= item["description"] %></span> — <%= money(item["total_cents"]) %></li><% end %>
+    </ul>
+    <h3>Política de cancelamento</h3>
+    <ul>
+      <% terms["cancellation_terms"].each do |text| %><li><%= text %></li><% end %>
+    </ul>
+    <% if terms["conditions"] %><h3>Condições específicas</h3><p class="pre"><%= terms["conditions"] %></p><% end %>
+  </section>
+  <section class="panel" aria-labelledby="documentos-titulo">
+    <h2 id="documentos-titulo">Documentos e aceite</h2>
+    <table class="table">
+      <thead><tr><th scope="col">Versão</th><th scope="col">Motivo</th><th scope="col">Gerado em</th><th scope="col">Aceite</th></tr></thead>
+      <tbody>
+        <% @data[:documents].each do |doc| %>
+          <tr>
+            <td><a href="/anexos/<%= doc["attachment_id"] %>">PDF versão <%= doc["version"] %></a><br><code class="small" title="SHA-256">SHA-256 <%= doc["sha256"] %></code></td>
+            <td><%= Locentra::Domain::Contracts::DOCUMENT_REASONS.fetch(doc["reason"]) %></td>
+            <td><%= datetime(doc["generated_at"]) %><br><span class="muted">retido até <%= date(doc["retain_until"]) %></span></td>
+            <td>
+              <% if doc["accepted_at"] %>
+                <%= badge("Aceite eletrônico simples", "success") %><br>
+                <%= doc["accepted_by_name"] %> · <%= Locentra::Domain::Customers::Document.format(doc["accepted_by_document"]) %><br>
+                <span class="muted"><%= datetime(doc["accepted_at"]) %> · IP <%= doc["accepted_ip"] || "não informado" %> · <%= Locentra::Domain::Contracts::ACCEPTANCE_CHANNELS.fetch(doc["accepted_via"]) %></span>
+              <% else %>
+                <span class="muted">Sem aceite registrado</span>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+    <% if c.open? && can?("contracts.write") && current_doc && current_doc["accepted_at"].nil? %>
+      <details<%= open_if(@errors, "nome", "documento", "declaracao") %>>
+        <summary>Registrar aceite da versão <%= c.current_document_version %></summary>
+        <form method="post" action="/contratos/<%= c.id %>/aceite" class="stack">
+          <%= csrf_field %>
+          <input type="hidden" name="versao" value="<%= c.current_document_version %>">
+          <p>Registro presencial do aceite eletrônico simples do locatário. Não equivale a assinatura digital certificada.</p>
+          <label for="aceite-nome">Nome completo de quem aceita</label>
+          <input id="aceite-nome" name="nome" required maxlength="160" value="<%= terms.dig("customer", "name") %>"<%= invalid(@errors, "nome") %>>
+          <%= field_errors(@errors, "nome") %>
+          <label for="aceite-documento">CPF ou CNPJ de quem aceita</label>
+          <input id="aceite-documento" name="documento" required inputmode="numeric"<%= invalid(@errors, "documento") %>>
+          <%= field_errors(@errors, "documento") %>
+          <label class="checkbox"><input type="checkbox" name="declaracao" value="1" required<%= invalid(@errors, "declaracao") %>> <%= Locentra::Domain::Contracts::ACCEPTANCE_STATEMENT %></label>
+          <%= field_errors(@errors, "declaracao") %>
+          <p class="muted">Serão registrados o IP e o navegador desta requisição e o instante do aceite.</p>
+          <button type="submit" class="primary">Registrar aceite</button>
+        </form>
+      </details>
+    <% end %>
+  </section>
+</div>
+<section class="panel" aria-labelledby="aditivos-titulo">
+  <h2 id="aditivos-titulo">Aditivos</h2>
+  <% if @data[:amendments].empty? %>
+    <p class="empty">Nenhum aditivo registrado.</p>
+  <% else %>
+    <table class="table">
+      <thead><tr><th scope="col">Nº</th><th scope="col">Tipo</th><th scope="col">Descrição</th><th scope="col">Documento</th><th scope="col">Registrado em</th><th scope="col" class="num">Diferença</th></tr></thead>
+      <tbody>
+        <% @data[:amendments].each do |a| %>
+          <tr><td><%= a["number"] %></td><td><%= Locentra::Domain::Contracts::AMENDMENT_KINDS.fetch(a["kind"]) %></td><td><%= a["description"] %></td>
+            <td>versão <%= a["document_version"] %></td><td><%= datetime(a["created_at"]) %></td><td class="num"><%= money(a["amount_delta_cents"]) %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+  <% if c.amendable? && can?("contracts.write") && can?("reservations.write") %>
+    <details<%= open_if(@errors, "fim") %>>
+      <summary>Aditivo de extensão de prazo</summary>
+      <form method="post" action="/contratos/<%= c.id %>/aditivos" class="stack">
+        <%= csrf_field %>
+        <label for="aditivo-fim">Nova devolução (horário local <%= time_zone.identifier %>)</label>
+        <input id="aditivo-fim" name="fim" type="datetime-local" required value="<%= local_input(r.period.ends_at) %>"<%= invalid(@errors, "fim") %>>
+        <%= field_errors(@errors, "fim") %>
+        <label for="aditivo-descricao">Descrição (opcional)</label>
+        <input id="aditivo-descricao" name="descricao" maxlength="1000">
+        <p class="muted">A diferença é calculada com a tabela de preços contratada e registrada como ajuste da reserva. Um novo documento é gerado. Se o novo prazo invadir outra reserva, nada é alterado.</p>
+        <button type="submit">Registrar aditivo</button>
+      </form>
+    </details>
+  <% end %>
+</section>
+<% if c.open? && @data[:preview] %>
+  <% preview = @data[:preview] %>
+  <section class="panel" aria-labelledby="cancelamento-titulo">
+    <h2 id="cancelamento-titulo">Cancelamento</h2>
+    <p>Prévia para cancelamento agora (<%= datetime(@now) %>): antecedência de <strong><%= preview.hours_before %> h</strong> em relação ao início.
+      Multa de <strong><%= Locentra::Domain::Contracts::Cancellation.percent_label(preview.fee_bps) %></strong> sobre <%= money(preview.base) %> = <strong><%= money(preview.fee) %></strong>.</p>
+    <% if can?("contracts.write") && can?("reservations.cancel") %>
+      <details<%= open_if(@errors, "motivo") %>>
+        <summary>Cancelar contrato</summary>
+        <form method="post" action="/contratos/<%= c.id %>/cancelar" class="stack" data-confirm="Cancelar o contrato, aplicar a multa calculada e liberar a reserva?">
+          <%= csrf_field %>
+          <label for="cancelamento-motivo">Motivo</label>
+          <input id="cancelamento-motivo" name="motivo" required maxlength="500"<%= invalid(@errors, "motivo") %>>
+          <%= field_errors(@errors, "motivo") %>
+          <p class="muted">A multa é recalculada no instante da confirmação e registrada como ajuste da reserva quando maior que zero.</p>
+          <button type="submit" class="danger">Cancelar contrato</button>
+        </form>
+      </details>
+    <% else %>
+      <p class="muted">O cancelamento exige as permissões de contratos e de cancelamento de reservas.</p>
+    <% end %>
+  </section>
+<% elsif c.open? %>
+  <section class="panel" aria-labelledby="cancelamento-titulo">
+    <h2 id="cancelamento-titulo">Cancelamento</h2>
+    <p class="empty">A reserva está <%= r.status_label.downcase %>: depois da retirada o contrato não pode mais ser cancelado e é encerrado após a devolução.</p>
+  </section>
+<% end %>
+<% if c.open? && r.status == "completed" && can?("contracts.write") %>
+  <section class="panel" aria-labelledby="encerramento-titulo">
+    <h2 id="encerramento-titulo">Encerramento</h2>
+    <% if c.status == "issued" %><p class="notice" role="status">Nenhum aceite eletrônico simples foi registrado para este contrato; o encerramento fica registrado sem aceite.</p><% end %>
+    <form method="post" action="/contratos/<%= c.id %>/encerrar"><%= csrf_field %><button type="submit">Encerrar contrato</button></form>
+  </section>
+<% end %>
+<section class="panel" aria-labelledby="historico-contrato">
+  <h2 id="historico-contrato">Histórico</h2>
+  <% if @history.empty? %><p class="empty">Sem eventos.</p><% else %>
+    <ol class="timeline">
+      <% @history.each do |event| %>
+        <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= label(:audit_action, event["action"]) %></strong> <span class="muted"><%= event["actor_name"] || label(:actor_type, event["actor_type"]) %></span></li>
+      <% end %>
+    </ol>
+  <% end %>
+</section>

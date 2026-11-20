@@ -1,0 +1,34 @@
+<section class="panel narrow" aria-labelledby="titulo-cadastro">
+  <h1 id="titulo-cadastro">Criar conta da empresa</h1>
+  <%= partial("shared/errors") %>
+  <form method="post" action="/cadastro" class="stack">
+    <label for="nome">Seu nome</label>
+    <input id="nome" name="nome" required maxlength="120" value="<%= @values["nome"] %>"<%= invalid(@errors, "nome") %>>
+    <%= field_errors(@errors, "nome") %>
+    <label for="email">E-mail</label>
+    <input id="email" name="email" type="email" required value="<%= @values["email"] %>"<%= invalid(@errors, "email") %>>
+    <%= field_errors(@errors, "email") %>
+    <label for="senha">Senha (mínimo 12 caracteres)</label>
+    <input id="senha" name="senha" type="password" autocomplete="new-password" required minlength="12"<%= invalid(@errors, "senha") %>>
+    <%= field_errors(@errors, "senha") %>
+    <label for="organizacao">Nome da empresa</label>
+    <input id="organizacao" name="organizacao" required value="<%= @values["organizacao"] %>"<%= invalid(@errors, "organizacao") %>>
+    <%= field_errors(@errors, "organizacao") %>
+    <fieldset>
+      <legend>Plano</legend>
+      <% @plans.each do |plan| %>
+        <label class="radio">
+          <input type="radio" name="plano" value="<%= plan["id"] %>"<%= checked(@values["plano"] == plan["id"]) %>>
+          <span><strong><%= plan["name"] %></strong> — <%= money(plan["monthly_price_cents"]) %>/mês ·
+            <%= plan["max_assets"] ? "até #{plan["max_assets"]} ativos" : "ativos ilimitados" %> ·
+            <%= plan["max_branches"] ? "#{plan["max_branches"]} filial(is)" : "filiais ilimitadas" %> ·
+            <%= plan["max_users"] ? "#{plan["max_users"]} usuários" : "usuários ilimitados" %> ·
+            implantação <%= money(plan["implementation_fee_cents"]) %></span>
+        </label>
+      <% end %>
+    </fieldset>
+    <p class="muted">Os primeiros 14 dias são de avaliação. Valores comerciais sujeitos à proposta.</p>
+    <button type="submit" class="primary">Criar conta</button>
+  </form>
+  <p class="links"><a href="/entrar">Já tenho conta</a></p>
+</section>

@@ -1,0 +1,17 @@
+title = "Locentra"
+
+[extend]
+useDefault = true
+
+# Valores fictícios usados exclusivamente em testes, CI efêmera e ambiente local. Cada padrão é
+# específico para um valor conhecido; diretórios inteiros não são liberados.
+[allowlist]
+description = "Valores fictícios de teste, CI e ambiente local"
+paths = [
+  '''^\.env\.example$''',
+]
+regexes = [
+  '''locentra-local-[a-z-]+''',
+  '''(senha-muito-segura|nova-senha-segura|outra-senha-segura)-[0-9]+''',
+  '''(ci|test)-(secret-key-base|encryption-key)-[0-9a-f]+''',
+]

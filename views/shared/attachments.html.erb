@@ -1,0 +1,20 @@
+<section class="panel" aria-labelledby="anexos-<%= @owner_id %>">
+  <h2 id="anexos-<%= @owner_id %>">Anexos</h2>
+  <% if @attachments.empty? %><p class="empty">Nenhum anexo.</p><% else %>
+    <ul class="row-list">
+      <% @attachments.each do |a| %>
+        <li><a href="/anexos/<%= a["id"] %>"><%= a["filename"] %></a> <span class="muted"><%= a["content_type"] %> · <%= (a["byte_size"] / 1024.0).ceil %> KB · SHA-256 <code class="small"><%= a["sha256"][0, 12] %>…</code></span></li>
+      <% end %>
+    </ul>
+  <% end %>
+  <% if @can_upload %>
+    <form method="post" action="/anexos" enctype="multipart/form-data" class="filters">
+      <%= csrf_field %>
+      <input type="hidden" name="dono_tipo" value="<%= @owner_type %>">
+      <input type="hidden" name="dono_id" value="<%= @owner_id %>">
+      <label for="arquivo-<%= @owner_id %>">Arquivo (PDF, PNG, JPEG ou WebP)</label>
+      <input id="arquivo-<%= @owner_id %>" name="arquivo" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" required>
+      <button type="submit">Enviar</button>
+    </form>
+  <% end %>
+</section>

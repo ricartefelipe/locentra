@@ -1,0 +1,92 @@
+<% fin = Locentra::Domain::Finance %>
+<header class="page-header">
+  <h1>Financeiro</h1>
+  <div class="actions">
+    <% if can?("integrations.manage") %><a class="button" href="/financeiro/provedor">Provedor de pagamentos</a><% end %>
+  </div>
+  <p class="muted">Cobranças com saldos derivados, pagamentos, reembolsos, cauções e conciliação. Cauções são valores de clientes sob guarda (passivo) e não entram na receita.</p>
+</header>
+<%= partial("shared/errors") %>
+<section class="cards" aria-label="Resumo financeiro">
+  <div class="card"><span class="card-value"><%= money(@data[:totals][:open]) %></span><span class="card-label">A receber (<%= @data[:totals][:open_count] %> cobranças)</span></div>
+  <div class="card"><span class="card-value"><%= money(@data[:totals][:credit]) %></span><span class="card-label">Créditos de clientes a reembolsar</span></div>
+  <div class="card"><span class="card-value"><%= money(-@data[:trial_balance]["deposit_liability"]) %></span><span class="card-label">Cauções retidas</span></div>
+  <div class="card<%= @data[:alerts].empty? ? "" : " card-alert" %>"><span class="card-value"><%= @data[:alerts].size %></span><span class="card-label">Alertas para decisão</span></div>
+</section>
+<%= partial("finance/alerts", alerts: @data[:alerts]) %>
+<section class="panel" aria-labelledby="titulo-cobrancas">
+  <h2 id="titulo-cobrancas">Cobranças</h2>
+  <form method="get" action="/financeiro" class="filters" role="search">
+    <label for="situacao">Situação</label>
+    <select id="situacao" name="situacao">
+      <option value="">Todas</option>
+      <% fin::RECEIVABLE_STATUSES.each do |key, label| %><option value="<%= key %>"<%= selected(@filter_status, key) %>><%= label %></option><% end %>
+    </select>
+    <button type="submit">Filtrar</button>
+  </form>
+  <%= partial("finance/receivables_table", rows: @data[:receivables].items) %>
+  <%= partial("shared/pagination", page: @data[:receivables], base_path: "/financeiro", query: { "situacao" => @filter_status }) %>
+</section>
+<section class="panel" aria-labelledby="titulo-pagamentos">
+  <h2 id="titulo-pagamentos">Pagamentos recentes</h2>
+  <%= partial("finance/payments_table", rows: @data[:payments]) %>
+</section>
+<section class="panel" aria-labelledby="titulo-caucoes">
+  <h2 id="titulo-caucoes">Cauções retidas</h2>
+  <% if @data[:deposits].empty? %><p class="empty">Nenhuma caução com saldo retido.</p><% else %>
+    <table class="table">
+      <caption class="sr-only">Cauções com saldo retido</caption>
+      <thead><tr><th scope="col">Reserva</th><th scope="col">Cliente</th><th scope="col" class="num">Recebido</th><th scope="col" class="num">Aplicado</th><th scope="col" class="num">Devolvido</th><th scope="col" class="num">Saldo</th></tr></thead>
+      <tbody>
+        <% @data[:deposits].each do |row| %>
+          <tr>
+            <td><a href="/financeiro/caucoes/<%= row[:deposit].id %>"><%= row[:reservation_code] %></a></td>
+            <td><%= row[:customer_name] %></td>
+            <td class="num"><%= money(row[:ledger].received) %></td>
+            <td class="num"><%= money(row[:ledger].applied) %></td>
+            <td class="num"><%= money(row[:ledger].returned) %></td>
+            <td class="num"><strong><%= money(row[:ledger].balance) %></strong></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>
+<div class="grid-2">
+  <section class="panel" aria-labelledby="titulo-conciliacao">
+    <h2 id="titulo-conciliacao">Conciliação com o provedor</h2>
+    <% account = @data[:account] %>
+    <% if account %>
+      <p>Conta ativa: <strong><%= account["name"] %></strong> (<%= fin::PROVIDERS.fetch(account["provider"]) %><%= account["provider"] == "asaas" ? ", #{label(:environment, account["environment"])}" : "" %>).</p>
+      <% if can?("finance.write") %>
+        <form method="post" action="/financeiro/conciliacao"><%= csrf_field %><button type="submit" class="primary">Conciliar agora</button></form>
+      <% end %>
+      <p class="muted">A conciliação também é executada a cada hora pelo worker.</p>
+    <% else %>
+      <p class="empty">Nenhum provedor de pagamentos configurado. Pagamentos podem ser registrados manualmente.</p>
+    <% end %>
+    <% if @data[:reports].empty? %><p class="empty">Nenhuma conciliação executada.</p><% else %>
+      <ul class="row-list">
+        <% @data[:reports].each do |report| %>
+          <li><a href="/financeiro/conciliacao/<%= report["id"] %>"><%= datetime(report["started_at"]) %></a>
+            <%= finance_badge(report["status"], { "running" => "Em execução", "completed" => "Concluída", "failed" => "Falhou" }.fetch(report["status"])) %>
+            <% if report["status"] == "completed" %><span class="muted"><%= report["summary"]["discrepancies"] %> divergência(s) em <%= report["summary"]["checked"] %> pagamento(s)</span><% end %>
+          </li>
+        <% end %>
+      </ul>
+    <% end %>
+  </section>
+  <section class="panel" aria-labelledby="titulo-diario">
+    <h2 id="titulo-diario">Diário contábil (saldos por conta)</h2>
+    <table class="table">
+      <caption class="sr-only">Saldo por conta: débitos menos créditos</caption>
+      <thead><tr><th scope="col">Conta</th><th scope="col" class="num">Débitos − créditos</th></tr></thead>
+      <tbody>
+        <% @data[:trial_balance].each do |account_key, total| %>
+          <tr><td><%= fin::ACCOUNTS.fetch(account_key) %></td><td class="num"><%= money(total) %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+    <p class="muted">Lançamentos somente de inserção, balanceados por transação. Faturas emitidas são demonstrativos comerciais: a emissão de NFS-e não é feita pelo Locentra.</p>
+  </section>
+</div>

@@ -1,0 +1,13 @@
+<section class="panel narrow">
+  <h1>Erro <%= @status %></h1>
+  <p><%= @message %></p>
+  <% if @details && @details["fields"] %>
+    <ul>
+      <% @details["fields"].each do |field, messages| %>
+        <li><%= label(:field, field) %>: <%= Array(messages).join("; ") %></li>
+      <% end %>
+    </ul>
+  <% end %>
+  <p class="muted">Referência: <code><%= request.request_id %></code></p>
+  <p><a href="/">Voltar ao início</a></p>
+</section>

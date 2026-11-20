@@ -1,0 +1,33 @@
+<% fin = Locentra::Domain::Finance %>
+<section class="panel" aria-labelledby="titulo-alertas">
+  <h2 id="titulo-alertas">Alertas para decisão</h2>
+  <% if @alerts.empty? %>
+    <p class="empty">Nenhum alerta financeiro em aberto.</p>
+  <% else %>
+    <ul class="row-list">
+      <% @alerts.each do |alert| %>
+        <li>
+          <%= finance_badge(alert["status"] == "open" ? "open" : "resolved", fin::ALERT_KINDS.fetch(alert["kind"], alert["kind"])) %>
+          <%= alert["message"] %>
+          <% if alert["reservation_code"] %> — <a href="/reservas/<%= alert["reservation_id"] %>">reserva <%= alert["reservation_code"] %></a><% end %>
+          <% if alert["payment_id"] %> · <a href="/financeiro/pagamentos/<%= alert["payment_id"] %>">ver pagamento</a><% end %>
+          <% if alert["status"] == "open" && can?("finance.write") %>
+            <form method="post" action="/financeiro/alertas/<%= alert["id"] %>/resolver" class="filters">
+              <%= csrf_field %>
+              <input type="hidden" name="voltar" value="<%= request.path %>">
+              <label for="decisao-<%= alert["id"] %>">Decisão</label>
+              <select id="decisao-<%= alert["id"] %>" name="decisao" required>
+                <% fin::ALERT_RESOLUTIONS.each do |key, label| %><option value="<%= key %>"><%= label %></option><% end %>
+              </select>
+              <label for="observacao-<%= alert["id"] %>">Observação</label>
+              <input id="observacao-<%= alert["id"] %>" name="observacao" maxlength="500">
+              <button type="submit">Registrar decisão</button>
+            </form>
+          <% elsif alert["resolution"] %>
+            <span class="muted">Decisão: <%= fin::ALERT_RESOLUTIONS.fetch(alert["resolution"]) %> em <%= datetime(alert["resolved_at"]) %><%= alert["resolution_notes"] ? " — #{alert["resolution_notes"]}" : "" %></span>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>

@@ -1,0 +1,21 @@
+<header class="page-header"><h1>Novo cliente</h1></header>
+<section class="panel">
+  <%= partial("shared/errors") %>
+  <form method="post" action="/clientes" class="form-grid">
+    <%= csrf_field %>
+    <fieldset class="full">
+      <legend>Tipo</legend>
+      <label class="radio"><input type="radio" name="tipo" value="individual"<%= checked(@values["tipo"] != "company") %>> Pessoa física (CPF)</label>
+      <label class="radio"><input type="radio" name="tipo" value="company"<%= checked(@values["tipo"] == "company") %>> Pessoa jurídica (CNPJ)</label>
+    </fieldset>
+    <div><label for="nome">Nome ou razão social</label>
+      <input id="nome" name="nome" required value="<%= @values["nome"] %>"<%= invalid(@errors, "nome") %>><%= field_errors(@errors, "nome") %></div>
+    <div><label for="nome_fantasia">Nome fantasia</label><input id="nome_fantasia" name="nome_fantasia" value="<%= @values["nome_fantasia"] %>"></div>
+    <div><label for="documento">CPF ou CNPJ</label>
+      <input id="documento" name="documento" required inputmode="numeric" value="<%= @values["documento"] %>"<%= invalid(@errors, "documento") %>><%= field_errors(@errors, "documento") %></div>
+    <div><label for="email">E-mail</label><input id="email" name="email" type="email" value="<%= @values["email"] %>"<%= invalid(@errors, "email") %>><%= field_errors(@errors, "email") %></div>
+    <div><label for="telefone">Telefone</label><input id="telefone" name="telefone" value="<%= @values["telefone"] %>"></div>
+    <div class="full"><label for="observacoes">Observações</label><textarea id="observacoes" name="observacoes" rows="3"><%= @values["observacoes"] %></textarea></div>
+    <div class="full actions"><button type="submit" class="primary">Cadastrar</button> <a href="/clientes">Cancelar</a></div>
+  </form>
+</section>

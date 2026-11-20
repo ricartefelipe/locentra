@@ -1,0 +1,36 @@
+<header class="page-header">
+  <h1>Clientes</h1>
+  <% if can?("customers.write") %><a class="button primary" href="/clientes/novo">Novo cliente</a><% end %>
+</header>
+<form method="get" action="/clientes" class="filters" role="search">
+  <label for="busca">Buscar por nome ou documento</label>
+  <input id="busca" name="busca" value="<%= @search %>">
+  <label for="situacao">Situação</label>
+  <select id="situacao" name="situacao">
+    <option value="">Todas</option>
+    <% Locentra::Domain::Customers::STATUSES.each do |key, label| %>
+      <option value="<%= key %>"<%= selected(@filter_status, key) %>><%= label %></option>
+    <% end %>
+  </select>
+  <button type="submit">Filtrar</button>
+</form>
+<% if @page.items.empty? %>
+  <p class="empty">Nenhum cliente encontrado.</p>
+<% else %>
+  <table class="table">
+    <caption class="sr-only">Lista de clientes</caption>
+    <thead><tr><th scope="col">Nome</th><th scope="col">Tipo</th><th scope="col">Documento</th><th scope="col">E-mail</th><th scope="col">Situação</th></tr></thead>
+    <tbody>
+      <% @page.items.each do |c| %>
+        <tr>
+          <td><a href="/clientes/<%= c.id %>"><%= c.name %></a></td>
+          <td><%= c.kind_label %></td>
+          <td><%= c.formatted_document %></td>
+          <td><%= c.email || "—" %></td>
+          <td><%= status_badge(c.status, Locentra::Domain::Customers::STATUSES[c.status]) %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+  <%= partial("shared/pagination", page: @page, base_path: "/clientes", query: { "busca" => @search, "situacao" => @filter_status }) %>
+<% end %>

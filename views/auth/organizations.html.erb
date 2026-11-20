@@ -1,0 +1,23 @@
+<section class="panel narrow" aria-labelledby="titulo-org">
+  <h1 id="titulo-org">Selecione a organização</h1>
+  <% if @memberships.empty? %>
+    <p class="empty">Sua conta não possui acesso ativo a nenhuma organização. Solicite um convite ao administrador.</p>
+  <% else %>
+    <ul class="choice-list">
+      <% @memberships.each do |m| %>
+        <li>
+          <form method="post" action="/organizacoes/ativar">
+            <%= csrf_field %>
+            <input type="hidden" name="organizacao_id" value="<%= m["organization_id"] %>">
+            <input type="hidden" name="tipo" value="<%= m["kind"] %>">
+            <button type="submit" class="choice">
+              <strong><%= m["name"] %></strong>
+              <span class="muted"><%= m["kind"] == "portal" ? "Portal do cliente" : Locentra::Domain::Identity.role_label(m["role"]) %></span>
+            </button>
+          </form>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+  <form method="post" action="/sair"><%= csrf_field %><button type="submit" class="link-button">Sair</button></form>
+</section>

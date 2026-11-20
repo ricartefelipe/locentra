@@ -1,0 +1,73 @@
+<% a = @data[:asset] %>
+<header class="page-header">
+  <h1>Ativo <%= a.tag %> <%= status_badge(a.status, a.status_label) %></h1>
+  <p class="muted"><a href="/produtos/<%= @data[:product].id %>"><%= @data[:product].name %></a> · Série <%= a.serial_number || "—" %> · Condição <%= a.condition_label %>
+    <% if a.unavailable_until %> · indisponível até <%= datetime(a.unavailable_until) %><% end %></p>
+  <% if a.status == "available" %>
+    <nav class="actions" aria-label="Operações do ativo">
+      <% if can?("maintenance.write") %><a class="button" href="<%= url("/manutencao", "ativo" => a.tag) %>">Abrir ordem de manutenção</a><% end %>
+      <% if can?("assets.write") %><a class="button" href="<%= url("/transferencias", "ativo" => a.tag) %>">Transferir para outra filial</a><% end %>
+    </nav>
+  <% end %>
+</header>
+<%= partial("shared/errors") %>
+<div class="grid-2">
+  <section class="panel">
+    <h2>Alocações e bloqueios</h2>
+    <% if @data[:allocations].empty? %><p class="empty">Nenhuma alocação.</p><% else %>
+      <table class="table">
+        <thead><tr><th scope="col">Período bloqueado</th><th scope="col">Tipo</th><th scope="col">Reserva</th><th scope="col">Ativa</th></tr></thead>
+        <tbody>
+          <% @data[:allocations].each do |al| %>
+            <tr><td><%= datetime(al["starts_at"]) %> → <%= datetime(al["ends_at"]) %></td>
+              <td><%= al["kind"] == "block" ? "Bloqueio: #{al["reason"]}" : "Reserva" %></td>
+              <td><% if al["reservation_id"] %><a href="/reservas/<%= al["reservation_id"] %>"><%= al["reservation_code"] %></a><% else %>—<% end %></td>
+              <td><%= al["active"] ? "sim" : "não" %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+    <% if can?("maintenance.write") %>
+      <details<%= open_after_failure("/ativos/#{a.id}/bloqueios") %>>
+        <summary>Bloquear período (preparação ou manutenção programada)</summary>
+        <form method="post" action="/ativos/<%= a.id %>/bloqueios" class="stack">
+          <%= csrf_field %>
+          <label for="b-inicio">Início</label><input id="b-inicio" name="inicio" type="datetime-local" required>
+          <label for="b-fim">Fim</label><input id="b-fim" name="fim" type="datetime-local" required>
+          <label for="b-motivo">Motivo</label><input id="b-motivo" name="motivo" required>
+          <button type="submit">Bloquear</button>
+        </form>
+      </details>
+    <% end %>
+  </section>
+  <section class="panel">
+    <h2>Situação operacional</h2>
+    <% managed = Locentra::Application::Catalog::ChangeAssetStatus::MANAGED[a.status] %>
+    <% if can?("assets.write") && managed %>
+      <p class="notice" role="status">Situação controlada pela operação: <%= managed %>.</p>
+    <% elsif can?("assets.write") %>
+      <form method="post" action="/ativos/<%= a.id %>/situacao" class="stack">
+        <%= csrf_field %>
+        <label for="situacao">Nova situação</label>
+        <select id="situacao" name="situacao">
+          <% Locentra::Domain::Catalog::ASSET_TRANSITIONS.fetch(a.status).select { |s| Locentra::Application::Catalog::ChangeAssetStatus::TARGETS.include?(s) }.each do |s| %>
+            <option value="<%= s %>"><%= Locentra::Domain::Catalog::ASSET_STATUSES[s] %></option>
+          <% end %>
+        </select>
+        <label for="indisponivel_ate">Indisponível até (opcional)</label><input id="indisponivel_ate" name="indisponivel_ate" type="datetime-local">
+        <label for="motivo">Motivo</label><input id="motivo" name="motivo">
+        <p class="muted">Reservas futuras deste ativo são transferidas para outra unidade livre; sem substituto, a operação é recusada.</p>
+        <button type="submit">Atualizar situação</button>
+      </form>
+    <% end %>
+    <h2>Histórico</h2>
+    <% if @data[:events].empty? %><p class="empty">Sem eventos.</p><% else %>
+      <ol class="timeline">
+        <% @data[:events].each do |e| %>
+          <li><time><%= datetime(e["occurred_at"]) %></time> <strong><%= label(:asset_event, e["kind"]) %></strong>
+            <% if e["to_status"] %><%= e["from_status"] ? asset_status(e["from_status"]) : "—" %> → <%= asset_status(e["to_status"]) %><% end %> <span class="muted"><%= e["notes"] %></span></li>
+        <% end %>
+      </ol>
+    <% end %>
+  </section>
+</div>

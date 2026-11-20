@@ -1,0 +1,51 @@
+<div><label for="filial_id">Filial</label>
+  <select id="filial_id" name="filial_id" required>
+    <% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["filial_id"], b.id) %>><%= b.name %> (<%= b.code %>)</option><% end %>
+  </select></div>
+<div><label for="inicio">Retirada (horário local <%= time_zone.identifier %>)</label>
+  <input id="inicio" name="inicio" type="datetime-local" required value="<%= @values["inicio"] %>"<%= invalid(@errors, "inicio") %>><%= field_errors(@errors, "inicio") %></div>
+<div><label for="fim">Devolução</label>
+  <input id="fim" name="fim" type="datetime-local" required value="<%= @values["fim"] %>"<%= invalid(@errors, "fim") %>><%= field_errors(@errors, "fim") %>
+  <%= field_errors(@errors, "periodo") %></div>
+<div><label for="validade">Validade do orçamento</label>
+  <input id="validade" name="validade" type="datetime-local" required value="<%= @values["validade"] %>"<%= invalid(@errors, "validade", describedby: "ajuda-validade") %>>
+  <p class="muted" id="ajuda-validade">Até <%= Locentra::Domain::Quotes::MAX_VALIDITY_DAYS %> dias e no máximo até o início da locação.</p>
+  <%= field_errors(@errors, "validade") %></div>
+<fieldset class="full">
+  <legend>Itens</legend>
+  <%= field_errors(@errors, "itens") %>
+  <div data-lines>
+    <% rows = [Array(@values["produto"]).size, 1].max %>
+    <% rows.times do |i| %>
+      <div class="line" data-line>
+        <label for="produto-<%= i %>">Produto ou kit</label>
+        <select id="produto-<%= i %>" name="produto[]">
+          <option value="">Selecione</option>
+          <% @products.each do |p| %><option value="<%= p.id %>"<%= selected(Array(@values["produto"])[i], p.id) %>><%= p.name %> · <%= p.tracking_label %></option><% end %>
+        </select>
+        <label for="quantidade-<%= i %>">Quantidade</label>
+        <input id="quantidade-<%= i %>" name="quantidade[]" type="number" min="1" value="<%= Array(@values["quantidade"])[i] || 1 %>">
+        <button type="button" class="link-button" data-remove-line>Remover</button>
+      </div>
+    <% end %>
+  </div>
+  <button type="button" data-add-line>Adicionar item</button>
+  <% if @products.empty? %><p class="muted"><a href="/produtos/novo">Cadastre um produto</a> antes de orçar.</p><% end %>
+</fieldset>
+<fieldset class="full">
+  <legend>Política de bloqueio</legend>
+  <label class="radio"><input type="radio" name="politica_bloqueio" value="none"<%= checked(@values["politica_bloqueio"].to_s.empty? || @values["politica_bloqueio"] == "none") %>>
+    Sem bloqueio (padrão): o orçamento enviado <strong>não garante disponibilidade</strong>; ela é verificada somente na conversão em reserva.</label>
+  <label class="radio"><input type="radio" name="politica_bloqueio" value="hold_on_send"<%= checked(@values["politica_bloqueio"] == "hold_on_send") %>>
+    Bloqueio temporário ao enviar: cria uma reserva em bloqueio temporário vinculada ao orçamento, que expira se não for convertida.</label>
+  <label for="validade_bloqueio">Validade do bloqueio temporário (minutos, até 1440)</label>
+  <input id="validade_bloqueio" name="validade_bloqueio" type="number" min="5" max="1440" value="<%= @values["validade_bloqueio"].to_s.empty? ? @hold_minutes : @values["validade_bloqueio"] %>"<%= invalid(@errors, "validade_bloqueio") %>>
+  <%= field_errors(@errors, "validade_bloqueio") %>
+  <%= field_errors(@errors, "politica_bloqueio") %>
+</fieldset>
+<div><label for="desconto">Desconto manual (%)</label><input id="desconto" name="desconto" inputmode="decimal" value="<%= @values["desconto"] %>"<%= invalid(@errors, "desconto") %>>
+  <%= field_errors(@errors, "desconto") %>
+  <p class="muted">Limite do seu papel: <%= percent(Locentra::Domain::Identity.discount_limit_bps(request.actor.role)) %>. Cupons não se aplicam a orçamentos.</p></div>
+<div class="full"><label for="condicoes">Condições e termos do orçamento</label>
+  <textarea id="condicoes" name="condicoes" rows="4" maxlength="5000"<%= invalid(@errors, "condicoes") %>><%= @values["condicoes"] %></textarea>
+  <p class="muted">Os preços são calculados com a tabela vigente e ficam congelados nesta versão.</p></div>
