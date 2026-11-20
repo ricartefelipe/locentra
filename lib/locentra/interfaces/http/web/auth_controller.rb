@@ -137,8 +137,7 @@ module Locentra
           def portal_path?(path) = path == "/portal" || path.start_with?("/portal/", "/portal?")
 
           def safe_back(value)
-            text = value.to_s
-            text.start_with?("/") && !text.start_with?("//") && !text.match?(/[\\\r\n]/) ? text : nil
+            Controller.local_path?(value) ? value.to_s : nil
           end
         end
       end

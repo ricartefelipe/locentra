@@ -31,7 +31,7 @@ module Locentra
 
           def back_path(ctx, fallback)
             target = ctx.form["voltar"].to_s
-            target.start_with?("/") && !target.start_with?("//") ? target : fallback
+            Controller.local_path?(target) ? target : fallback
           end
         end
 

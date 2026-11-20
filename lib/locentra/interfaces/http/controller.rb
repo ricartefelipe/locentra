@@ -7,6 +7,17 @@ module Locentra
       class Controller
         Dependencies = Data.define(:system, :templates, :flash)
 
+        # Caminho local seguro para redirecionamento: começa com uma única "/" e não tem barra
+        # invertida, espaço nem caractere de controle. Navegadores removem TAB e quebras de linha antes
+        # de resolver o endereço ("/\t/evil.example" vira "//evil.example"), por isso qualquer
+        # caractere de controle é recusado.
+        UNSAFE_PATH = /[\x00-\x20\x7F\\]/
+
+        def self.local_path?(value)
+          text = value.to_s
+          text.start_with?("/") && !text.start_with?("//") && !text.match?(UNSAFE_PATH)
+        end
+
         def initialize(deps)
           @system = deps.system
           @templates = deps.templates
@@ -40,10 +51,7 @@ module Locentra
         end
 
         def local_path(location)
-          text = location.to_s
-          return "/" unless text.start_with?("/") && !text.start_with?("//") && !text.include?("\\") && !text.match?(/[\r\n]/)
-
-          text
+          self.class.local_path?(location) ? location.to_s : "/"
         end
 
         def json(status, body, headers = {})

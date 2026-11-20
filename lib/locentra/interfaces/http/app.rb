@@ -145,7 +145,7 @@ module Locentra
         end
 
         def login_redirect(ctx)
-          target = ctx.get? && ctx.path.start_with?("/") && !ctx.path.start_with?("//") ? ctx.path : "/"
+          target = ctx.get? && Controller.local_path?(ctx.path) ? ctx.path : "/"
           location = target == "/" ? "/entrar" : "/entrar?#{URI.encode_www_form(voltar: target)}"
           [303, { "location" => location, "content-type" => "text/html; charset=utf-8" }, [""]]
         end
