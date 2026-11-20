@@ -21,7 +21,6 @@ module Locentra
       # Matriz de permissões por papel. Fonte única para a interface, a API, a CLI e o worker.
       PERMISSIONS = {
         "organization.manage" => %w[owner admin],
-        "subscription.manage" => %w[owner],
         "members.read" => %w[owner admin manager auditor],
         "members.manage" => %w[owner admin],
         "integrations.manage" => %w[owner admin],
@@ -47,8 +46,7 @@ module Locentra
         "finance.refund" => %w[owner admin finance],
         "deposits.manage" => %w[owner admin manager finance],
         "audit.read" => %w[owner admin auditor],
-        "jobs.manage" => %w[owner admin],
-        "reports.export" => %w[owner admin manager finance auditor]
+        "jobs.manage" => %w[owner admin]
       }.freeze
 
       # Desconto manual máximo por papel, em pontos-base.

@@ -118,8 +118,8 @@ class EntitiesTest < UnitTest
   end
 
   def test_permissions_matrix_and_password_policy
-    assert I.permitted?("owner", "subscription.manage")
-    refute I.permitted?("admin", "subscription.manage")
+    assert I.permitted?("owner", "members.manage")
+    refute I.permitted?("manager", "members.manage")
     refute I.permitted?("auditor", "reservations.write")
     assert I.permitted?("auditor", "audit.read")
     refute I.permitted?("attendant", "finance.refund")

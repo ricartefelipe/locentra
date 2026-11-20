@@ -7,7 +7,6 @@ telas de navegação. A tabela abaixo foi gerada a partir do código.
 | Permissão | Proprietário | Administrador | Gerente | Atendente | Operador de estoque | Financeiro | Auditor |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | `organization.manage` | ✓ | ✓ |  |  |  |  |  |
-| `subscription.manage` | ✓ |  |  |  |  |  |  |
 | `members.read` | ✓ | ✓ | ✓ |  |  |  | ✓ |
 | `members.manage` | ✓ | ✓ |  |  |  |  |  |
 | `integrations.manage` | ✓ | ✓ |  |  |  |  |  |
@@ -34,7 +33,6 @@ telas de navegação. A tabela abaixo foi gerada a partir do código.
 | `deposits.manage` | ✓ | ✓ | ✓ |  |  | ✓ |  |
 | `audit.read` | ✓ | ✓ |  |  |  |  | ✓ |
 | `jobs.manage` | ✓ | ✓ |  |  |  |  |  |
-| `reports.export` | ✓ | ✓ | ✓ |  |  | ✓ | ✓ |
 
 Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, Atendente 5%; demais papéis: 0%.
 
