@@ -164,8 +164,10 @@ module Locentra
       end
     end
 
-    # Paginação com limites explícitos.
+    # Paginação com limites explícitos. O deslocamento máximo mantém o valor dentro do tipo do
+    # PostgreSQL (OFFSET é bigint) e evita varreduras profundas sem sentido.
     MAX_PAGE_LIMIT = 100
+    MAX_PAGE_OFFSET = 1_000_000
 
     Page = Data.define(:items, :limit, :offset, :total) do
       def self.params(limit: nil, offset: nil, default: 25)
@@ -173,6 +175,7 @@ module Locentra
         off = offset.to_s.empty? ? 0 : Integer(offset.to_s, 10)
         raise Domain::ValidationError.field("limite", "entre 1 e #{MAX_PAGE_LIMIT}") unless lim.between?(1, MAX_PAGE_LIMIT)
         raise Domain::ValidationError.field("deslocamento", "não pode ser negativo") if off.negative?
+        raise Domain::ValidationError.field("deslocamento", "no máximo #{MAX_PAGE_OFFSET}") if off > MAX_PAGE_OFFSET
 
         [lim, off]
       rescue ArgumentError

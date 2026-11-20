@@ -165,7 +165,8 @@ module Locentra
           raise Domain::Conflict.new("registro duplicado", code: "duplicate:#{constraint(e)}")
         rescue PG::ForeignKeyViolation
           raise Domain::NotFound, "registro relacionado"
-        rescue PG::CheckViolation, PG::NotNullViolation, PG::InvalidTextRepresentation
+        rescue PG::CheckViolation, PG::NotNullViolation, PG::DataException
+          # DataException inclui texto em formato inválido e número fora da faixa do tipo.
           raise Domain::ValidationError.new({ "base" => ["dados inválidos"] })
         rescue PG::InsufficientPrivilege
           raise Domain::AccessDenied, "operação não permitida no contexto atual"

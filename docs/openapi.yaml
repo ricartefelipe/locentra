@@ -322,7 +322,7 @@ components:
   parameters:
     Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
-    Offset: { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+    Offset: { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 } }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
