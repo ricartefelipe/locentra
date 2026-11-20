@@ -43,6 +43,13 @@ class AdminCliTest < Minitest::Test
     assert_equal [1, "erro: MIGRATION_DATABASE_URL não definido\n"], [status, err]
   end
 
+  def test_seed_is_refused_in_production
+    status, _, err = run_admin(%w[db:seed], "APP_ENV" => "production")
+
+    assert_equal 1, status
+    assert_match(/recusado com APP_ENV=production/, err)
+  end
+
   def test_database_password_is_never_printed
     {
       "postgres://locentra_owner:SenhaSecreta99@[::1/x" => "URL que o libpq não interpreta",

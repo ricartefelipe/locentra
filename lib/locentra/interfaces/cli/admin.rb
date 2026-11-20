@@ -16,7 +16,7 @@ module Locentra
         COMMANDS = {
           "db:migrate" => "Aplica migrations pendentes (exclusão mútua por advisory lock)",
           "db:status" => "Lista migrations aplicadas, pendentes e com checksum divergente",
-          "db:seed" => "Carrega dados demonstrativos idempotentes (duas organizações)"
+          "db:seed" => "Carrega dados demonstrativos idempotentes (duas organizações); recusado com APP_ENV=production"
         }.freeze
 
         def initialize(env: ENV, out: $stdout, err: $stderr)
@@ -64,6 +64,7 @@ module Locentra
             opts.banner = "Uso: bin/locentra-admin COMANDO [opções]\n\nComandos:\n" \
                           "#{COMMANDS.map { |k, v| format("  %-12<k>s %<v>s", k: k, v: v) }.join("\n")}\n\nOpções:"
             opts.on("--json", "Saída em JSON") { options[:json] = true }
+            opts.on("--allow-production", "Permite db:seed com APP_ENV=production (contas com senha pública)") { options[:allow_production] = true }
             opts.on("-h", "--help", "Ajuda") do
               @out.puts(opts)
               options[:help] = true
@@ -101,7 +102,14 @@ module Locentra
           rows.any? { |r| r["status"] == "checksum divergente" } ? 1 : 0
         end
 
+        # O seed cria proprietários com a senha de demonstração publicada no README: em produção só com
+        # --allow-production explícito.
         def db_seed(options)
+          if @env.fetch("APP_ENV", "development") == "production" && !options[:allow_production]
+            raise ConfigError, "db:seed cria contas com senha pública e é recusado com APP_ENV=production (use --allow-production " \
+                               "somente em ambiente de demonstração)"
+          end
+
           require_relative "../../system"
           require_relative "../../seed"
           system = System.boot(@env)
