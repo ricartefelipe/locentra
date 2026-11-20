@@ -6,10 +6,12 @@ require "uri"
 module Locentra
   class ConfigError < StandardError; end
 
+  PAYMENT_PROVIDER_NAMES = %w[simulator asaas].freeze
+
   # Configuração lida do ambiente somente quando o sistema é montado (nunca ao carregar o domínio).
   Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :database_url, :worker_database_url, :migration_database_url,
                        :pool_size, :pool_timeout, :worker_concurrency, :webhook_concurrency, :log_level, :smtp_host, :smtp_port, :mail_from,
-                       :payment_provider, :asaas_base_url, :asaas_api_key, :storage_root, :max_upload_bytes, :bcrypt_cost,
+                       :payment_providers, :asaas_base_url, :storage_root, :max_upload_bytes, :bcrypt_cost,
                        :metrics_token, :trusted_proxies, :api_rate_limit, :worker_health_file) do
     def self.from_env(env = ENV, overrides = {})
       app_env = env.fetch("APP_ENV", "development")
@@ -29,9 +31,8 @@ module Locentra
         smtp_host: env.fetch("SMTP_HOST", "localhost"),
         smtp_port: Integer(env.fetch("SMTP_PORT", "1025")),
         mail_from: env.fetch("MAIL_FROM", "Locentra <nao-responda@locentra.local>"),
-        payment_provider: env.fetch("PAYMENT_PROVIDER", "simulator"),
+        payment_providers: payment_providers(env["PAYMENT_PROVIDERS"], app_env),
         asaas_base_url: env.fetch("ASAAS_BASE_URL", "https://api-sandbox.asaas.com/v3"),
-        asaas_api_key: optional(env, "ASAAS_API_KEY"),
         storage_root: env.fetch("STORAGE_ROOT", File.expand_path("../../storage", __dir__)),
         max_upload_bytes: Integer(env.fetch("MAX_UPLOAD_BYTES", "10485760")),
         bcrypt_cost: Integer(env.fetch("BCRYPT_COST", app_env == "test" ? "4" : "12")),
@@ -46,6 +47,14 @@ module Locentra
     end
 
     def self.optional(env, key) = env[key].to_s.empty? ? nil : env[key]
+
+    # Provedores de pagamento que as organizações podem configurar neste processo. A chave de cada
+    # conta é cadastrada por organização (Financeiro → Provedor), nunca no ambiente. O simulador
+    # confirma pagamentos sem dinheiro real: fora da lista padrão de produção.
+    def self.payment_providers(text, app_env)
+      default = app_env == "production" ? "asaas" : PAYMENT_PROVIDER_NAMES.join(",")
+      (text.to_s.strip.empty? ? default : text).split(",").map(&:strip).reject(&:empty?).uniq.freeze
+    end
 
     # Endereços (IP ou CIDR, separados por vírgula) dos proxies reversos cujo X-Forwarded-For é
     # aceito. Vazio: o IP do cliente é sempre o par da conexão (REMOTE_ADDR).
@@ -62,8 +71,9 @@ module Locentra
       raise ConfigError, "DATABASE_URL obrigatório" if database_url.to_s.empty?
       raise ConfigError, "APP_SECRET_KEY_BASE deve ter ao menos 32 caracteres" if secret_key_base.to_s.length < 32
       raise ConfigError, "APP_ENCRYPTION_KEY obrigatório" if encryption_key.to_s.length < 16
-      raise ConfigError, "PAYMENT_PROVIDER inválido" unless %w[simulator asaas].include?(payment_provider)
-      raise ConfigError, "ASAAS_API_KEY obrigatório com PAYMENT_PROVIDER=asaas" if payment_provider == "asaas" && asaas_api_key.nil?
+
+      unknown = payment_providers - PAYMENT_PROVIDER_NAMES
+      raise ConfigError, "PAYMENT_PROVIDERS inválido (use simulator e/ou asaas)" if payment_providers.empty? || !unknown.empty?
       raise ConfigError, "APP_BASE_URL deve usar https em produção" if production? && !base_url.start_with?("https://")
       raise ConfigError, "API_RATE_LIMIT deve ser positivo" unless api_rate_limit.positive?
 
@@ -74,7 +84,7 @@ module Locentra
 
     # Representação sem segredos, para diagnóstico.
     def inspect
-      "#<Locentra::Config env=#{env} base_url=#{base_url} pool_size=#{pool_size} provider=#{payment_provider}>"
+      "#<Locentra::Config env=#{env} base_url=#{base_url} pool_size=#{pool_size} providers=#{payment_providers.join(",")}>"
     end
     alias_method :to_s, :inspect
   end

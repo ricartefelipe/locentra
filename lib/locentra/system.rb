@@ -395,7 +395,9 @@ module Locentra
       fn = A::Finance
       simulator = I::Payments::Simulator.new(transactor: transactor, clock: clock, ids: ids)
       asaas = I::Payments::Asaas.new(http: @payment_http || I::Payments::HttpClient.new, box: s[:box], sandbox_url: config.asaas_base_url)
-      providers = fn::Providers.new({ "simulator" => simulator, "asaas" => asaas }, s[:external_calls])
+      # Somente os provedores habilitados no processo (PAYMENT_PROVIDERS); em produção, o simulador fica
+      # fora por padrão.
+      providers = fn::Providers.new({ "simulator" => simulator, "asaas" => asaas }.slice(*config.payment_providers), s[:external_calls])
       s[:payment_providers] = providers
       ledger = fn::Ledger.new(entries: r[:ledger_entries], ids: ids, clock: clock)
       alert_book = fn::AlertBook.new(alerts: r[:finance_alerts], ids: ids, clock: clock)
@@ -428,13 +430,14 @@ module Locentra
       uc[:ingest_payment_webhook] = ingest
       uc[:process_payment_webhook] = fn::ProcessWebhook.new(uow: uow, inbound: r[:inbound_webhooks], payments: r[:payments], providers: providers,
                                                             settlement: settlement, alert_book: alert_book, clock: clock)
-      uc[:simulate_payment] = fn::SimulateProviderEvent.new(uow: uow, payments: r[:payments], **accounts, simulator: simulator, ingest: ingest)
+      uc[:simulate_payment] = fn::SimulateProviderEvent.new(uow: uow, payments: r[:payments], **accounts,
+                                                            simulator: config.payment_providers.include?("simulator") ? simulator : nil, ingest: ingest)
       uc[:open_deposit] = fn::OpenDeposit.new(uow: uow, reservations: r[:reservations], deposits: r[:deposits], audit: audit, clock: clock, ids: ids)
       uc[:move_deposit] = fn::MoveDeposit.new(uow: uow, deposits: r[:deposits], receivables: r[:receivables], **money)
       uc[:reconcile_payments] = fn::Reconcile.new(uow: uow, **accounts, payments: r[:payments], reports: r[:reconciliation], providers: providers,
                                                   resolver: resolver, remote: remote, audit: audit, clock: clock, ids: ids)
       uc[:configure_payment_account] = fn::ConfigureProviderAccount.new(uow: uow, **accounts, limits: s[:limits], box: s[:box], audit: audit,
-                                                                        clock: clock, ids: ids)
+                                                                        clock: clock, ids: ids, enabled: config.payment_providers)
       uc[:deactivate_payment_account] = fn::DeactivateProviderAccount.new(uow: uow, **accounts, audit: audit, clock: clock)
       uc[:resolve_finance_alert] = fn::ResolveAlert.new(uow: uow, alerts: r[:finance_alerts], audit: audit, clock: clock)
       uc[:issue_invoice] = fn::IssueInvoice.new(uow: uow, reservations: r[:reservations], receivables: r[:receivables], organizations: r[:organizations],

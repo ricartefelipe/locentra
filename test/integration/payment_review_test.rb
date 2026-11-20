@@ -43,4 +43,25 @@ class PaymentReviewTest < DatabaseTest
     assert_includes kinds, ["payment_after_expiration", requested.id]
     assert_includes kinds, ["payment_after_expiration", manual.id]
   end
+
+  # O simulador confirma pagamentos sem dinheiro real: fora dos provedores padrão em produção.
+  def test_simulator_is_not_available_when_disabled_in_the_process
+    assert_equal %w[asaas], Locentra::Config.from_env(TestDatabase.env("APP_ENV" => "production", "APP_BASE_URL" => "https://l.example")).payment_providers
+    assert_equal %w[simulator asaas], Locentra::Config.from_env(TestDatabase.env).payment_providers
+    assert_raises(Locentra::ConfigError) { Locentra::Config.from_env(TestDatabase.env("PAYMENT_PROVIDERS" => "outro")) }
+    asaas_only = Locentra::System.new(Locentra::Config.from_env(TestDatabase.env("PAYMENT_PROVIDERS" => "asaas")), clock: @clock, logger: @system.logger)
+    error = assert_raises(D::ValidationError) do
+      asaas_only.use_cases[:configure_payment_account].call(@actor, provider: "simulator", name: "Simulador")
+    end
+
+    assert_match(/não habilitado/, error.errors["provedor"].first)
+    rental = rental_of(booking.tap { |r| sync(r) })
+    requested = request_online(rental, 1_000)
+    drain
+    disabled = assert_raises(D::Conflict) { asaas_only.use_cases[:simulate_payment].call(@actor, requested.id) }
+
+    assert_equal "simulator_disabled", disabled.code
+  ensure
+    asaas_only&.shutdown
+  end
 end

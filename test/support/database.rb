@@ -42,7 +42,7 @@ module TestDatabase
       "APP_ENV" => "test", "DATABASE_URL" => app_url, "WORKER_DATABASE_URL" => worker_url, "MIGRATION_DATABASE_URL" => owner_url,
       "APP_SECRET_KEY_BASE" => "test-secret-key-base-0123456789abcdef0123456789",
       "APP_ENCRYPTION_KEY" => "test-encryption-key-0123456789",
-      "DB_POOL_SIZE" => "8", "LOG_LEVEL" => "error", "BCRYPT_COST" => "4", "PAYMENT_PROVIDER" => "simulator",
+      "DB_POOL_SIZE" => "8", "LOG_LEVEL" => "error", "BCRYPT_COST" => "4",
       "STORAGE_ROOT" => File.expand_path("../../tmp/test-storage", __dir__)
     }.merge(overrides)
   end

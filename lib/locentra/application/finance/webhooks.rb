@@ -150,7 +150,10 @@ module Locentra
           @ingest = ingest
         end
 
+        # `simulator` é nil quando o simulador não está habilitado no processo (padrão em produção).
         def call(actor, payment_id)
+          raise Domain::Conflict.new("Simulador de pagamentos desativado neste ambiente", code: "simulator_disabled") unless @simulator
+
           payment, account = @uow.run(actor, "finance.write") do |tx, _|
             found = @payments.find(tx, Domain::Identifier.parse(payment_id, "pagamento")) || raise(Domain::NotFound, "pagamento")
             unless found.provider == "simulator" && found.provider_payment_id

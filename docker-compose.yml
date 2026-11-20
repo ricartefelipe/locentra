@@ -19,9 +19,8 @@ x-app-env: &app-env
   SMTP_HOST: ${SMTP_HOST:-mailpit}
   SMTP_PORT: ${SMTP_PORT:-1025}
   MAIL_FROM: ${MAIL_FROM:-Locentra <nao-responda@locentra.local>}
-  PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-simulator}
+  PAYMENT_PROVIDERS: ${PAYMENT_PROVIDERS:-}
   ASAAS_BASE_URL: ${ASAAS_BASE_URL:-https://api-sandbox.asaas.com/v3}
-  ASAAS_API_KEY: ${ASAAS_API_KEY:-}
   STORAGE_ROOT: /app/storage
   MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
   METRICS_TOKEN: ${METRICS_TOKEN:-}

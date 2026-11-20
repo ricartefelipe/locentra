@@ -8,7 +8,8 @@ module Locentra
       class ConfigureProviderAccount
         KEY_PREFIXES = { "sandbox" => "$aact_hmlg_", "production" => "$aact_prod_" }.freeze
 
-        def initialize(uow:, accounts:, limits:, box:, audit:, clock:, ids:)
+        # `enabled`: provedores habilitados no processo (PAYMENT_PROVIDERS).
+        def initialize(uow:, accounts:, limits:, box:, audit:, clock:, ids:, enabled: F::ONLINE_PROVIDERS)
           @uow = uow
           @accounts = accounts
           @limits = limits
@@ -16,10 +17,12 @@ module Locentra
           @audit = audit
           @clock = clock
           @ids = ids
+          @enabled = enabled
         end
 
         def call(actor, provider:, name:, api_key: nil, environment: "sandbox")
           raise Domain::ValidationError.field("provedor", "use simulator ou asaas") unless F::ONLINE_PROVIDERS.include?(provider)
+          raise Domain::ValidationError.field("provedor", "provedor não habilitado neste ambiente") unless @enabled.include?(provider)
           raise Domain::ValidationError.field("ambiente", "use sandbox ou production") unless KEY_PREFIXES.key?(environment)
 
           key = provider == "asaas" ? api_key!(api_key, environment) : nil
