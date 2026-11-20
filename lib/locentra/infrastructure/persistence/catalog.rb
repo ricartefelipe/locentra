@@ -27,6 +27,11 @@ module Locentra
           row && self.class.map_product(row)
         end
 
+        def find_product_by_sku(tx, sku)
+          row = tx.query_one("SELECT #{PRODUCT_COLUMNS} FROM products WHERE organization_id = $1 AND sku = $2", [tx.tenant_id!, sku])
+          row && self.class.map_product(row)
+        end
+
         def lock_product(tx, id)
           row = tx.query_one("SELECT #{PRODUCT_COLUMNS} FROM products WHERE organization_id = $1 AND id = $2 FOR UPDATE",
                              [tx.tenant_id!, id])
