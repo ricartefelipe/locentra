@@ -292,8 +292,8 @@ class PaymentProviderTest < DatabaseTest
                                       audit: worker_system.services[:audit], events: worker_system.services[:events], clock: @clock)
     system_actor = A::Actor.system(organization_id: @org[:organization_id])
 
-    assert_raises(FN::ProviderTimeout) { processor.call(system_actor, refund.id) }
-    assert_equal :confirmed, processor.call(system_actor, refund.id)
+    assert_equal :awaiting_settlement, processor.call(system_actor, refund.id), "tempo esgotado: resultado desconhecido"
+    assert_equal :confirmed, processor.call(system_actor, refund.id), "a consulta encontra o estorno registrado"
     assert_equal 1, flaky.refund_calls
     refunds = owner_query("SELECT refunds FROM payment_simulator_charges").first["refunds"]
 

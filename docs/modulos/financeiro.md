@@ -212,11 +212,16 @@ credenciais reais (`test/unit/infrastructure/asaas_adapter_test.rb`).
 6. Requisição não enviada (`ProviderUnavailable`: conexão recusada, limite de taxa) devolve o
    pagamento a `pending_submission` e a fila reagenda a tarefa com espera crescente.
 
-Reembolsos de provedor seguem o mesmo princípio: antes de pedir o estorno, os reembolsos já
-registrados no provedor são procurados pela descrição estável `Locentra reembolso <id>`. A situação
-informada decide: concluído (`DONE`) confirma; em andamento (pendente ou aguardando autorização)
-mantém o reembolso pendente (valor comprometido) e agenda nova consulta em 30 minutos; cancelado no
-provedor falha o reembolso, com estorno contábil, sem novo pedido automático.
+Reembolsos de provedor seguem o mesmo protocolo do envio (migration
+`0013_tentativas_de_estorno.sql`): a tentativa (`submission_attempts`, `submission_started_at`) é gravada
+sob lock antes da chamada de rede, e antes de pedir o estorno os reembolsos já registrados no provedor são
+procurados pela descrição estável `Locentra reembolso <id>`. A consulta vazia só autoriza um novo pedido
+quando a janela da última tentativa (300 s) já passou; dentro dela (tempo esgotado na tentativa anterior,
+outro worker com a mesma tarefa), nada é reenviado e uma consulta é agendada para o fim da janela, uma por
+tentativa. Tempo esgotado no pedido mantém o reembolso pendente com essa consulta; conexão recusada libera a
+tentativa e a fila repete. A situação encontrada decide: concluído confirma; em andamento mantém o
+reembolso pendente (valor comprometido) e agenda nova consulta em 30 minutos; cancelado no provedor falha o
+reembolso, com estorno contábil, sem novo pedido automático.
 
 ## Webhooks recebidos
 
