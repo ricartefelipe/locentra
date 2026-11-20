@@ -146,6 +146,37 @@ class WorkerTest < DatabaseTest
     assert_equal([{ "kind" => "email.send", "outcome" => "dead", "total" => "1" }], totals.map { |t| t.transform_values(&:to_s) })
   end
 
+  def test_claim_takes_lower_priority_numbers_first
+    { 90 => "c", 10 => "a", 50 => "b" }.each { |priority, name| wtx { |tx| queue.enqueue(tx, "email.send", { "n" => name }, priority: priority) } }
+    order = Array.new(3) { worker_system.transactor.call { |tx| queue.claim(tx, worker: "w", limit: 1).first.payload["n"] } }
+
+    assert_equal %w[a b c], order
+  end
+
+  # Duas reivindicações simultâneas: a primeira mantém o lock da tarefa até o fim da transação; a
+  # segunda recebe a outra tarefa sem esperar (SKIP LOCKED).
+  def test_concurrent_claims_receive_distinct_jobs_without_blocking
+    2.times { |i| wtx { |tx| queue.enqueue(tx, "email.send", { "n" => i }) } }
+    holding = Barrier.new(2)
+    released = Barrier.new(2)
+    first = Thread.new do
+      worker_system.transactor.call do |tx|
+        job = queue.claim(tx, worker: "a", limit: 1).first
+        holding.wait
+        released.wait
+        job
+      end
+    end
+    holding.wait
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    second = worker_system.transactor.call { |tx| queue.claim(tx, worker: "b", limit: 1).first }
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    released.wait
+
+    refute_equal first.value.id, second.id
+    assert_operator elapsed, :<, 2, "a segunda reivindicação não espera o lock da primeira"
+  end
+
   def test_webhook_deliveries_use_their_own_queue_and_threads
     server = CaptureServer.new
     uc(:create_webhook).call(@org[:actor], url: server.url, events: ["*"])
