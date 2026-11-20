@@ -10,11 +10,13 @@ module Locentra
     # `external_call_duration_seconds{provider,kind}`. Rótulos de métricas são de baixa cardinalidade:
     # identificadores vão somente para o log (`details`).
     #
-    # Portas: `logger` com `info`/`warn` e `metrics` com `increment`/`observe`.
+    # Portas: `logger` com `info`/`warn`, `metrics` com `increment`/`observe` e `clock` com `monotonic`
+    # (duração das chamadas).
     class ExternalCalls
-      def initialize(logger:, metrics:)
+      def initialize(logger:, metrics:, clock: Domain::SystemClock.new)
         @logger = logger
         @metrics = metrics
+        @clock = clock
       end
 
       # `outcome` classifica um resultado sem exceção (padrão "ok"); `errors` associa classes de
@@ -43,7 +45,7 @@ module Locentra
         outcome == "ok" ? @logger.info(entry.merge(fields)) : @logger.warn(entry.merge(fields))
       end
 
-      def monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      def monotonic = @clock.monotonic
     end
   end
 end

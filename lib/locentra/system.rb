@@ -85,7 +85,7 @@ module Locentra
         contract_renderer: I::Documents::ContractPdf.new,
         reservation_guard: A::Reservations::ChangeGuard.new(contracts: repos[:contracts], quotes: repos[:quotes]),
         # Chamadas a provedores de pagamento e webhooks enviados: log com correlação e métricas.
-        external_calls: A::ExternalCalls.new(logger: logger, metrics: metrics),
+        external_calls: A::ExternalCalls.new(logger: logger, metrics: metrics, clock: clock),
         portal_scope: A::Portal::ContractDocumentScope.new(contracts: repos[:contracts])
       }
       @services[:hold_expiry] = A::Reservations::HoldExpiry.new(reservations: repos[:reservations], audit: @services[:audit], events: @services[:events])
