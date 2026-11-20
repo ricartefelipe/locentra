@@ -87,6 +87,9 @@ module Locentra
                   "created_by" => actor.audit_actor_id, "created_at" => now, "retain_until" => retain_days ? now + (retain_days * 86_400) : nil }
           guard!(tx, owner_type, row["owner_id"])
           stats = @storage.put(key, bytes)
+          # Composto com outra operação (ex.: PDF do contrato), uma falha posterior, no COMMIT ou uma
+          # nova tentativa da transação também removem o arquivo.
+          tx.after_rollback { @storage.delete(key) }
           begin
             row = row.merge("byte_size" => stats[:byte_size], "sha256" => stats[:sha256])
             @attachments.insert(tx, row)

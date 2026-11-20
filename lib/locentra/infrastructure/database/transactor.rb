@@ -24,6 +24,7 @@ module Locentra
           @request_id = request_id
           @savepoints = 0
           @after_commit = []
+          @after_rollback = []
         end
 
         def request_id = @request_id || @actor&.request_id
@@ -85,6 +86,21 @@ module Locentra
         def run_after_commit
           @after_commit.each(&:call)
         end
+
+        # Compensações executadas se a transação for desfeita (erro, falha no COMMIT ou nova tentativa
+        # por deadlock), por exemplo remover um arquivo gravado fora do banco. Erros de uma compensação
+        # não substituem o erro original.
+        def after_rollback(&block)
+          @after_rollback << block
+        end
+
+        def run_after_rollback
+          @after_rollback.each do |block|
+            block.call
+          rescue StandardError
+            nil
+          end
+        end
       end
 
       # Coordenador de transações.
@@ -136,6 +152,7 @@ module Locentra
               conn.exec("COMMIT")
             rescue Exception # rubocop:disable Lint/RescueException -- rollback também em interrupções
               rollback(conn)
+              tx.run_after_rollback
               raise
             ensure
               Thread.current[THREAD_KEY] = nil
