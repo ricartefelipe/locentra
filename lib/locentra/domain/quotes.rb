@@ -104,7 +104,8 @@ module Locentra
         # Conteúdo comparável: duas versões iguais não justificam nova versão.
         def fingerprint
           [branch_id, period, valid_until.to_i, terms, manual_discount_bps, total.cents, deposit.cents,
-           items.map { |i| [i.fetch("product_id"), i.fetch("quantity"), i.fetch("total_cents")] }.sort]
+           items.map { |i| [i.fetch("product_id"), i.fetch("quantity"), i.fetch("total_cents")] }.sort,
+           pricing.fetch("fees", []).map { |f| [f["fee_id"], f["description"], f["amount_cents"]] }.sort_by(&:inspect)]
         end
       end
 

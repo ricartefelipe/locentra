@@ -13,11 +13,6 @@ module Locentra
         # caractere de controle é recusado.
         UNSAFE_PATH = /[\x00-\x20\x7F\\]/
 
-        # Percentual com até duas casas decimais ("12", "12,5", "12.34") em pontos-base, com aritmética
-        # inteira. Infinity, NaN, notação científica e casas além da segunda são recusados (não
-        # arredondados nem truncados em silêncio).
-        PERCENT = /\A(\d{1,3})(?:[.,](\d{1,2}))?\z/
-
         def self.local_path?(value)
           text = value.to_s
           text.start_with?("/") && !text.start_with?("//") && !text.match?(UNSAFE_PATH)
@@ -63,13 +58,10 @@ module Locentra
           [status, { "content-type" => "application/json; charset=utf-8" }.merge(headers), [JSON.generate(body)]]
         end
 
-        def percent_bps(value, field)
-          text = value.to_s.strip
-          return 0 if text.empty?
-
-          match = PERCENT.match(text) || raise(Domain::ValidationError.field(field, "percentual inválido (até duas casas decimais)"))
-          (match[1].to_i * 100) + match[2].to_s.ljust(2, "0").to_i
-        end
+        # Percentual com até duas casas decimais ("12", "12,5", "12.34") em pontos-base, com aritmética
+        # inteira (Domain::Percent.parse); vazio vale 0. Infinity, NaN, notação científica e casas além
+        # da segunda são recusados (não arredondados nem truncados em silêncio).
+        def percent_bps(value, field) = Domain::Percent.parse(value, field) || 0
 
         # Conversões de entrada de formulário. O erro de formato vai para o campo do formulário que
         # enviou o valor (o domínio usa a chave genérica "valor").

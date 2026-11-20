@@ -8,9 +8,9 @@ class QuotesDomainTest < UnitTest
   def now = t("2026-03-02T12:00:00Z")
   def rental = period("2026-03-10T08:00:00Z", "2026-03-12T08:00:00Z")
 
-  def version(number: 1, valid_until: t("2026-03-05T12:00:00Z"), rental_period: rental, total: 24_000)
+  def version(number: 1, valid_until: t("2026-03-05T12:00:00Z"), rental_period: rental, total: 24_000, pricing: {})
     Q::Version.new(id: "v#{number}", quote_id: "q1", number: number, branch_id: "b1", period: rental_period, valid_until: valid_until,
-                   items: [{ "product_id" => "p1", "quantity" => 2, "total_cents" => total }], pricing: { "total_cents" => total },
+                   items: [{ "product_id" => "p1", "quantity" => 2, "total_cents" => total }], pricing: { "total_cents" => total }.merge(pricing),
                    terms: "Condições", manual_discount_bps: 0, deposit: Domain::Money.zero, total: Domain::Money.new(total), created_at: now,
                    sent_at: nil)
   end
@@ -63,6 +63,24 @@ class QuotesDomainTest < UnitTest
     assert_predicate delivered, :sent?
     assert_equal v.fingerprint, delivered.fingerprint, "o envio não altera o conteúdo da versão"
     assert_raises(Domain::InvariantViolation) { delivered.mark_sent(now + 60) }
+  end
+
+  # As tarifas fazem parte do conteúdo comparável: trocar uma tarifa por outra de mesmo valor (total
+  # igual) justifica nova versão; a ordem das tarifas e os campos internos do snapshot, não.
+  def test_fingerprint_includes_fees
+    delivery = { "fee_id" => "f1", "code" => "ENTREGA", "description" => "Entrega", "amount_cents" => 15_000, "default_amount_cents" => 15_000,
+                 "source" => "catalog" }
+    custom = { "fee_id" => nil, "code" => nil, "description" => "Taxa de estacionamento", "amount_cents" => 3_000, "default_amount_cents" => nil,
+               "source" => "custom" }
+    with_fees = version(pricing: { "fees" => [delivery, custom] })
+
+    refute_equal version.fingerprint, with_fees.fingerprint
+    assert_equal version.fingerprint, version(pricing: { "fees" => [] }).fingerprint, "versões anteriores não têm a chave"
+    assert_equal with_fees.fingerprint, version(pricing: { "fees" => [custom, delivery] }).fingerprint
+    assert_equal with_fees.fingerprint, version(pricing: { "fees" => [delivery.merge("default_amount_cents" => 18_000), custom] }).fingerprint
+    refute_equal with_fees.fingerprint, version(pricing: { "fees" => [delivery.merge("fee_id" => "f2"), custom] }).fingerprint
+    refute_equal with_fees.fingerprint, version(pricing: { "fees" => [delivery, custom.merge("description" => "Pedágio")] }).fingerprint
+    refute_equal with_fees.fingerprint, version(pricing: { "fees" => [delivery.merge("amount_cents" => 20_000), custom] }).fingerprint
   end
 
   # O bloqueio do envio fica ligado ao orçamento enquanto ele está enviado ou aprovado (ainda não
