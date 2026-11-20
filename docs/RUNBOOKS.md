@@ -30,7 +30,7 @@ docker compose --profile ops run --rm migrate ruby bin/locentra-admin db:status
   conteúdo original e crie uma migration nova.
 - A aplicação e o worker nunca usam a credencial de migration.
 
-## 3. Backup do banco e dos anexos — exercitado em 18/11/2026
+## 3. Backup do banco e dos anexos — exercitado em 20/11/2026 (esquema da 1.0.0)
 
 Papel dedicado `locentra_backup` (somente leitura, `BYPASSRLS`, membro de `pg_read_all_data`). Como a RLS é
 forçada inclusive para o proprietário, um backup feito com o proprietário ou com o papel da aplicação sairia
@@ -55,7 +55,7 @@ caminho inexistente) o script termina com erro antes do dump; omitir os anexos e
 `STORAGE_ROOT` para o diretório real dos anexos. Guarde o diretório do backup fora do servidor, cifrado,
 com retenção definida pela política da operação.
 
-## 4. Restauração — exercitada em 18/11/2026
+## 4. Restauração — exercitada em 20/11/2026 (esquema da 1.0.0)
 
 Executada por administrador do PostgreSQL (superusuário), sempre em **banco novo**; os proprietários
 originais (`locentra_owner`) e as políticas de RLS são preservados.
@@ -83,16 +83,22 @@ docker run --rm -v "$PWD/tmp/anexos-restaurados":/origem:ro -v locentra_storage:
 docker compose up -d --wait web worker
 ```
 
-### Registro do exercício (18/11/2026, PostgreSQL 18.7, banco de desenvolvimento semeado)
+### Registro do exercício (20/11/2026, PostgreSQL 18.7, branch release/1.0.0, banco semeado com um anexo)
+
+Backup com `bin/backup` (imagem `postgres:18.7-trixie`, papel `locentra_backup`, `STORAGE_ROOT` apontando para
+o diretório dos anexos) e restauração com `bin/restore` em banco novo, que foi removido depois da validação.
 
 | Verificação | Resultado |
 |---|---|
-| Manifesto SHA-256 do backup | conferido antes da restauração |
-| `db:status` no banco restaurado | 10 migrations aplicadas, sem checksum divergente |
-| Contagem de linhas de todas as tabelas (origem × restaurado, via `locentra_backup`) | 67 tabelas, 192 linhas, idênticas |
-| RLS no banco restaurado com `locentra_app` | sem contexto: 0 clientes; com contexto da organização: somente os clientes dela |
+| Manifesto SHA-256 do backup | conferido antes da restauração; backup informou 1 arquivo de anexo |
+| `db:status` no banco restaurado | 14 migrations aplicadas, sem checksum divergente |
+| Contagem de linhas por tabela (origem × restaurado, via `locentra_backup`) | 69 tabelas, 224 linhas, idênticas tabela a tabela |
+| RLS no banco restaurado com `locentra_app` | sem contexto: 0 clientes; com contexto da organização: 2 clientes, nenhum de outra (4 clientes em 3 organizações no total) |
+| Permissões do banco restaurado | `PUBLIC` sem `CONNECT` nem `TEMPORARY`; `locentra_app` com `CONNECT` |
 | Anexo restaurado | SHA-256 do arquivo igual ao registrado em `attachments.sha256` |
-| Defeito encontrado e corrigido no exercício | o script removia o schema `public`, que o dump não recria; removido |
+
+Exercício anterior (18/11/2026, 10 migrations e 67 tabelas): encontrou e corrigiu a remoção do schema
+`public` pelo script, que o dump não recria.
 
 **Não exercitado:** recuperação em ponto no tempo (arquivamento contínuo de WAL) e restauração a partir de
 object storage — dependem da infraestrutura de produção escolhida.

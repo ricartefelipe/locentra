@@ -55,6 +55,9 @@ contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
   de contadores como reinício. As métricas derivadas do banco (fila, desfechos de tarefas) são as mesmas em
   qualquer processo.
 - Sem API v1 para orçamentos, contratos, operação e portal (disponíveis pela interface e casos de uso).
+- A confirmação de e-mail (RF-05) é emitida e registrada, mas não restringe funcionalidades: conta não
+  confirmada entra, convida, cria credenciais e envia orçamentos e contratos. O cadastro é limitado por IP e
+  por e-mail (ADR-026); uma política de bloqueio até a confirmação fica para versão futura.
 - Configurações da organização (`settings`: política de cancelamento e validade padrão do bloqueio
   temporário) são lidas com valores padrão, mas não há tela nem comando para alterá-las nesta versão.
 - Cupons, condições negociadas por cliente e tarifas adicionais: o motor de preços os aplica
