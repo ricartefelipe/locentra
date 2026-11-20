@@ -23,10 +23,12 @@ class IdentityFlowTest < DatabaseTest
       uc(:sign_up).call(name: "Outra", email: "dona@alfa.test", password: "senha-muito-segura-1", organization_name: "Outra Empresa")
     end
     assert_equal "email_taken", error.code
-    slug = assert_raises(D::Conflict) do
-      uc(:sign_up).call(name: "Outra", email: "nova@alfa.test", password: "senha-muito-segura-1", organization_name: "Locadora Alfa")
-    end
-    assert_equal "slug_taken", slug.code
+    homonym = uc(:sign_up).call(name: "Outra", email: "nova@alfa.test", password: "senha-muito-segura-1", organization_name: "Locadora Alfa")
+    name, slug = owner_query("SELECT name, slug FROM organizations", [], tenant: homonym[:organization_id]).first.values_at("name", "slug")
+
+    refute_equal @org[:organization_id], homonym[:organization_id]
+    assert_equal "Locadora Alfa", name, "nome repetido não revela a outra organização"
+    assert_match(/\Alocadora-alfa-[0-9a-f]{6}\z/, slug)
     assert_raises(D::ValidationError) { uc(:sign_up).call(name: "X", email: "x@y.test", password: "curta", organization_name: "Empresa X") }
     assert_raises(D::ValidationError) { uc(:sign_up).call(name: "X", email: "x@y.test", password: "senha-muito-segura-1", organization_name: "Empresa X", plan_id: "ouro") }
   end

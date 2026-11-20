@@ -34,6 +34,19 @@ class PortalPagesTest < PortalHttpTest
     assert_equal %w[requested portal], owner_query("SELECT status, source FROM reservations").first.values_at("status", "source")
   end
 
+  def test_reservation_requests_are_limited_per_portal_user
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    portal_login
+    token = portal_csrf
+    statuses = Array.new(31) do
+      post "/portal/reservas", request_form("").merge("_csrf" => token)
+      last_response.status
+    end
+
+    assert_equal [422, 429], statuses.uniq
+    assert_equal 429, statuses.last
+  end
+
   def test_reservations_and_quotes_through_the_screens
     portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
     confirmed = reserve(@actor, @customer, @branch, period("2026-03-12T08:00:00Z", "2026-03-13T08:00:00Z"), [line(@camera, 1)], mode: "confirm")

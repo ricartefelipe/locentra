@@ -105,6 +105,12 @@ module Locentra
           tx.execute("UPDATE user_tokens SET used_at = $3 WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL", [user_id, purpose, now])
         end
 
+        def usable?(tx, digest, purpose, now)
+          !tx.query_one(<<~SQL, [digest, purpose, now]).nil?
+            SELECT 1 FROM user_tokens WHERE token_digest = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > $3
+          SQL
+        end
+
         # Marca como usado e devolve a linha somente se ainda válido: uso único sob concorrência.
         def consume(tx, digest, purpose, now)
           tx.query_one(<<~SQL, [digest, purpose, now])

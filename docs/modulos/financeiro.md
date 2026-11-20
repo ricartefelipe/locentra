@@ -316,7 +316,8 @@ Permissões existentes: `finance.read`, `finance.write`, `finance.refund`, `depo
   tempo) não é reenviado automaticamente; precisa de nova cobrança.
 - A janela de conclusão do envio (300 s) pressupõe os tempos limite do cliente HTTP; uma requisição
   que ultrapasse a janela pode gerar cobrança duplicada, que é sinalizada por alerta.
-- Webhooks recebidos não têm limitação de taxa própria além do limite de corpo da aplicação.
+- Webhooks recebidos são limitados a 1200 requisições por IP por minuto (ADR-026); acima disso o
+  provedor recebe `429` e repete a entrega.
 - NFS-e fora do escopo.
 
 ## Como testar

@@ -8,6 +8,24 @@ require_relative "../support/portal_support"
 class AccessControlTest < DatabaseTest
   include PortalHelpers
 
+  # Hasher que conta quantos hashes de senha foram calculados.
+  class CountingHasher
+    attr_reader :count
+
+    def initialize(inner)
+      @inner = inner
+      @count = 0
+    end
+
+    def hash(password)
+      @count += 1
+      @inner.hash(password)
+    end
+
+    def verify(...) = @inner.verify(...)
+    def dummy_digest = @inner.dummy_digest
+  end
+
   def setup
     super
     @org = create_organization
@@ -51,5 +69,52 @@ class AccessControlTest < DatabaseTest
 
     assert_equal ["ERP"], revoked
     refute_nil uc(:authenticate_credential).call(other), "credenciais de outros membros continuam válidas"
+  end
+
+  def test_invalid_tokens_and_taken_emails_do_not_cost_a_password_hash
+    hasher = CountingHasher.new(@system.services[:hasher])
+    r = @system.repos
+    s = @system.services
+    reset = A::Identity::ResetPassword.new(uow: @system.uow, users: r[:users], tokens: s[:tokens], hasher: hasher, sessions_repository: r[:sessions],
+                                           clock: @clock)
+    accept = A::Organizations::AcceptInvitation.new(uow: @system.uow, organizations: r[:organizations], users: r[:users], hasher: hasher,
+                                                    audit: s[:audit], clock: @clock, ids: @system.ids)
+    portal = A::Portal::AcceptInvitation.new(uow: @system.uow, portal: r[:portal], customers: r[:customers], users: r[:users], limits: s[:limits],
+                                             hasher: hasher, audit: s[:audit], clock: @clock, ids: @system.ids)
+    sign_up = A::Identity::SignUp.new(uow: @system.uow, users: r[:users], organizations: r[:organizations], hasher: hasher, notifier: s[:notifier],
+                                      clock: @clock, ids: @system.ids, audit: s[:audit], rate_limiter: s[:rate_limiter])
+    password = "senha-muito-segura-9"
+
+    assert_raises(D::ValidationError) { reset.call(token: "invalido", password: password) }
+    assert_raises(D::ValidationError) { accept.call(token: "#{@org[:organization_id]}.invalido", name: "X", password: password) }
+    assert_raises(D::ValidationError) { portal.call(token: "#{@org[:organization_id]}.invalido", name: "X", password: password) }
+    assert_raises(D::Conflict) { sign_up.call(name: "X", email: "dona@alfa.test", password: password, organization_name: "Outra") }
+    assert_equal 0, hasher.count
+  end
+
+  # O cadastro da organização no setup é a primeira tentativa do endereço.
+  def test_signup_attempts_are_limited_per_email
+    4.times do
+      assert_raises(D::Conflict) { uc(:sign_up).call(name: "X", email: "dona@alfa.test", password: "senha-muito-segura-1", organization_name: "Outra") }
+    end
+    assert_raises(A::Identity::TooManyRequests) do
+      uc(:sign_up).call(name: "X", email: "DONA@alfa.test", password: "senha-muito-segura-1", organization_name: "Outra")
+    end
+    @clock.advance(3601)
+
+    assert_raises(D::Conflict) { uc(:sign_up).call(name: "X", email: "dona@alfa.test", password: "senha-muito-segura-1", organization_name: "Outra") }
+  end
+
+  def test_signup_reports_organization_name_errors_on_the_organization_field
+    error = assert_raises(D::ValidationError) do
+      uc(:sign_up).call(name: "Fulano de Tal", email: "fulano@x.test", password: "senha-muito-segura-1", organization_name: "A")
+    end
+
+    assert_equal ["organizacao"], error.errors.keys
+    symbols = assert_raises(D::ValidationError) do
+      uc(:sign_up).call(name: "Fulano de Tal", email: "fulano@x.test", password: "senha-muito-segura-1", organization_name: "!!!")
+    end
+
+    assert_equal ["organizacao"], symbols.errors.keys
   end
 end

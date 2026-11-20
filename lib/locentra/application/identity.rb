@@ -145,10 +145,18 @@ module Locentra
 
       # Cadastro de nova organização: usuário proprietário, filial principal e assinatura em teste.
       # `request_id` (da requisição, quando houver) correlaciona a auditoria e o e-mail de confirmação.
+      #
+      # Cada endereço tem limite de tentativas por hora (o IP é limitado na rota). O e-mail já
+      # cadastrado é verificado antes do bcrypt, que só é calculado para um cadastro que pode ser
+      # concluído. Nome de organização repetido recebe sufixo aleatório no identificador, sem revelar
+      # que outra organização usa o mesmo nome.
       class SignUp
         TRIAL_DAYS = 14
+        EMAIL_LIMIT = 5
+        EMAIL_WINDOW = 3600
+        SLUG_ATTEMPTS = 3
 
-        def initialize(uow:, users:, organizations:, hasher:, notifier:, clock:, ids:, audit:)
+        def initialize(uow:, users:, organizations:, hasher:, notifier:, clock:, ids:, audit:, rate_limiter:)
           @uow = uow
           @users = users
           @organizations = organizations
@@ -157,30 +165,27 @@ module Locentra
           @clock = clock
           @ids = ids
           @audit = audit
+          @rate_limiter = rate_limiter
         end
 
         def call(name:, email:, password:, organization_name:, plan_id: "profissional", timezone: "America/Sao_Paulo", request_id: nil)
           now = @clock.now
           email = Domain::Identity::Email.normalize(email)
+          throttle!(email)
           Domain::Identity::PasswordPolicy.validate!(password)
           user_name = Domain::Organizations::Text.required(name, "nome", max: 120)
-          org = Domain::Organizations::Organization.build(id: @ids.uuid, name: organization_name, timezone: timezone)
+          org = organization(organization_name, timezone)
+          @uow.anonymous { |tx| email_taken!(tx, email) }
           digest = @hasher.hash(password)
 
           @uow.anonymous(request_id: request_id) do |tx|
-            if @users.find_by_email(
-              tx, email
-            )
-              raise Domain::Conflict.new("e-mail já cadastrado; entre com sua conta para criar outra organização",
-                                         code: "email_taken")
-            end
-
+            email_taken!(tx, email)
             plan = @organizations.find_plan(tx, plan_id) || raise(Domain::ValidationError.field("plano", "plano inexistente"))
             user_id = @ids.uuid
             @users.insert(tx, "id" => user_id, "email" => email, "name" => user_name, "password_digest" => digest, "created_at" => now,
                               "updated_at" => now)
             tx.switch_tenant!(org.id)
-            create_tenant(tx, org, user_id, plan, now)
+            org = create_tenant(tx, org, user_id, plan, now)
             @notifier.email_confirmation(tx, user_id)
             actor = Actor.user(user_id: user_id, organization_id: org.id, role: "owner", request_id: request_id)
             @audit.record(tx, actor, "organization.created", "organization", org.id, "plan" => plan.fetch("id"))
@@ -190,8 +195,38 @@ module Locentra
 
         private
 
+        # Erros do nome da organização vão para o campo "organizacao" do formulário (o campo "nome"
+        # é o da pessoa).
+        def organization(name, timezone)
+          Domain::Organizations::Organization.build(id: @ids.uuid, name: name, timezone: timezone)
+        rescue Domain::ValidationError => e
+          raise e unless e.errors.key?("nome") || e.errors.key?("identificador")
+
+          raise Domain::ValidationError.new({ "organizacao" => e.errors.values_at("nome", "identificador").compact.flatten })
+        end
+
+        def throttle!(email)
+          result = @rate_limiter.hit("signup:email:#{email}", limit: EMAIL_LIMIT, window_seconds: EMAIL_WINDOW)
+          raise TooManyRequests, result.retry_after unless result.allowed
+        end
+
+        def email_taken!(tx, email)
+          return unless @users.find_by_email(tx, email)
+
+          raise Domain::Conflict.new("e-mail já cadastrado; entre com sua conta para criar outra organização", code: "email_taken")
+        end
+
+        def insert_organization(tx, org, now, attempt = 1)
+          tx.savepoint { @organizations.insert(tx, org, now) }
+          org
+        rescue Domain::Conflict => e
+          raise unless e.code == "slug_taken" && attempt < SLUG_ATTEMPTS
+
+          insert_organization(tx, org.with_slug_suffix(@ids.uuid.delete("-")[-6, 6]), now, attempt + 1)
+        end
+
         def create_tenant(tx, org, user_id, plan, now)
-          @organizations.insert(tx, org, now)
+          org = insert_organization(tx, org, now)
           @organizations.insert_branch(tx,
                                        Domain::Organizations::Branch.build(id: @ids.uuid, organization_id: org.id, name: "Matriz", code: "MATRIZ"), now)
           @organizations.insert_membership(tx, "id" => @ids.uuid, "organization_id" => org.id, "user_id" => user_id, "role" => "owner",
@@ -202,6 +237,7 @@ module Locentra
                                              "started_at" => now, "trial_ends_at" => now + (TRIAL_DAYS * 86_400),
                                              "current_period_start" => today, "current_period_end" => today.next_month,
                                              "implementation_fee_cents" => plan.fetch("implementation_fee_cents"), "created_at" => now, "updated_at" => now)
+          org
         end
       end
 
@@ -220,6 +256,13 @@ module Locentra
           @repository.insert(tx, "id" => @ids.uuid, "user_id" => user_id, "purpose" => purpose, "token_digest" => Tokens.digest(token),
                                  "expires_at" => now + ttl_seconds, "created_at" => now)
           token
+        end
+
+        # Confere, sem consumir, que o token ainda pode ser usado.
+        def usable!(tx, token, purpose)
+          return if @repository.usable?(tx, Tokens.digest(token), purpose, @clock.now)
+
+          raise Domain::ValidationError.field("token", "link inválido ou expirado")
         end
 
         # Consome o token atomicamente: duas tentativas simultâneas não podem ambas ter sucesso.
@@ -282,8 +325,10 @@ module Locentra
           @clock = clock
         end
 
+        # O token é conferido antes do bcrypt: link inválido ou expirado não custa um hash.
         def call(token:, password:)
           Domain::Identity::PasswordPolicy.validate!(password)
+          @uow.anonymous { |tx| @tokens.usable!(tx, token, "password_reset") }
           digest = @hasher.hash(password)
           @uow.anonymous do |tx|
             row = @tokens.consume(tx, token, "password_reset")

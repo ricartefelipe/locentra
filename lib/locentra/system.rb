@@ -121,7 +121,8 @@ module Locentra
       r = repos
       audit = s[:audit]
       uc[:sign_up] = A::Identity::SignUp.new(uow: uow, users: r[:users], organizations: r[:organizations], hasher: s[:hasher],
-                                             notifier: s[:notifier], clock: clock, ids: ids, audit: audit)
+                                             notifier: s[:notifier], clock: clock, ids: ids, audit: audit,
+                                             rate_limiter: s[:rate_limiter])
       uc[:authenticate] =
         A::Identity::Authenticate.new(uow: uow, users: r[:users], hasher: s[:hasher], rate_limiter: s[:rate_limiter], clock: clock)
       uc[:confirm_email] = A::Identity::ConfirmEmail.new(uow: uow, tokens: s[:tokens], users: r[:users], clock: clock)

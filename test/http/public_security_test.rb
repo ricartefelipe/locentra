@@ -23,6 +23,48 @@ class PublicSecurityTest < HttpTest
     refute_includes last_response.body, "evil.example"
   end
 
+  def test_signup_is_limited_per_ip_and_per_email
+    10.times { |i| post "/cadastro", { "nome" => "Pessoa", "email" => "p#{i}@x.test", "senha" => "curta", "organizacao" => "Empresa" } }
+
+    assert_equal 422, last_response.status
+    post "/cadastro", { "nome" => "Pessoa", "email" => "p11@x.test", "senha" => "curta", "organizacao" => "Empresa" }
+
+    assert_equal 429, last_response.status
+    assert_operator last_response.headers["retry-after"].to_i, :>, 0
+    5.times { |i| post "/cadastro", { "nome" => "P", "email" => "dona@alfa.test", "senha" => "senha-muito-segura-1" }, { "REMOTE_ADDR" => "10.9.0.#{i}" } }
+    post "/cadastro", { "nome" => "P", "email" => "dona@alfa.test", "senha" => "senha-muito-segura-1", "organizacao" => "Outra" },
+         { "REMOTE_ADDR" => "10.9.0.99" }
+
+    assert_equal 429, last_response.status, "limite por e-mail, de qualquer IP"
+  end
+
+  def test_password_reset_and_invitations_are_limited_per_ip
+    { "/redefinir-senha" => 20, "/convites" => 20, "/portal/convite" => 20 }.each do |path, limit|
+      limit.times { post path, { "token" => "invalido", "senha" => "senha-muito-segura-1", "nome" => "X" }, { "REMOTE_ADDR" => "10.8.0.1" } }
+
+      assert_equal 422, last_response.status, path
+      post path, { "token" => "invalido" }, { "REMOTE_ADDR" => "10.8.0.1" }
+
+      assert_equal 429, last_response.status, path
+      post path, { "token" => "invalido" }, { "REMOTE_ADDR" => "10.8.0.2" }
+
+      assert_equal 422, last_response.status, "#{path}: outro IP"
+    end
+  end
+
+  def test_api_is_limited_per_credential
+    limited = Locentra::System.new(Locentra::Config.from_env(TestDatabase.env("API_RATE_LIMIT" => "2")), clock: @clock, logger: @system.logger)
+    api = Rack::MockRequest.new(Locentra::Interfaces::HTTP::App.build(limited))
+    token = uc(:create_credential).call(@org[:actor], name: "ERP", scopes: %w[customers.read], expires_in_days: 1)["token"]
+    other = uc(:create_credential).call(@org[:actor], name: "BI", scopes: %w[customers.read], expires_in_days: 1)["token"]
+    statuses = Array.new(3) { api.get("/api/v1/customers", "HTTP_AUTHORIZATION" => "Bearer #{token}").status }
+
+    assert_equal [200, 200, 429], statuses
+    assert_equal 200, api.get("/api/v1/customers", "HTTP_AUTHORIZATION" => "Bearer #{other}").status
+  ensure
+    limited&.shutdown
+  end
+
   # Sem proxies confiáveis, cabeçalhos de encaminhamento não mudam o IP: o limite de entrada por IP
   # continua valendo e a sessão grava o par da conexão.
   def test_forwarded_headers_are_ignored_without_trusted_proxies

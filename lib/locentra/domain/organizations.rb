@@ -39,6 +39,11 @@ module Locentra
 
         def active? = status == "active"
 
+        # Identificador alternativo quando o derivado do nome já está em uso.
+        def with_slug_suffix(suffix)
+          with(slug: "#{slug[0, 60 - suffix.length - 1].sub(/-+\z/, "")}-#{suffix}")
+        end
+
         def time_zone = TimeZone.new(timezone)
 
         # Política de cancelamento padrão; cada contrato guarda o snapshot vigente.

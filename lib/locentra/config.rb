@@ -10,7 +10,7 @@ module Locentra
   Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :database_url, :worker_database_url, :migration_database_url,
                        :pool_size, :pool_timeout, :worker_concurrency, :webhook_concurrency, :log_level, :smtp_host, :smtp_port, :mail_from,
                        :payment_provider, :asaas_base_url, :asaas_api_key, :storage_root, :max_upload_bytes, :bcrypt_cost,
-                       :metrics_token, :trusted_proxies) do
+                       :metrics_token, :trusted_proxies, :api_rate_limit) do
     def self.from_env(env = ENV, overrides = {})
       app_env = env.fetch("APP_ENV", "development")
       values = {
@@ -36,7 +36,8 @@ module Locentra
         max_upload_bytes: Integer(env.fetch("MAX_UPLOAD_BYTES", "10485760")),
         bcrypt_cost: Integer(env.fetch("BCRYPT_COST", app_env == "test" ? "4" : "12")),
         metrics_token: env["METRICS_TOKEN"].to_s.empty? ? nil : env["METRICS_TOKEN"],
-        trusted_proxies: trusted_proxies(env["TRUSTED_PROXIES"])
+        trusted_proxies: trusted_proxies(env["TRUSTED_PROXIES"]),
+        api_rate_limit: Integer(env.fetch("API_RATE_LIMIT", "1200"))
       }.merge(overrides)
       new(**values).tap(&:validate!)
     rescue ArgumentError => e
@@ -61,6 +62,7 @@ module Locentra
       raise ConfigError, "PAYMENT_PROVIDER inválido" unless %w[simulator asaas].include?(payment_provider)
       raise ConfigError, "ASAAS_API_KEY obrigatório com PAYMENT_PROVIDER=asaas" if payment_provider == "asaas" && asaas_api_key.nil?
       raise ConfigError, "APP_BASE_URL deve usar https em produção" if production? && !base_url.start_with?("https://")
+      raise ConfigError, "API_RATE_LIMIT deve ser positivo" unless api_rate_limit.positive?
 
       true
     end

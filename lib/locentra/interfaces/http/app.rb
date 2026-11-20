@@ -34,6 +34,7 @@ module Locentra
           [PayloadTooLarge, 413, "payload_too_large"],
           [Infrastructure::Database::PoolTimeout, 503, "unavailable_capacity"]
         ].freeze
+        API_WINDOW = 60
 
         # Monta a pilha de middlewares de forma explícita.
         def self.build(system, reload_templates: false)
@@ -70,12 +71,34 @@ module Locentra
 
         private
 
+        # Limite de requisições por IP das rotas públicas que fazem trabalho caro (bcrypt, e-mail,
+        # cadastro), declarado na rota como [nome, limite, janela em segundos]. A API tem limite por
+        # credencial (API_RATE_LIMIT por minuto, API_WINDOW) e o portal, por usuário nas solicitações
+        # de reserva.
         def dispatch(route, ctx)
+          throttle!(route.options[:throttle], ctx.ip)
           @authenticator.authenticate!(ctx, route.auth)
+          throttle_actor!(route, ctx)
           ctx.env["locentra.organization_id"] = ctx.actor&.organization_id
           ctx.env["locentra.actor_id"] = ctx.actor&.audit_actor_id
           ctx.verify_csrf! if csrf_required?(route, ctx)
           route.controller.public_send(route.action, ctx)
+        end
+
+        def throttle_actor!(route, ctx)
+          if ctx.env["locentra.auth_method"] == "bearer"
+            throttle!(["api:credential", @system.config.api_rate_limit, API_WINDOW], ctx.actor.credential_id)
+          elsif route.options[:throttle_actor] && ctx.actor
+            throttle!(route.options[:throttle_actor], ctx.actor.user_id)
+          end
+        end
+
+        def throttle!(spec, subject)
+          return unless spec
+
+          name, limit, window = spec
+          result = @system.services[:rate_limiter].hit("#{name}:#{subject}", limit: limit, window_seconds: window)
+          raise Application::Identity::TooManyRequests, result.retry_after unless result.allowed
         end
 
         def csrf_required?(route, ctx)

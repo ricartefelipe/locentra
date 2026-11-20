@@ -147,16 +147,18 @@ module Locentra
           @ids = ids
         end
 
-        # Com `user_id`, vincula a conta autenticada; sem ele, cria a conta com nome e senha.
+        # Com `user_id`, vincula a conta autenticada; sem ele, cria a conta com nome e senha. O convite
+        # é conferido antes do bcrypt: token inválido ou expirado não custa um hash.
         def call(token:, user_id: nil, name: nil, password: nil)
           org_id, = token.to_s.split(".", 2)
           raise Domain::ValidationError.field("token", "convite inválido") unless Domain::Identifier.valid?(org_id)
 
+          now = @clock.now
           digest = if user_id.nil?
                      Domain::Identity::PasswordPolicy.validate!(password)
+                     pending!(org_id, token, now)
                      @hasher.hash(password)
                    end
-          now = @clock.now
           @uow.anonymous(tenant_id: org_id, user_id: user_id) do |tx|
             invitation = @organizations.lock_invitation(tx, Identity::Tokens.digest(token))
             raise Domain::ValidationError.field("token", "convite inválido ou expirado") unless usable?(invitation, now)
@@ -172,6 +174,11 @@ module Locentra
         end
 
         private
+
+        def pending!(org_id, token, now)
+          usable = @uow.anonymous(tenant_id: org_id) { |tx| usable?(@organizations.lock_invitation(tx, Identity::Tokens.digest(token)), now) }
+          raise Domain::ValidationError.field("token", "convite inválido ou expirado") unless usable
+        end
 
         def usable?(invitation, now)
           invitation && invitation["accepted_at"].nil? && invitation["revoked_at"].nil? && now < invitation["expires_at"]

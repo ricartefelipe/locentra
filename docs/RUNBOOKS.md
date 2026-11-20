@@ -122,3 +122,6 @@ proxy reverso (nginx, balanceador):
    `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` a partir de um proxy de borda que não
    aceite o cabeçalho do cliente). O cabeçalho `Forwarded` não é usado.
 3. Confira em uma sessão nova (Usuários e permissões ou `sessions.ip`) que o IP gravado é o do cliente.
+
+Limites por IP e por credencial (ADR-026) respondem `429` com `Retry-After`; `API_RATE_LIMIT` ajusta o
+limite da API por credencial por minuto.

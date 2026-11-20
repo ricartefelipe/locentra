@@ -202,3 +202,19 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   tabela global sem dados de tenant e expostos pelo processo web; conflitos contados na unidade de trabalho;
   rótulos com aparência de identificador mascarados; `request_id` propagado à outbox, às tarefas e às chamadas
   externas.
+
+## ADR-026 — Limites de taxa e IP do cliente
+
+- **Decisão:** limites por janela fixa persistidos em `rate_limits` (valem entre processos). Entrada:
+  30 por IP em 5 min e 10 por e-mail em 15 min; recuperação de senha: 10 por IP e 3 por e-mail por
+  hora; cadastro: 10 por IP e 5 por e-mail por hora; redefinição de senha e aceite de convites (equipe
+  e portal): 20 por IP por hora; webhook de pagamento: 1200 por IP por minuto; API: `API_RATE_LIMIT`
+  por credencial por minuto (padrão 1200); solicitações de reserva do portal: 30 por usuário por hora.
+  Acima do limite a resposta é `429` com `Retry-After`. Tokens de redefinição e convites são conferidos
+  antes do bcrypt, e o cadastro confere o e-mail antes do hash. O IP do cliente é o par da conexão;
+  `X-Forwarded-For` só é considerado quando a conexão vem de um proxy listado em `TRUSTED_PROXIES`, e
+  `Forwarded` nunca é usado.
+- **Consequências:** clientes atrás do mesmo NAT compartilham os limites por IP. O cadastro informa
+  que o e-mail já tem conta (a conta nova entra direto na organização criada, então uma resposta neutra
+  não esconderia a diferença); a enumeração fica limitada pelos limites por IP e por e-mail. Nome de
+  organização repetido recebe sufixo aleatório no identificador, sem revelar a outra organização.

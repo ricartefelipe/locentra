@@ -13,6 +13,7 @@ x-app-env: &app-env
   WEBHOOK_CONCURRENCY: ${WEBHOOK_CONCURRENCY:-1}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+  API_RATE_LIMIT: ${API_RATE_LIMIT:-1200}
   SMTP_HOST: ${SMTP_HOST:-mailpit}
   SMTP_PORT: ${SMTP_PORT:-1025}
   MAIL_FROM: ${MAIL_FROM:-Locentra <nao-responda@locentra.local>}

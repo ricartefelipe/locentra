@@ -18,6 +18,14 @@ module Locentra
     module HTTP
       # Tabela de rotas da aplicação. Caminhos da interface web em português; API versionada em /api/v1.
       module Routes
+        # Limites por IP das rotas públicas: [nome, limite, janela em segundos].
+        SIGNUP = ["signup:ip", 10, 3600].freeze
+        PASSWORD_RESET = ["password_reset:ip", 20, 3600].freeze
+        INVITATION = ["invitation:ip", 20, 3600].freeze
+        PORTAL_INVITATION = ["portal_invitation:ip", 20, 3600].freeze
+        PAYMENT_WEBHOOK = ["payment_webhook:ip", 1200, 60].freeze
+        PORTAL_REQUEST = ["portal_request:user", 30, 3600].freeze
+
         module_function
 
         def draw(router, deps)
@@ -33,16 +41,16 @@ module Locentra
           r.post "/entrar", auth, :login, auth: :public, csrf: false
           r.post "/sair", auth, :logout, auth: :login
           r.get "/cadastro", auth, :signup_form, auth: :public
-          r.post "/cadastro", auth, :signup, auth: :public, csrf: false
+          r.post "/cadastro", auth, :signup, auth: :public, csrf: false, throttle: SIGNUP
           r.get "/organizacoes", auth, :organizations, auth: :login
           r.post "/organizacoes/ativar", auth, :switch, auth: :login
           r.get "/confirmar-email", auth, :confirm_email, auth: :public
           r.get "/recuperar-senha", auth, :forgot_form, auth: :public
           r.post "/recuperar-senha", auth, :forgot, auth: :public, csrf: false
           r.get "/redefinir-senha", auth, :reset_form, auth: :public
-          r.post "/redefinir-senha", auth, :reset, auth: :public, csrf: false
+          r.post "/redefinir-senha", auth, :reset, auth: :public, csrf: false, throttle: PASSWORD_RESET
           r.get "/convites", auth, :invitation_form, auth: :public
-          r.post "/convites", auth, :accept_invitation, auth: :public, csrf: false
+          r.post "/convites", auth, :accept_invitation, auth: :public, csrf: false, throttle: INVITATION
 
           draw_portal(r, deps, w)
           draw_staff(r, deps, w)
@@ -160,7 +168,8 @@ module Locentra
           r.post "/financeiro/caucoes/:id/aplicar", deposits, :apply
           r.post "/financeiro/caucoes/:id/devolver", deposits, :give_back
 
-          r.post "/webhooks/pagamentos/:conta_id", w::PaymentWebhooksController.new(deps), :receive, auth: :public, csrf: false
+          r.post "/webhooks/pagamentos/:conta_id", w::PaymentWebhooksController.new(deps), :receive,
+                 auth: :public, csrf: false, throttle: PAYMENT_WEBHOOK
 
           api = API::FinanceV1Controller.new(deps)
           r.post "/api/v1/payments", api, :create_payment, auth: :api
@@ -252,12 +261,12 @@ module Locentra
           invitations = w::PortalInvitationsController.new(deps)
           r.get "/portal/convite", invitations, :show, auth: :public
           # Sem sessão não há token CSRF; com sessão, o controlador exige o token da sessão.
-          r.post "/portal/convite", invitations, :accept, auth: :public, csrf: false
+          r.post "/portal/convite", invitations, :accept, auth: :public, csrf: false, throttle: PORTAL_INVITATION
 
           portal = w::PortalController.new(deps)
           r.get "/portal", portal, :home, auth: :portal
           r.get "/portal/disponibilidade", portal, :availability, auth: :portal
-          r.post "/portal/reservas", portal, :request_reservation, auth: :portal
+          r.post "/portal/reservas", portal, :request_reservation, auth: :portal, throttle_actor: PORTAL_REQUEST
           r.get "/portal/financeiro", portal, :finance, auth: :portal
 
           reservations = w::PortalReservationsController.new(deps)
