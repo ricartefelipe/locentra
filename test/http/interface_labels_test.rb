@@ -17,6 +17,37 @@ class InterfaceLabelsTest < HttpTest
 
   def count_payments = owner_query("SELECT count(*) AS n FROM payments").first["n"].to_i
 
+  def test_asset_history_and_reservation_details_use_portuguese_labels
+    camera = create_product(@actor, sku: "CAM-LBL", tracking: "serialized")
+    asset = register_assets(@actor, camera, @org[:branch], 1).first
+    get "/ativos/#{asset.id}"
+
+    assert_includes last_response.body, "<strong>Cadastro</strong>"
+    assert_includes last_response.body, "→ Disponível"
+    refute_match(%r{<strong>registered</strong>|→ available}, last_response.body)
+    reservation = booking
+    get "/reservas/#{reservation.id}"
+
+    assert_includes last_response.body, "<dd>Equipe</dd>"
+    assert_includes last_response.body, "Reserva registrada"
+    refute_includes last_response.body, "reservation.created"
+    get "/organizacao"
+
+    assert_includes last_response.body, "Em avaliação"
+  end
+
+  def test_error_summary_shows_field_names_and_transition_errors_use_status_labels
+    get "/produtos/novo"
+    post_form "/produtos", { "sku" => "X-1", "nome" => "Produto", "rastreamento" => "bulk", "preco_diaria" => "10,00", "caucao" => "-5" }
+
+    assert_equal 422, last_response.status
+    assert_match(/<li>Caução: /, last_response.body)
+    refute_match(/<li>caucao: /, last_response.body)
+    error = Locentra::Domain::InvalidTransition.new("reserva", "cancelled", "confirmed")
+
+    assert_equal "Transição inválida em reserva: Cancelada → Confirmada", error.message
+  end
+
   def test_payment_form_submitted_twice_registers_one_payment
     @account = simulator_account
     rental = rental_of(booking.tap { |r| sync(r) })

@@ -5,6 +5,7 @@ require "cgi"
 require "json"
 require "securerandom"
 require "uri"
+require_relative "labels"
 
 module Locentra
   module Interfaces
@@ -144,6 +145,11 @@ module Locentra
           "overdue" => "danger", "affected_by_overdue" => "warning", "asset_unavailable" => "danger", "draft" => "neutral",
           "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted"
         }.freeze
+
+        # Rótulo em português de um código interno (ver Labels::GROUPS).
+        def label(group, value) = Labels.label(group, value)
+
+        def asset_status(status) = Domain::Catalog::ASSET_STATUSES.fetch(status.to_s) { Labels.label(:field, status) }
 
         def status_badge(status, label)
           badge(label, STATUS_TONES.fetch(status, "neutral"))

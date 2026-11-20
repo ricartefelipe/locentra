@@ -57,7 +57,7 @@
     <h2 id="titulo-conciliacao">Conciliação com o provedor</h2>
     <% account = @data[:account] %>
     <% if account %>
-      <p>Conta ativa: <strong><%= account["name"] %></strong> (<%= fin::PROVIDERS.fetch(account["provider"]) %><%= account["provider"] == "asaas" ? ", #{account["environment"]}" : "" %>).</p>
+      <p>Conta ativa: <strong><%= account["name"] %></strong> (<%= fin::PROVIDERS.fetch(account["provider"]) %><%= account["provider"] == "asaas" ? ", #{label(:environment, account["environment"])}" : "" %>).</p>
       <% if can?("finance.write") %>
         <form method="post" action="/financeiro/conciliacao"><%= csrf_field %><button type="submit" class="primary">Conciliar agora</button></form>
       <% end %>

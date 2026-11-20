@@ -133,7 +133,7 @@
   <% if @history.empty? %><p class="empty">Sem eventos.</p><% else %>
     <ol class="timeline">
       <% @history.each do |event| %>
-        <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= event["action"] %></strong> <span class="muted"><%= event["actor_name"] || event["actor_type"] %></span></li>
+        <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= label(:audit_action, event["action"]) %></strong> <span class="muted"><%= event["actor_name"] || label(:actor_type, event["actor_type"]) %></span></li>
       <% end %>
     </ol>
   <% end %>

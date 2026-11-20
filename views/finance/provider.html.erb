@@ -22,7 +22,7 @@
           <tr>
             <td><%= account["name"] %></td>
             <td><%= fin::PROVIDERS.fetch(account["provider"]) %></td>
-            <td><%= account["environment"] %></td>
+            <td><%= label(:environment, account["environment"]) %></td>
             <td><%= account["api_key_hint"] || "—" %></td>
             <td><code class="small">/webhooks/pagamentos/<%= account["id"] %></code> <span class="muted">token <%= account["webhook_token_hint"] %></span></td>
             <td><%= account["active"] ? badge("Ativa", "success") : badge("Desativada em #{date(account["deactivated_at"])}", "muted") %></td>

@@ -53,7 +53,7 @@
     <dl class="details">
       <dt>Retirada</dt><dd><%= datetime(r.period.starts_at) %></dd>
       <dt>Devolução</dt><dd><%= datetime(r.period.ends_at) %></dd>
-      <dt>Origem</dt><dd><%= r.source %></dd>
+      <dt>Origem</dt><dd><%= label(:reservation_source, r.source) %></dd>
       <dt>Observações</dt><dd class="pre"><%= r.notes || "—" %></dd>
     </dl>
     <% if can?("reservations.write") && %w[requested held confirmed].include?(r.status) && !quote_hold %>
@@ -106,7 +106,7 @@
       <dt>Total contratado</dt><dd><strong><%= money(r.total) %></strong></dd>
       <dt>Caução prevista</dt><dd><%= money(r.deposit) %></dd>
       <% @data[:pricing][:adjustments].each do |adj| %>
-        <dt>Ajuste (<%= adj["kind"] %>)</dt><dd><%= money(adj["amount_cents"]) %> em <%= datetime(adj["created_at"]) %></dd>
+        <dt>Ajuste (<%= label(:adjustment_kind, adj["kind"]) %>)</dt><dd><%= money(adj["amount_cents"]) %> em <%= datetime(adj["created_at"]) %></dd>
       <% end %>
     </dl>
     <p class="muted">Preços congelados em <%= pricing["priced_at"] ? datetime(Time.iso8601(pricing["priced_at"])) : "—" %>; alterações de catálogo não afetam esta reserva.</p>
@@ -142,7 +142,7 @@
   <% if @history.empty? %><p class="empty">Sem eventos.</p><% else %>
     <ol class="timeline">
       <% @history.each do |event| %>
-        <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= event["action"] %></strong> <span class="muted"><%= event["actor_name"] || event["actor_type"] %></span></li>
+        <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= label(:audit_action, event["action"]) %></strong> <span class="muted"><%= event["actor_name"] || label(:actor_type, event["actor_type"]) %></span></li>
       <% end %>
     </ol>
   <% end %>

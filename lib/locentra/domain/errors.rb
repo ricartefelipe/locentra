@@ -23,11 +23,29 @@ module Locentra
     class InvalidTransition < Error
       attr_reader :entity, :from, :to
 
+      # Rótulos das situações por entidade, resolvidos ao montar a mensagem (as entidades já estão
+      # carregadas). Alvos que não são situações (por exemplo, "aditivo") aparecem como recebidos.
+      LABELS = {
+        "reserva" => -> { Reservations::STATUSES }, "orçamento" => -> { Quotes::STATUSES }, "contrato" => -> { Contracts::STATUSES },
+        "ativo" => -> { Catalog::ASSET_STATUSES }, "pagamento" => -> { Finance::PAYMENT_STATUSES },
+        "reembolso" => -> { Finance::REFUND_STATUSES }, "inspeção" => -> { Maintenance::INSPECTION_STATUSES },
+        "ordem de manutenção" => -> { Maintenance::ORDER_STATUSES }, "registro de avaria" => -> { Maintenance::DAMAGE_STATUSES },
+        "transferência" => -> { Transfers::STATUSES }, "alerta" => -> { Alerts::STATUSES },
+        "convite do portal" => -> { Portal::INVITATION_STATUSES }, "retirada" => -> { Fulfillment::PICKUP_STATUSES }
+      }.freeze
+
       def initialize(entity, from, to)
         @entity = entity
         @from = from
         @to = to
-        super("Transição inválida em #{entity}: #{from} -> #{to}")
+        labels = self.class.labels_for(entity)
+        super("Transição inválida em #{entity}: #{labels.fetch(from.to_s, from)} → #{labels.fetch(to.to_s, to)}")
+      end
+
+      def self.labels_for(entity)
+        LABELS.fetch(entity, -> { {} }).call
+      rescue NameError
+        {}
       end
     end
 

@@ -41,7 +41,7 @@
       <tbody>
         <% @data[:deliveries].each do |d| %>
           <tr><td><code><%= d["event_type"] %></code><br><span class="muted"><%= datetime(d["created_at"]) %></span></td><td><code class="small"><%= d["url"] %></code></td>
-            <td><%= status_badge(d["status"] == "delivered" ? "confirmed" : (d["status"] == "failed" ? "cancelled" : "held"), d["status"]) %></td>
+            <td><%= status_badge(d["status"] == "delivered" ? "confirmed" : (d["status"] == "failed" ? "cancelled" : "held"), label(:delivery_status, d["status"])) %></td>
             <td><%= d["attempts"] %></td><td><%= d["last_status_code"] || d["last_error"] || "—" %></td>
             <td><% if d["status"] == "failed" %><form method="post" action="/integracoes/entregas/<%= d["id"] %>/reenviar" class="inline"><%= csrf_field %><button type="submit">Reenviar</button></form><% end %></td></tr>
         <% end %>
