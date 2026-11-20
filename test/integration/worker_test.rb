@@ -257,6 +257,26 @@ class WorkerTest < DatabaseTest
     assert_equal [[dead, recent].sort, 0], remaining
   end
 
+  # Encerramento gracioso: o TERM interrompe a espera das threads, mas a tarefa em execução termina e
+  # é concluída antes de o pool ser fechado.
+  def test_stop_waits_for_the_running_job_to_finish
+    wtx { |tx| queue.enqueue(tx, "teste.demorada", {}) }
+    started = Queue.new
+    handlers = Locentra::Interfaces::Worker::Handlers.new(worker_system, mailer: @mailer, templates: worker_system.services[:mail_templates])
+    handlers.register("teste.demorada", lambda do |_job|
+      started << true
+      sleep 0.5
+      :concluida
+    end)
+    graceful = Locentra::Interfaces::Worker::Runner.new(system: worker_system, handlers: handlers, concurrency: 1, webhook_concurrency: 0,
+                                                        logger: worker_system.logger, scheduler: false, poll_interval: 0.05)
+    threads = graceful.start_threads
+    started.pop
+    graceful.stop(threads, timeout: 5)
+
+    assert_equal "succeeded", jobs("kind = 'teste.demorada'").first["status"]
+  end
+
   def test_unknown_job_kind_fails_permanently
     wtx { |tx| queue.enqueue(tx, "desconhecido.tipo", {}) }
     drain
