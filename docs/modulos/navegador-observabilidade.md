@@ -217,9 +217,11 @@ esperando duas linhas `skipped`).
   das chamadas feitas no worker (envio de cobrança, estornos, conciliação agendada, entrega de webhooks)
   ficam apenas no registro do processo do worker; essas chamadas são rastreáveis pelos logs
   `external.call`. No processo web aparecem as chamadas feitas por ele (conciliação manual).
-- Com vários processos Puma (`WEB_CONCURRENCY` > 0), cada processo expõe o próprio registro: os
-  contadores HTTP precisam ser somados pelo coletor. Os valores vindos do banco (fila, retentativas e
-  falhas) são iguais em todos os processos.
+- Com vários processos Puma (`WEB_CONCURRENCY` > 0), cada processo tem o próprio registro e todos
+  compartilham a porta: cada coleta de `/metrics` é atendida por um processo arbitrário, sem rótulo de
+  processo, e o coletor não consegue separar nem somar as séries (a alternância entre registros aparece como
+  reinício de contador). Nesta versão, as métricas HTTP só são confiáveis com `WEB_CONCURRENCY=0`. Os valores
+  vindos do banco (fila, retentativas e falhas) são iguais em todos os processos.
 - Tarefas agendadas (`platform.fanout`, `organization.tick`, conciliação horária) não têm requisição
   de origem e ficam sem `correlation_id`; o log `job.finished` traz o `job_id`.
 - A entrega de webhook não envia o request_id de origem ao destinatário (somente identificadores do

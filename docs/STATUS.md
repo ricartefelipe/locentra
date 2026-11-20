@@ -49,8 +49,11 @@ contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
 - NFS-e fora do escopo; apenas faturas comerciais.
 - Armazenamento de anexos somente local; object storage privado depende de adaptador com a mesma interface.
 - Recuperação em ponto no tempo (WAL) não exercitada.
-- Métricas de duração de tarefas e de chamadas externas ficam no processo do worker; com vários processos
-  Puma o coletor precisa somar as séries.
+- Métricas de duração de tarefas e de chamadas externas ficam no processo do worker, que não expõe HTTP.
+- `/metrics` só é confiável com um processo web (`WEB_CONCURRENCY=0`): com vários processos Puma, cada
+  coleta é atendida por um processo arbitrário, as séries não têm rótulo de processo e o coletor vê quedas
+  de contadores como reinício. As métricas derivadas do banco (fila, desfechos de tarefas) são as mesmas em
+  qualquer processo.
 - Sem API v1 para orçamentos, contratos, operação e portal (disponíveis pela interface e casos de uso).
 - Configurações da organização (`settings`: política de cancelamento e validade padrão do bloqueio
   temporário) são lidas com valores padrão, mas não há tela nem comando para alterá-las nesta versão.
