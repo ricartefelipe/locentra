@@ -125,3 +125,16 @@ proxy reverso (nginx, balanceador):
 
 Limites por IP e por credencial (ADR-026) respondem `429` com `Retry-After`; `API_RATE_LIMIT` ajusta o
 limite da API por credencial por minuto.
+
+## 11. Implantação de uma versão publicada — procedimento escrito
+
+A publicação está descrita em `CONTRIBUTING.md` (tag anotada `vX.Y.Z`, CI completa e `PUBLISH_IMAGE=true`).
+A imagem publicada é `ghcr.io/<repositório>:X.Y.Z`; não existe tag `latest`, então a versão é sempre
+explícita.
+
+1. Faça o backup (seção 3).
+2. Aplique as migrations com a imagem nova e a credencial do proprietário:
+   `docker run --rm -e APP_ENV=production -e MIGRATION_DATABASE_URL=... ghcr.io/<repositório>:X.Y.Z ruby bin/locentra-admin db:migrate`.
+3. Substitua web e worker pela imagem nova (mesmas variáveis de ambiente) e confira `/health/ready` (200).
+4. Para voltar à versão anterior, use a imagem anterior; migrations são aditivas, mas confirme no
+   `CHANGELOG.md` se a versão nova tem migration que a anterior não tolera antes de reverter.
