@@ -79,10 +79,11 @@ seed (duas organizações) e inicia web e worker.
 Comandos úteis:
 
 ```bash
-docker compose --profile ops run --rm migrate                         # migrations
-docker compose run --rm --no-deps web ruby bin/locentra-admin db:status
-docker compose run --rm --no-deps web ruby bin/locentra-admin db:seed  # idempotente
-docker compose run --rm --no-deps -e LOCENTRA_TOKEN=... web ruby bin/locentra reservations list
+docker compose --profile ops run --rm migrate                                      # migrations
+docker compose --profile ops run --rm migrate ruby bin/locentra-admin db:status    # credencial do proprietário
+docker compose run --rm --no-deps web ruby bin/locentra-admin db:seed  # idempotente; somente demonstração (recusado em produção)
+read -rs LOCENTRA_TOKEN && export LOCENTRA_TOKEN                     # o token não fica no histórico nem no ps
+docker compose run --rm --no-deps -e LOCENTRA_TOKEN web ruby bin/locentra reservations list
 docker compose logs -f web worker
 ```
 
@@ -91,8 +92,11 @@ docker compose logs -f web worker
 Variáveis em [`.env.example`](.env.example): URLs separadas para aplicação (`DATABASE_URL`), worker
 (`WORKER_DATABASE_URL`), migrations (`MIGRATION_DATABASE_URL`) e backup (`BACKUP_DATABASE_URL`);
 `APP_SECRET_KEY_BASE`, `APP_ENCRYPTION_KEY`, `APP_BASE_URL` (HTTPS obrigatório em produção), dimensionamento
-(`PUMA_THREADS`, `WEB_CONCURRENCY`, `DB_POOL_SIZE`, `WORKER_CONCURRENCY`), SMTP, provedor de pagamento
-(`PAYMENT_PROVIDER`), armazenamento (`STORAGE_ROOT`, `MAX_UPLOAD_BYTES`) e `METRICS_TOKEN`.
+(`PUMA_THREADS`, `WEB_CONCURRENCY`, `DB_POOL_SIZE`, `DB_POOL_TIMEOUT`, `WORKER_CONCURRENCY`,
+`WEBHOOK_CONCURRENCY`), proxies confiáveis (`TRUSTED_PROXIES`), limite da API (`API_RATE_LIMIT`), SMTP,
+provedores de pagamento habilitados (`PAYMENT_PROVIDERS`; a conta e a chave de cada organização são
+cadastradas em Financeiro → Provedor), armazenamento (`STORAGE_ROOT`, `MAX_UPLOAD_BYTES`) e `METRICS_TOKEN`
+(obrigatório para expor `/metrics` em produção). O Compose repassa essas variáveis do `.env` aos contêineres.
 
 ## Testes e qualidade
 

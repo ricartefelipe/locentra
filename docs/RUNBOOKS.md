@@ -22,7 +22,7 @@ têm `stop_grace_period` de 30 s, acima dos 25 s de encerramento gracioso de cad
 
 ```bash
 docker compose --profile ops run --rm migrate          # usa MIGRATION_DATABASE_URL (locentra_owner)
-docker compose run --rm --no-deps web ruby bin/locentra-admin db:status
+docker compose --profile ops run --rm migrate ruby bin/locentra-admin db:status
 ```
 
 - Exclusão mútua por `pg_advisory_lock`: execuções simultâneas aguardam.
