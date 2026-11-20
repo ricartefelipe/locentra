@@ -44,7 +44,8 @@ module Locentra
 
         def verb = rack.request_method
         def path = rack.path_info
-        def ip = rack.ip
+        # Definido pelo middleware ClientAddress; sem ele (aplicação montada sem a pilha), o par da conexão.
+        def ip = env["locentra.client_ip"] || env["REMOTE_ADDR"]
         def user_agent = env["HTTP_USER_AGENT"].to_s
         def get? = %w[GET HEAD].include?(verb)
 

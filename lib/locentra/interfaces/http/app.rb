@@ -42,7 +42,8 @@ module Locentra
           stack = BodyLimit.new(stack, default: 1_048_576, uploads: system.config.max_upload_bytes + 65_536, upload_prefixes: ["/anexos"])
           stack = Rack::Static.new(stack, urls: ["/css", "/js", "/img"], root: File.join(ROOT, "public"),
                                           header_rules: [[:all, { "cache-control" => "public, max-age=300" }]])
-          RequestLogger.new(stack, logger: system.logger, metrics: system.metrics)
+          stack = RequestLogger.new(stack, logger: system.logger, metrics: system.metrics)
+          ClientAddress.new(stack, trusted: system.config.trusted_proxies)
         end
 
         attr_reader :system, :router, :templates

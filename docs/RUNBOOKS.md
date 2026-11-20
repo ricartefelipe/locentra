@@ -109,3 +109,16 @@ Conexões máximas = processos web × `DB_POOL_SIZE` (≥ `PUMA_THREADS`) + work
 `WEBHOOK_CONCURRENCY` + 2) +
 execuções de CLI/migrations. Mantenha abaixo de `max_connections` com folga. Espera por conexão aparece em
 `locentra_db_pool_wait_seconds` e esgotamento em `locentra_db_pool_timeouts_total` (resposta 503).
+
+## 10. Proxy reverso e IP do cliente — procedimento escrito
+
+O IP do cliente alimenta os limites de taxa por IP, as sessões, a auditoria e o aceite de contratos. Sem
+`TRUSTED_PROXIES`, a aplicação usa o par da conexão e ignora `X-Forwarded-For` e `Forwarded`. Atrás de um
+proxy reverso (nginx, balanceador):
+
+1. Defina `TRUSTED_PROXIES` com os endereços ou faixas do proxy (ex.: `10.0.0.0/8` ou `172.18.0.1`),
+   separados por vírgula. Não inclua faixas por onde chegam clientes.
+2. Configure o proxy para sobrescrever `X-Forwarded-For` com o endereço real (no nginx,
+   `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` a partir de um proxy de borda que não
+   aceite o cabeçalho do cliente). O cabeçalho `Forwarded` não é usado.
+3. Confira em uma sessão nova (Usuários e permissões ou `sessions.ip`) que o IP gravado é o do cliente.
