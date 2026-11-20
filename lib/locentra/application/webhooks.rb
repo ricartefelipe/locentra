@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "uri"
 
 module Locentra
   module Application
@@ -25,6 +26,17 @@ module Locentra
           @ids = ids
         end
 
+        # Na auditoria (visível ao papel auditor) fica só esquema, host e porta: caminho e query de URLs
+        # de webhook costumam carregar segredos.
+        def self.audit_url(url)
+          uri = URI.parse(url.to_s)
+          suffix = uri.path.to_s.empty? || uri.path == "/" ? "" : "/…"
+          suffix = "/…" if uri.query
+          "#{uri.scheme}://#{uri.host}#{":#{uri.port}" unless uri.port == uri.default_port}#{suffix}"
+        rescue URI::InvalidURIError
+          "[URL inválida]"
+        end
+
         def call(actor, url:, events:, description: nil)
           list = Array(events).map(&:to_s).uniq
           raise Domain::ValidationError.field("eventos", "selecione ao menos um evento") if list.empty?
@@ -41,7 +53,8 @@ module Locentra
             row = { "id" => @ids.uuid, "url" => url.to_s, "events" => list, "description" => Domain::Organizations::Text.optional(description, max: 200),
                     "secret_ciphertext" => @box.encrypt(secret), "created_by" => current.user_id, "created_at" => @clock.now }
             @webhooks.insert_endpoint(tx, row)
-            @audit.record(tx, current, "webhook.endpoint_created", "webhook_endpoint", row["id"], "url" => row["url"], "events" => list)
+            @audit.record(tx, current, "webhook.endpoint_created", "webhook_endpoint", row["id"], "url" => self.class.audit_url(row["url"]),
+                                                                                                  "events" => list)
             row.merge("secret" => secret)
           end
         end

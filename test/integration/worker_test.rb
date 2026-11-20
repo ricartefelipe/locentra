@@ -333,6 +333,16 @@ class WorkerTest < DatabaseTest
     server&.stop
   end
 
+  # A auditoria é visível ao papel auditor: o caminho e a query da URL (que costumam levar segredos) ficam de fora.
+  def test_webhook_endpoint_audit_keeps_only_scheme_and_host
+    uc(:create_webhook).call(@org[:actor], url: "http://127.0.0.1:9/hooks/T000/B000/XXXX?token=segredo", events: ["*"])
+    details = owner_query("SELECT details FROM audit_events WHERE action = 'webhook.endpoint_created'").first["details"]
+
+    assert_equal "http://127.0.0.1:9/…", JSON.parse(details)["url"]
+    refute_includes details, "segredo"
+    assert_equal "https://hooks.example", A::Webhooks::CreateEndpoint.audit_url("https://hooks.example/")
+  end
+
   def test_webhook_endpoint_validation_and_plan_gate
     assert_raises(D::ValidationError) { uc(:create_webhook).call(@org[:actor], url: "https://hooks.example", events: []) }
     assert_raises(D::ValidationError) { uc(:create_webhook).call(@org[:actor], url: "https://hooks.example", events: ["tudo"]) }
