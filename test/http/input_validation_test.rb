@@ -91,4 +91,70 @@ class InputValidationTest < HttpTest
     assert_equal 422, last_response.status
   end
 
+  def test_body_size_limits
+    big = "a" * (1_048_576 + 1)
+    post "/entrar", { "email" => big }
+
+    assert_equal 413, last_response.status
+    post "/api/v1/reservations", big, { "CONTENT_TYPE" => "application/json" }
+
+    assert_equal 413, last_response.status
+    env = Rack::MockRequest.env_for("/entrar", method: "POST", input: "email=x", "HTTP_TRANSFER_ENCODING" => "chunked")
+    env.delete("CONTENT_LENGTH")
+
+    assert_equal 413, Locentra::Interfaces::HTTP::App.build(@system).call(env).first, "corpo sem tamanho declarado"
+    env = Rack::MockRequest.env_for("/api/v1/reservations", method: "POST", input: big, "CONTENT_TYPE" => "application/json")
+    env.delete("CONTENT_LENGTH")
+
+    assert_raises(Locentra::Interfaces::HTTP::PayloadTooLarge) { Locentra::Interfaces::HTTP::RequestContext.new(env, {}, "r").json }
+  end
+
+  def test_upload_above_the_configured_size_is_refused_and_nothing_is_stored
+    small = Locentra::System.new(Locentra::Config.from_env(TestDatabase.env("MAX_UPLOAD_BYTES" => "1048576")), clock: @clock, logger: @system.logger)
+    @app = Rack::Lint.new(Locentra::Interfaces::HTTP::App.build(small))
+    login("dona@alfa.test")
+    get "/clientes/#{@customer.id}"
+    pdf = Rack::Test::UploadedFile.new(StringIO.new("%PDF-1.4\n#{"x" * 1_048_576}"), "application/pdf", original_filename: "grande.pdf")
+    post "/anexos", { "_csrf" => csrf, "dono_tipo" => "customer", "dono_id" => @customer.id, "arquivo" => pdf }
+
+    follow_redirect! while last_response.redirect?
+
+    assert_includes last_response.body, "acima de 1 MB"
+    assert_equal 0, owner_query("SELECT count(*) AS n FROM attachments").first["n"].to_i
+    stored = Dir.glob(File.join(small.config.storage_root, @org[:organization_id], "*"))
+
+    assert_empty stored
+    post "/anexos", "x" * (1_048_576 + 65_537), { "CONTENT_TYPE" => "multipart/form-data; boundary=x" }
+
+    assert_equal 413, last_response.status, "acima do limite de upload mais a margem do formulário"
+  ensure
+    small&.shutdown
+  end
+
+  def test_session_cookie_attributes_and_hsts_with_https
+    secure = Locentra::System.new(Locentra::Config.from_env(TestDatabase.env("APP_BASE_URL" => "https://locentra.example")), clock: @clock,
+                                                                                                                             logger: @system.logger)
+    response = Rack::MockRequest.new(Locentra::Interfaces::HTTP::App.build(secure))
+                                .post("/entrar", params: { "email" => "dona@alfa.test", "senha" => "senha-muito-segura-1" })
+    cookie = response.headers["set-cookie"].to_s.split("\n").find { |c| c.start_with?("__Host-locentra=") }
+
+    refute_nil cookie, response.headers["set-cookie"].inspect
+    attributes = cookie.split(";").map { |part| part.strip.downcase }
+
+    assert_includes attributes, "secure"
+    assert_includes attributes, "httponly"
+    assert_includes attributes, "samesite=lax"
+    assert_includes attributes, "path=/"
+    assert(attributes.none? { |a| a.start_with?("domain=") })
+    production = Locentra::System.new(Locentra::Config.from_env(TestDatabase.env("APP_ENV" => "production", "APP_BASE_URL" => "https://locentra.example")),
+                                      clock: @clock, logger: @system.logger)
+
+    assert_match(/max-age=31536000/, Rack::MockRequest.new(Locentra::Interfaces::HTTP::App.build(production)).get("/entrar")
+                                                                                                          .headers["strict-transport-security"])
+    error = assert_raises(Locentra::ConfigError) { Locentra::Config.from_env(TestDatabase.env("APP_ENV" => "production")) }
+    assert_match(/https/, error.message)
+  ensure
+    secure&.shutdown
+    production&.shutdown
+  end
 end
