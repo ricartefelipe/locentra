@@ -36,15 +36,24 @@ Papel dedicado `locentra_backup` (somente leitura, `BYPASSRLS`, membro de `pg_re
 forçada inclusive para o proprietário, um backup feito com o proprietário ou com o papel da aplicação sairia
 vazio. O cliente `pg_dump` deve ter a mesma versão principal do servidor (18) ou mais nova.
 
+No ambiente Compose, os anexos de web e worker ficam no volume nomeado `locentra_storage` (montado em
+`/app/storage` nos serviços), e não no diretório `./storage` do checkout. O comando monta esse volume somente
+para leitura, o diretório do projeto (scripts e destino) e usa a rede do Compose (`locentra_default`):
+
 ```bash
-docker run --rm --network <rede> -v "$PWD":/app -w /app \
+docker run --rm --network locentra_default \
+  -v "$PWD":/app -w /app -v locentra_storage:/anexos:ro \
   -e BACKUP_DATABASE_URL=postgres://locentra_backup:<senha>@postgres:5432/locentra \
-  -e STORAGE_ROOT=/app/storage \
+  -e STORAGE_ROOT=/anexos \
   postgres:18.7-trixie bash bin/backup /app/tmp/backups
 ```
 
-Gera `banco.dump` (formato custom), `banco.indice`, `anexos.tar.gz` e `MANIFESTO.sha256`. Guarde o diretório
-fora do servidor, cifrado, com retenção definida pela política da operação.
+Gera `banco.dump` (formato custom), `banco.indice`, `anexos.tar.gz` e `MANIFESTO.sha256`, e informa quantos
+arquivos de anexo foram incluídos. `STORAGE_ROOT` é obrigatório e precisa existir: sem ele (ou com um
+caminho inexistente) o script termina com erro antes do dump; omitir os anexos exige
+`BACKUP_SKIP_ATTACHMENTS=1`, registrado no arquivo `SEM-ANEXOS` do backup. Fora do Compose, aponte
+`STORAGE_ROOT` para o diretório real dos anexos. Guarde o diretório do backup fora do servidor, cifrado,
+com retenção definida pela política da operação.
 
 ## 4. Restauração — exercitada em 18/11/2026
 
@@ -52,14 +61,27 @@ Executada por administrador do PostgreSQL (superusuário), sempre em **banco nov
 originais (`locentra_owner`) e as políticas de RLS são preservados.
 
 ```bash
-docker run --rm --network <rede> -v "$PWD":/app -w /app \
+docker run --rm --network locentra_default -v "$PWD":/app -w /app \
   -e RESTORE_ADMIN_URL=postgres://postgres:<senha>@postgres:5432/postgres \
   postgres:18.7-trixie bash bin/restore /app/tmp/backups/<carimbo> locentra_restaurado /app/tmp/anexos-restaurados
-MIGRATION_DATABASE_URL=postgres://locentra_owner:<senha>@postgres:5432/locentra_restaurado bin/locentra-admin db:status
+docker compose --profile ops run --rm \
+  -e MIGRATION_DATABASE_URL=postgres://locentra_owner:<senha>@postgres:5432/locentra_restaurado \
+  migrate ruby bin/locentra-admin db:status
 ```
 
-Depois de validar, aponte `DATABASE_URL`/`WORKER_DATABASE_URL` para o banco restaurado, mova os anexos para o
-`STORAGE_ROOT` e reinicie web e worker.
+O script reaplica as permissões do banco (o dump não as leva): `PUBLIC` sem acesso, `CONNECT`/`TEMPORARY`
+para os papéis da aplicação e `CONNECT` para o backup. A validação roda pelo serviço `migrate`, que está na
+rede do Compose e tem Ruby.
+
+Depois de validar, aponte `DATABASE_URL`/`WORKER_DATABASE_URL` para o banco restaurado, grave os anexos no
+volume dos anexos e reinicie web e worker:
+
+```bash
+docker compose stop web worker
+docker run --rm -v "$PWD/tmp/anexos-restaurados":/origem:ro -v locentra_storage:/destino \
+  postgres:18.7-trixie bash -c 'cp -a /origem/. /destino/ && chown -R 10001:10001 /destino'
+docker compose up -d --wait web worker
+```
 
 ### Registro do exercício (18/11/2026, PostgreSQL 18.7, banco de desenvolvimento semeado)
 
