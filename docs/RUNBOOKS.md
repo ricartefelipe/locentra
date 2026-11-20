@@ -99,13 +99,32 @@ object storage — dependem da infraestrutura de produção escolhida.
 
 ## 5. Tarefas com falha na fila — exercitado (testes de integração do worker)
 
-1. Consultar: tela/CLI de falhas (`jobs failures`) ou métricas `locentra_jobs_queue_size{kind="dead"}`.
+1. Consultar: CLI operacional (`bin/locentra jobs failures`, com credencial `cli` da organização) ou as
+   métricas `locentra_jobs_queue_size{status="dead"}` e `locentra_jobs_dead_total{queue,kind}`. Não há tela
+   de tarefas na interface web.
 2. Ler `last_error` e o histórico em `job_attempts` (tentativa, worker, resultado, erro).
 3. Corrigir a causa (credencial do provedor, destino de webhook, dado inválido).
-4. Reprocessar com usuário/credencial que tenha `jobs.manage` (auditado). A tarefa volta a `pending`.
+4. Reprocessar com `bin/locentra jobs retry <id>` usando credencial `cli` com o escopo `jobs.manage`
+   (auditado). A tarefa volta a `pending`.
+
+Tarefas sem organização (e-mails de confirmação e de recuperação de senha, `platform.fanout`,
+`platform.housekeeping`) não aparecem na CLI operacional, que só enxerga a própria organização. Consulta e
+reprocessamento são feitos pelo operador com o papel do worker (sem auditoria de aplicação; registre a
+ação no controle de mudanças):
+
+```bash
+psql "$WORKER_DATABASE_URL" -c "SELECT id, kind, attempts, last_error, updated_at FROM jobs
+  WHERE organization_id IS NULL AND status = 'dead' ORDER BY updated_at DESC LIMIT 50"
+psql "$WORKER_DATABASE_URL" -c "UPDATE jobs SET status = 'pending', run_at = now(), attempts = 0, finished_at = NULL,
+  updated_at = now() WHERE id = '<id>' AND organization_id IS NULL AND status = 'dead'"
+```
+
+`platform.*` é reagendado a cada minuto pelo próprio worker e não precisa ser reprocessado. Um e-mail de
+recuperação de senha reprocessado gera um link novo (o anterior é invalidado).
 
 Worker parado ou travado: tarefas `running` com lease vencido voltam a ser reivindicadas por outro worker; o
-worker antigo não consegue concluí-las (fencing por `lease_token`).
+worker antigo não consegue concluí-las (fencing por `lease_token`). Uma tarefa com lease vencido na última
+tentativa permitida termina `dead`.
 
 ## 6. Provedor de pagamento indisponível ou resposta perdida — exercitado (testes com simulador)
 
