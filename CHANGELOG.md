@@ -21,7 +21,8 @@ Primeira versão estável da plataforma.
 - **Reservas:** solicitação, bloqueio temporário com expiração, confirmação com revalidação atômica,
   cancelamento, reagendamento, extensão; garantias por exclusion constraint e locks no PostgreSQL.
 - **Precificação:** hora, diária de 24 horas, dia de calendário, semana, mínimo, arredondamento, tolerância,
-  faixas, cupons, descontos por papel, condições negociadas, multa por atraso e snapshots.
+  faixas, descontos por papel, multa por atraso e snapshots; o motor aplica cupons, condições negociadas e
+  tarifas adicionais (sem cadastro nesta versão, ver limitações).
 - **Orçamentos e contratos:** versões, aprovação da versão aceita, conversão idempotente, PDF com versão e
   SHA-256, aceite eletrônico simples, aditivos e cancelamento com política.
 - **Operação:** separação, conferência, retirada, devolução total ou parcial, inspeção, avarias e faltas com
@@ -39,3 +40,15 @@ Primeira versão estável da plataforma.
   exercitada, publicação de imagem por tag condicionada a verificações e a configuração explícita.
 - **Testes:** unitários, propriedades, repositórios, integração, Rack com `Rack::Lint`, CLI, concorrência com
   barreiras, navegador e roteiro de demonstração de ponta a ponta.
+
+### Limitações conhecidas
+
+- **RF-29 atendido parcialmente:** a caução por depósito pago (recebimento, aplicação e devolução) está
+  implementada; a pré-autorização em cartão (`card_preauthorization`) é modelada e recusada, porque exige
+  tokenização no provedor para autorizar, capturar parcialmente e liberar sem estorno (PAN e CVV nunca são
+  recebidos nem armazenados).
+- Cupons, condições negociadas por cliente e tarifas adicionais não têm caso de uso, tela, endpoint nem
+  comando de cadastro; o motor de preços os aplica quando existem no banco.
+- Integração real com o sandbox Asaas não exercitada (sem credenciais); adaptador testado com cliente HTTP
+  falso.
+- Demais limitações em [`docs/STATUS.md`](docs/STATUS.md).
