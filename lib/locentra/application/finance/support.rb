@@ -171,9 +171,12 @@ module Locentra
           @ids = ids
         end
 
+        # A reserva é lida com FOR SHARE: um cancelamento ou expiração em andamento termina antes da
+        # decisão (e é visto por ela). Bloqueio temporário vencido e ainda não varrido conta como
+        # expirado: o dinheiro chegou depois do prazo, mesmo que o sweeper ainda não tenha passado.
         def findings(tx, reservation_id, expected: nil, received: nil)
-          reservation = @reservations.find(tx, reservation_id)
-          [F::Review.for_reservation(reservation&.status), expected && F::Review.amount_mismatch(expected, received)].compact
+          reservation = reservation_id && @reservations.lock_shared(tx, reservation_id)
+          [F::Review.for_reservation(effective_status(reservation)), expected && F::Review.amount_mismatch(expected, received)].compact
         end
 
         # Confirma um pagamento já bloqueado (FOR UPDATE) pelo chamador. `extra`: achados adicionais
@@ -186,6 +189,12 @@ module Locentra
           @payments.update(tx, confirmed, from: from, now: @clock.now)
           effects(tx, actor, confirmed, found)
           confirmed
+        end
+
+        def effective_status(reservation)
+          return nil unless reservation
+
+          reservation.hold_expired?(@clock.now) ? "expired" : reservation.status
         end
 
         def effects(tx, actor, payment, found)
