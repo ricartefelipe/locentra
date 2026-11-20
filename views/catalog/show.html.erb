@@ -20,7 +20,7 @@
         </table>
       <% end %>
       <% if can?("assets.write") %>
-        <details>
+        <details<%= open_after_failure("/produtos/#{p.id}/ativos") %>>
           <summary>Cadastrar ativo</summary>
           <form method="post" action="/produtos/<%= p.id %>/ativos" class="stack">
             <%= csrf_field %>
@@ -94,7 +94,7 @@
       </dl>
     <% end %>
     <% if can?("catalog.write") %>
-      <details>
+      <details<%= open_after_failure("/produtos/#{p.id}/precos") %>>
         <summary>Alterar tabela de preços</summary>
         <form method="post" action="/produtos/<%= p.id %>/precos" class="form-grid">
           <%= csrf_field %>

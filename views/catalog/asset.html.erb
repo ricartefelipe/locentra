@@ -28,7 +28,7 @@
       </table>
     <% end %>
     <% if can?("maintenance.write") %>
-      <details>
+      <details<%= open_after_failure("/ativos/#{a.id}/bloqueios") %>>
         <summary>Bloquear período (preparação ou manutenção programada)</summary>
         <form method="post" action="/ativos/<%= a.id %>/bloqueios" class="stack">
           <%= csrf_field %>

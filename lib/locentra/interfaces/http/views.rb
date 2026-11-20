@@ -201,6 +201,15 @@ module Locentra
         # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.
         def open_if(errors, *fields) = raw(fields.any? { |field| errors&.key?(field.to_s) } ? " open" : "")
 
+        # Formulário de outra tela de detalhe que falhou: a página volta com o <details> do formulário
+        # aberto e com os valores enviados (a requisição atual é o POST para o `path` do formulário).
+        def open_after_failure(path) = raw(failed_submission?(path) ? " open" : "")
+        def submitted(path, field) = failed_submission?(path) ? request.form[field].to_s : ""
+
+        def failed_submission?(path)
+          !request.get? && request.path == path && @errors.is_a?(Hash) && !@errors.empty?
+        end
+
         # Chave de envio único de formulários que movimentam dinheiro (idempotência do envio).
         def submission_field = raw(%(<input type="hidden" name="envio" value="#{SecureRandom.uuid}">))
 

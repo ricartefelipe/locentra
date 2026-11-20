@@ -63,7 +63,7 @@
         <% end %>
       </div>
       <% unless contract_open %>
-      <details>
+      <details<%= open_after_failure("/reservas/#{r.id}/reagendar") %>>
         <summary>Reagendar</summary>
         <form method="post" action="/reservas/<%= r.id %>/reagendar" class="stack">
           <%= csrf_field %>
@@ -75,7 +75,7 @@
       <% end %>
     <% end %>
     <% if can?("reservations.write") && %w[held confirmed in_progress].include?(r.status) && !contract_open && !quote_hold %>
-      <details>
+      <details<%= open_after_failure("/reservas/#{r.id}/estender") %>>
         <summary>Estender devolução</summary>
         <form method="post" action="/reservas/<%= r.id %>/estender" class="stack">
           <%= csrf_field %>
@@ -86,7 +86,7 @@
       </details>
     <% end %>
     <% if can?("reservations.cancel") && %w[requested held confirmed].include?(r.status) && !contract_open %>
-      <details>
+      <details<%= open_after_failure("/reservas/#{r.id}/cancelar") %>>
         <summary>Cancelar reserva</summary>
         <form method="post" action="/reservas/<%= r.id %>/cancelar" class="stack" data-confirm="Cancelar esta reserva e liberar a disponibilidade?">
           <%= csrf_field %>
