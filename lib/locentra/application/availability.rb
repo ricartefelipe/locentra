@@ -15,10 +15,14 @@ module Locentra
       # esses produtos, calcula faltas com o domínio e só então insere as alocações. Ativos
       # individuais são inseridos sob savepoint; se outra transação alocou o mesmo ativo, a
       # exclusion constraint rejeita e o próximo candidato livre é tentado.
+      #
+      # Bloqueios vencidos expirados aqui passam por `expiry` (auditoria e evento reservation.expired),
+      # como na varredura.
       class Allocator
-        def initialize(repository:, ids:)
+        def initialize(repository:, ids:, expiry: nil)
           @repository = repository
           @ids = ids
+          @expiry = expiry
         end
 
         # items: [{id:, product_id:, quantity:}] — linhas persistidas da reserva.
@@ -88,8 +92,14 @@ module Locentra
           physical = products.values.reject { |p| p[:product].kit? }
           bulk_ids = physical.select { |p| p[:product].bulk? }.map { |p| p[:product].id }.sort
           pools = lock ? @repository.lock_pools(tx, branch_id, bulk_ids) : @repository.pools(tx, branch_id, bulk_ids)
-          @repository.release_stale_holds(tx, physical.map { |p| p[:product].id }, now) if lock
+          release_stale_holds(tx, physical.map { |p| p[:product].id }, now) if lock
           { products: products, pools: pools }
+        end
+
+        def release_stale_holds(tx, product_ids, now)
+          @repository.release_stale_holds(tx, product_ids, now).each do |row|
+            @expiry&.record(tx, nil, row["id"], row["code"], "allocation")
+          end
         end
 
         def expand(context, items)

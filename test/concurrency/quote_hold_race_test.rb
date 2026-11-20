@@ -42,8 +42,9 @@ class QuoteHoldRaceTest < DatabaseTest
   def test_rejection_keeps_a_hold_expired_by_a_concurrent_sweep
     @clock.advance(3600)
     barrier = Barrier.new(2)
-    sweep = R::ExpireHolds.new(uow: @system.uow, reservations: paused_after_status_update(barrier), audit: services[:audit],
-                               events: services[:events], clock: @clock)
+    paused = paused_after_status_update(barrier)
+    expiry = R::HoldExpiry.new(reservations: paused, audit: services[:audit], events: services[:events])
+    sweep = R::ExpireHolds.new(uow: @system.uow, reservations: paused, expiry: expiry, clock: @clock)
     reject = Q::RejectQuote.new(uow: @system.uow, quotes: @system.repos[:quotes], hold_release: hold_release(barrier), audit: services[:audit],
                                 events: services[:events], clock: @clock)
 

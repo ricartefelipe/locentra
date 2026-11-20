@@ -76,7 +76,6 @@ module Locentra
         tokens: A::Identity::OneTimeTokens.new(repository: repos[:user_tokens], clock: clock, ids: ids),
         sessions: A::Identity::Sessions.new(uow: uow, repository: repos[:sessions], clock: clock, ids: ids),
         limits: A::Organizations::PlanLimits.new(subscriptions: repos[:subscriptions]),
-        allocator: A::Availability::Allocator.new(repository: repos[:availability], ids: ids),
         pricer: A::Reservations::Pricer.new(pricing: repos[:pricing]),
         pricing_rules: Domain::Pricing::Rules.new,
         mailer: @mailer, http: @http,
@@ -89,6 +88,8 @@ module Locentra
         external_calls: A::ExternalCalls.new(logger: logger, metrics: metrics),
         portal_scope: A::Portal::ContractDocumentScope.new(contracts: repos[:contracts])
       }
+      @services[:hold_expiry] = A::Reservations::HoldExpiry.new(reservations: repos[:reservations], audit: @services[:audit], events: @services[:events])
+      @services[:allocator] = A::Availability::Allocator.new(repository: repos[:availability], ids: ids, expiry: @services[:hold_expiry])
       @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
                                                                            quotes: repos[:quotes], contracts: repos[:contracts])
       @services[:finance_subscriber] = A::Finance::ReservationChargesSubscriber.new(queue: queue)
@@ -197,7 +198,8 @@ module Locentra
                                                                        allocator: s[:allocator], pricer: s[:pricer], events: s[:events], ids: ids,
                                                                        **reservation_deps)
       uc[:confirm_reservation] = A::Reservations::ConfirmReservation.new(uow: uow, allocator: s[:allocator], events: s[:events],
-                                                                         guard: s[:reservation_guard], **reservation_deps)
+                                                                         guard: s[:reservation_guard], expiry: s[:hold_expiry],
+                                                                         **reservation_deps)
       uc[:cancel_reservation] = A::Reservations::CancelReservation.new(uow: uow, events: s[:events], guard: s[:reservation_guard],
                                                                        **reservation_deps)
       uc[:reschedule_reservation] = A::Reservations::RescheduleReservation.new(uow: uow, organizations: r[:organizations],
@@ -206,7 +208,7 @@ module Locentra
       uc[:extend_reservation] = A::Reservations::ExtendReservation.new(uow: uow, organizations: r[:organizations], allocator: s[:allocator],
                                                                        availability: r[:availability], events: s[:events], ids: ids,
                                                                        guard: s[:reservation_guard], **reservation_deps)
-      uc[:expire_holds] = A::Reservations::ExpireHolds.new(uow: uow, events: s[:events], **reservation_deps)
+      uc[:expire_holds] = A::Reservations::ExpireHolds.new(uow: uow, reservations: r[:reservations], expiry: s[:hold_expiry], clock: clock)
       uc[:list_reservations] = A::Reservations::ListReservations.new(uow: uow, reservations: r[:reservations])
       uc[:get_reservation] = A::Reservations::GetReservation.new(uow: uow, reservations: r[:reservations])
     end
