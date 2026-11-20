@@ -127,6 +127,19 @@ module Locentra
           raise CsrfFailure unless sent && expected && Rack::Utils.secure_compare(sent.to_s, expected.to_s)
         end
 
+        # Formulários públicos (sem sessão, portanto sem token CSRF): recusa envios de outro site,
+        # identificados por Sec-Fetch-Site ou por Origin diferente da própria aplicação. Evita que uma
+        # página de terceiros conecte a vítima à conta de quem atacou (CSRF de login). Clientes que não
+        # enviam nenhum dos cabeçalhos (fora de navegadores) não são afetados.
+        def verify_origin!(allowed = [])
+          return if get?
+          raise CsrfFailure if env["HTTP_SEC_FETCH_SITE"] == "cross-site"
+
+          origin = env["HTTP_ORIGIN"].to_s
+          return if origin.empty?
+          raise CsrfFailure unless (allowed + [rack.base_url]).include?(origin)
+        end
+
         def can?(permission)
           actor && Application::Authorizer.allowed?(actor, permission)
         end

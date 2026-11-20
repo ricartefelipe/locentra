@@ -127,7 +127,9 @@ atualizado.
 
 - **Decisão:** cookie com token aleatório de 256 bits; o banco guarda SHA-256. HttpOnly, SameSite=Lax,
   Secure e prefixo `__Host-` com HTTPS. Rotação em login e troca de organização. CSRF por token
-  sincronizado por sessão. ERB com `<%= %>` escapando sempre (subclasse de `ERB` que altera o comando de
+  sincronizado por sessão; formulários públicos (entrada, cadastro, recuperação e redefinição de senha,
+  aceite de convites), que não têm sessão, recusam envios com `Sec-Fetch-Site: cross-site` ou `Origin`
+  diferente da aplicação (CSRF de login); com sessão, o aceite de convite exige o token. ERB com `<%= %>` escapando sempre (subclasse de `ERB` que altera o comando de
   inserção); HTML confiável só por `raw`/helpers. CSP sem `unsafe-inline`.
 
 ## ADR-019 — Tokens de uso único emitidos no envio

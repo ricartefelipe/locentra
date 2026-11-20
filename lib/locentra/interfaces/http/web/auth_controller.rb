@@ -102,7 +102,9 @@ module Locentra
             render(ctx, "auth/invitation", title: "Convite", layout: "layouts/public", token: ctx.query("token").to_s, errors: {})
           end
 
+          # Com sessão, vincula a conta conectada: exige o token CSRF da sessão (como no portal).
           def accept_invitation(ctx)
+            ctx.verify_csrf! if ctx.session
             result = uc(:accept_invitation).call(token: ctx.form["token"], user_id: ctx.session&.fetch("user_id"),
                                                  name: ctx.form["nome"], password: ctx.form["senha"])
             token, = @system.services[:sessions].create(user_id: result[:user_id], organization_id: result[:organization_id], ip: ctx.ip,

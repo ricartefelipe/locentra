@@ -51,6 +51,7 @@ module Locentra
 
         def initialize(system, reload_templates: false)
           @system = system
+          @origins = [self.class.origin_of(system.config.base_url)].compact
           @templates = Templates.new(root: File.join(ROOT, "views"), reload: reload_templates)
           @authenticator = Authenticator.new(system)
           @flash = Flash.new(system.config.secret_key_base)
@@ -69,6 +70,15 @@ module Locentra
           handle_error(ctx || RequestContext.new(env, {}, env["locentra.request_id"].to_s), e)
         end
 
+        def self.origin_of(url)
+          uri = URI.parse(url.to_s)
+          return nil unless uri.host
+
+          "#{uri.scheme}://#{uri.host}#{":#{uri.port}" unless uri.port == uri.default_port}"
+        rescue URI::InvalidURIError
+          nil
+        end
+
         private
 
         # Limite de requisições por IP das rotas públicas que fazem trabalho caro (bcrypt, e-mail,
@@ -77,6 +87,7 @@ module Locentra
         # de reserva.
         def dispatch(route, ctx)
           throttle!(route.options[:throttle], ctx.ip)
+          ctx.verify_origin!(@origins) if route.options[:csrf] == :origin
           @authenticator.authenticate!(ctx, route.auth)
           throttle_actor!(route, ctx)
           ctx.env["locentra.organization_id"] = ctx.actor&.organization_id
@@ -102,7 +113,7 @@ module Locentra
         end
 
         def csrf_required?(route, ctx)
-          return false if route.options[:csrf] == false
+          return false if [false, :origin].include?(route.options[:csrf])
           return false if ctx.env["locentra.auth_method"] == "bearer"
 
           !ctx.get?

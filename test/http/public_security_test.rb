@@ -12,6 +12,32 @@ class PublicSecurityTest < HttpTest
 
   def credentials = { "email" => "dona@alfa.test", "senha" => "senha-muito-segura-1" }
 
+  def test_login_from_another_site_is_refused_without_creating_a_session
+    post "/entrar", credentials, { "HTTP_ORIGIN" => "https://evil.example" }
+
+    assert_equal 403, last_response.status
+    assert_nil last_response.headers["set-cookie"]
+    assert_includes last_response.body, "O formulário expirou ou a sessão mudou"
+    post "/entrar", credentials, { "HTTP_SEC_FETCH_SITE" => "cross-site" }
+
+    assert_equal 403, last_response.status
+    post "/entrar", credentials, { "HTTP_ORIGIN" => "null" }
+
+    assert_equal 403, last_response.status
+    post "/entrar", credentials, { "HTTP_ORIGIN" => "http://localhost:9292", "HTTP_SEC_FETCH_SITE" => "same-origin" }
+
+    assert_equal 303, last_response.status
+    assert_match(/locentra_session=/, last_response.headers["set-cookie"])
+  end
+
+  def test_public_forms_check_the_origin
+    %w[/cadastro /recuperar-senha /redefinir-senha /convites /portal/convite].each do |path|
+      post path, {}, { "HTTP_ORIGIN" => "https://evil.example" }
+
+      assert_equal 403, last_response.status, path
+    end
+  end
+
   def test_login_return_path_with_control_characters_is_ignored
     ["/\t/evil.example/roubo", "/\v/evil.example", "/\f/evil.example", "/\x1F/evil.example", "/ /evil.example", "/\\evil.example"].each do |back|
       post "/entrar", credentials.merge("voltar" => back)
@@ -91,6 +117,14 @@ class PublicSecurityTest < HttpTest
     assert_equal "10.0.0.2", resolve.call("10.0.0.2", "lixo"), "cabeçalho inválido"
     assert_equal "203.0.113.9", resolve.call("::1", "203.0.113.9")
     assert_raises(Locentra::ConfigError) { Locentra::Config.trusted_proxies("10.0.0.0/8, não-é-ip") }
+  end
+
+  def test_staff_invitation_with_a_session_requires_the_csrf_token
+    login("dona@alfa.test")
+    post "/convites", { "token" => "#{@org[:organization_id]}.qualquer" }
+
+    assert_equal 403, last_response.status
+    assert_includes last_response.body, "Recarregue a página"
   end
 
   def test_csrf_failure_page_explains_what_to_do

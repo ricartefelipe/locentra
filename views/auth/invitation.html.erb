@@ -4,6 +4,7 @@
   <form method="post" action="/convites" class="stack">
     <input type="hidden" name="token" value="<%= @token %>">
     <% if request.session %>
+      <%= csrf_field %>
       <p>Você está conectado. O convite será vinculado à sua conta atual se o e-mail corresponder.</p>
     <% else %>
       <label for="nome">Seu nome</label>
