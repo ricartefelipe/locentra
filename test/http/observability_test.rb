@@ -210,6 +210,17 @@ class ObservabilityTest < HttpTest
     protected_system&.shutdown
   end
 
+  def test_metrics_are_disabled_in_production_without_a_token
+    production = Locentra::System.new(Locentra::Config.from_env(TestDatabase.env("APP_ENV" => "production", "APP_BASE_URL" => "https://locentra.example")),
+                                      clock: @clock, logger: @system.logger)
+    response = Rack::MockRequest.new(Rack::Lint.new(Locentra::Interfaces::HTTP::App.build(production))).get("/metrics")
+
+    assert_equal 404, response.status
+    assert_includes response.body, "METRICS_TOKEN"
+  ensure
+    production&.shutdown
+  end
+
   private
 
   # Valida o formato texto 0.0.4: comentários HELP/TYPE antes das amostras de cada família, uma linha

@@ -127,4 +127,4 @@ vez, com escape automático; JavaScript em módulos ES sem scripts inline. API v
 
 Logs JSON por linha com redação de campos sensíveis e correlação por `request_id` (requisição → outbox →
 tarefa → operação externa). Métricas Prometheus em `/metrics` (protegido por `METRICS_TOKEN` quando
-definido) com rótulos de baixa cardinalidade. `/health/live` e `/health/ready` (banco e migrations).
+definido; em produção, sem token, o endpoint fica desativado) com rótulos de baixa cardinalidade. `/health/live` e `/health/ready` (banco e migrations).

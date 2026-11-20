@@ -153,7 +153,8 @@ module Locentra
       uc[:idempotency] = A::Idempotency.new(**common, repository: r[:idempotency], ids: ids)
       uc[:dashboard] = A::Reports::Dashboard.new(**common, reports: r[:reports])
       uc[:list_audit] = A::Reports::ListAudit.new(uow: uow, audit: r[:audit])
-      uc[:collect_metrics] = A::Reports::CollectMetrics.new(transactor: transactor, reports: r[:reports], metrics: metrics, clock: clock)
+      uc[:collect_metrics] = A::Reports::CollectMetrics.new(transactor: transactor, reports: r[:reports], metrics: metrics, clock: clock,
+                                                            logger: logger)
     end
 
     def build_catalog_use_cases(cases)

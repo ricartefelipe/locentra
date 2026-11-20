@@ -58,8 +58,10 @@ próprio, com PostgreSQL 18.7 como serviço e o mesmo script de papéis).
 ## Métricas
 
 Expostas em `GET /metrics` do processo web (formato texto 0.0.4, com `# HELP` e `# TYPE` por família;
-`METRICS_TOKEN` exige `Authorization: Bearer`). Cada processo mantém o próprio registro; o que vem do
-banco é coletado a cada leitura.
+`METRICS_TOKEN` exige `Authorization: Bearer`; em produção, sem `METRICS_TOKEN`, o endpoint responde 404).
+Cada processo mantém o próprio registro; o que vem do banco é coletado a cada leitura, e
+`locentra_metrics_collect_success` (0 ou 1) indica se a última coleta funcionou (a falha vai para o log
+como `metrics.collect_failed`).
 
 | Métrica | Tipo | Rótulos | Origem |
 |---|---|---|---|
@@ -74,6 +76,7 @@ banco é coletado a cada leitura.
 | `locentra_jobs_queue_size` | gauge | `queue`, `status` | `queue_stats` (worker) |
 | `locentra_jobs_oldest_age_seconds` | gauge | `queue`, `status` | `queue_stats` (worker) |
 | `locentra_jobs_queue_stats_age_seconds` | gauge | — | Idade da última atualização de `queue_stats` |
+| `locentra_metrics_collect_success` | gauge | — | 1 se a coleta das métricas derivadas do banco funcionou na última leitura |
 | `locentra_jobs_retries_total` | counter | `queue`, `kind` | `job_outcome_totals` (todos os workers) |
 | `locentra_jobs_dead_total` | counter | `queue`, `kind` | `job_outcome_totals` (todos os workers) |
 

@@ -30,6 +30,7 @@ class ApplicationObservabilityTest < UnitTest
     def observe(name, value, **labels) = @observations << [name, value, labels]
     def set_counter(name, value, **labels) = @totals[[name, labels]] = value
     def replace_gauges(name, series) = @gauges[name] = series
+    def gauge(name, value, **labels) = @gauges[name] = [[value, labels]]
   end
 
   class FakeTransactor
@@ -155,7 +156,10 @@ class ApplicationObservabilityTest < UnitTest
 
     assert collect.call
     assert_empty metrics.gauges["jobs_queue_stats_age_seconds"], "sem agregados gravados não há idade a informar"
+    assert_equal [[1, {}]], metrics.gauges["metrics_collect_success"]
     refute A::Reports::CollectMetrics.new(transactor: FakeTransactor.new(error: RuntimeError.new("sem banco")), reports: reports, metrics: metrics,
-                                          clock: clock).call
+                                          clock: clock, logger: logger).call
+    assert_equal [[0, {}]], metrics.gauges["metrics_collect_success"], "falha visível na própria série"
+    assert_equal "metrics.collect_failed", logger.entries.last[1][:event]
   end
 end

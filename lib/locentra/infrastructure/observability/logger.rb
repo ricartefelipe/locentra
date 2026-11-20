@@ -84,6 +84,7 @@ module Locentra
           "jobs_queue_size" => "Tarefas por fila e situação (agregado gravado pelo worker)",
           "jobs_oldest_age_seconds" => "Idade da tarefa mais antiga já liberada para execução, por fila e situação",
           "jobs_queue_stats_age_seconds" => "Tempo desde a última atualização dos agregados da fila pelo worker",
+          "metrics_collect_success" => "1 se a última coleta das métricas derivadas do banco teve sucesso, 0 caso contrário",
           "jobs_retries_total" => "Reagendamentos de tarefas após falha, somados entre todos os workers",
           "jobs_dead_total" => "Tarefas encerradas sem novas tentativas (falha permanente), somadas entre todos os workers",
           "job_duration_seconds" => "Duração da execução de tarefas no processo do worker",
