@@ -44,8 +44,8 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
   ator (membro ativo, credencial válida e não expirada, ou acesso de portal ativo). Revogação e mudança de
   papel valem na requisição seguinte.
 - **Atribuição de papéis:** o proprietário atribui qualquer papel exceto proprietário; o administrador atribui
-  papéis abaixo de administrador; o proprietário não pode ser removido nem rebaixado; administradores só
-  são removidos pelo proprietário.
+  papéis abaixo de administrador e só altera membros com esses papéis; o proprietário não pode ser
+  removido nem rebaixado; administradores só são alterados e removidos pelo proprietário.
 - **Credenciais de integração (API e CLI):** cada credencial tem escopos (subconjunto das permissões de quem a
   criou), organização, validade e revogação. O tenant vem do token, nunca de parâmetros.
 - **Cliente (portal):** ator `customer` com a permissão `portal.access`, sempre restrito ao próprio

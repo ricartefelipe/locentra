@@ -214,6 +214,9 @@ module Locentra
             assignable = Domain::Identity.assignable_roles(current.role)
             raise Domain::AccessDenied, "papel não pode ser atribuído" unless assignable.include?(role)
             raise Domain::AccessDenied, "não é possível alterar o proprietário" if member["role"] == "owner"
+            # Somente membros com papel que o ator poderia atribuir: administrador não altera outro
+            # administrador (nem o rebaixa para depois removê-lo).
+            raise Domain::AccessDenied, "administradores só podem ser alterados pelo proprietário" unless assignable.include?(member["role"])
 
             @organizations.update_membership_role(tx, member["id"], role, @clock.now)
             @audit.record(tx, current, "member.role_changed", "membership", member["id"], "from" => member["role"], "to" => role)
