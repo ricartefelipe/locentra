@@ -63,8 +63,6 @@ module Locentra
           [status, { "content-type" => "application/json; charset=utf-8" }.merge(headers), [JSON.generate(body)]]
         end
 
-        def form_errors(error) = error.errors
-
         def percent_bps(value, field)
           text = value.to_s.strip
           return 0 if text.empty?

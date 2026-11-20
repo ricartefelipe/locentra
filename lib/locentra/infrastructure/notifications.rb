@@ -27,10 +27,6 @@ module Locentra
         @queue.enqueue(tx, "email.portal_invitation", { "invitation_id" => invitation.id }, priority: 20)
       end
 
-      def generic(tx, template, to:, variables: {})
-        @queue.enqueue(tx, "email.send", { "template" => template, "to" => to, "variables" => variables }, priority: 60, correlation_id: correlation(tx))
-      end
-
       private
 
       def correlation(tx) = tx.request_id

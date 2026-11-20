@@ -28,10 +28,6 @@ module Locentra
           raise Domain::Conflict.new("identificador da organização já utilizado; escolha outro nome", code: "slug_taken")
         end
 
-        def update_settings(tx, settings, now)
-          tx.execute("UPDATE organizations SET settings = $2, updated_at = $3 WHERE id = $1", [tx.tenant_id!, settings, now])
-        end
-
         def insert_branch(tx, branch, now)
           tx.execute(<<~SQL, [branch.id, branch.organization_id, branch.name, branch.code, branch.address, now])
             INSERT INTO branches (id, organization_id, name, code, address, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6)

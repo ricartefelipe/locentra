@@ -32,10 +32,6 @@ module Locentra
           SQL
         end
 
-        def coupons(tx)
-          tx.query("SELECT * FROM coupons WHERE organization_id = $1 ORDER BY created_at DESC", [tx.tenant_id!])
-        end
-
         # Maior desconto negociado vigente: específico do produto ou geral do cliente.
         def negotiated_discount_bps(tx, customer_id, product_id, now)
           tx.query_value(<<~SQL, [tx.tenant_id!, customer_id, product_id, now]).to_i
@@ -49,14 +45,6 @@ module Locentra
           tx.execute(<<~SQL, [row["id"], tx.tenant_id!, *row.values_at("customer_id", "product_id", "discount_bps", "valid_until", "notes", "created_by", "created_at")])
             INSERT INTO customer_price_agreements (id, organization_id, customer_id, product_id, discount_bps, valid_until, notes, created_by, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          SQL
-        end
-
-        def agreements(tx, customer_id)
-          tx.query(<<~SQL, [tx.tenant_id!, customer_id])
-            SELECT a.id, a.product_id, a.discount_bps, a.valid_until, a.notes, p.name AS product_name
-              FROM customer_price_agreements a LEFT JOIN products p ON p.organization_id = a.organization_id AND p.id = a.product_id
-             WHERE a.organization_id = $1 AND a.customer_id = $2 ORDER BY a.created_at DESC
           SQL
         end
       end

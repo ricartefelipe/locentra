@@ -31,7 +31,6 @@ module Locentra
       end
 
       def user? = kind == "user"
-      def system? = kind == "system"
       def customer? = kind == "customer"
       def credential? = %w[api cli].include?(kind)
 

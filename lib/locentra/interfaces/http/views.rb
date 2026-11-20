@@ -23,12 +23,6 @@ module Locentra
         end
 
         def safe(text) = SafeHtml.new(text.to_s)
-
-        # JSON seguro para embutir em <script type="application/json">: caracteres que poderiam
-        # encerrar o elemento ou abrir comentários HTML são escapados.
-        def json_for_script(data)
-          JSON.generate(data).gsub("<", "\\u003c").gsub(">", "\\u003e").gsub("&", "\\u0026").gsub("\u2028", "\\u2028").gsub("\u2029", "\\u2029")
-        end
       end
 
       # ERB com escape automático: `<%= %>` escapa sempre; HTML confiável precisa passar por
@@ -173,11 +167,6 @@ module Locentra
 
         def u(text) = URI.encode_www_form_component(text.to_s)
 
-        def link_to(text, href, **attrs)
-          extra = attrs.map { |k, v| %( #{k.to_s.tr("_", "-")}="#{h(v)}") }.join
-          raw(%(<a href="#{h(href)}"#{extra}>#{h(text)}</a>))
-        end
-
         def field_errors(errors, field)
           messages = Array(errors && errors[field.to_s])
           return raw("") if messages.empty?
@@ -207,10 +196,6 @@ module Locentra
 
         def selected(current, value) = raw(current.to_s == value.to_s ? " selected" : "")
         def checked(flag) = raw(flag ? " checked" : "")
-
-        def json_script(id, data)
-          raw(%(<script type="application/json" id="#{h(id)}">#{Html.json_for_script(data)}</script>))
-        end
 
         def can?(permission) = request.can?(permission)
 

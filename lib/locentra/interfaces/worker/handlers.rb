@@ -166,7 +166,7 @@ module Locentra
           actor = Application::Actor.system(organization_id: job.organization_id, request_id: job.correlation_id)
           expired = uc(:expire_holds).call(actor)
           expired_quotes = uc(:expire_quotes).call(actor)
-          overdue = @system.use_cases.names.include?(:detect_overdue) ? uc(:detect_overdue).call(actor) : []
+          overdue = uc(:detect_overdue).call(actor)
           tenant(job) { |tx| @system.repos[:idempotency].purge(tx, @system.clock.now) }
           reconciliation = @finance.schedule_reconciliation(job)
           { "expired" => expired.size, "expired_quotes" => expired_quotes.size, "overdue" => Array(overdue).size,

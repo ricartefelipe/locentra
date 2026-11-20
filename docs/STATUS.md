@@ -52,6 +52,8 @@ contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
 - Métricas de duração de tarefas e de chamadas externas ficam no processo do worker; com vários processos
   Puma o coletor precisa somar as séries.
 - Sem API v1 para orçamentos, contratos, operação e portal (disponíveis pela interface e casos de uso).
+- Configurações da organização (`settings`: política de cancelamento e validade padrão do bloqueio
+  temporário) são lidas com valores padrão, mas não há tela nem comando para alterá-las nesta versão.
 - Cupons, condições negociadas por cliente e tarifas adicionais: o motor de preços os aplica
   (`Domain::Pricing`, `Reservations::Pricer`) e há testes, mas não existe caso de uso, tela, endpoint nem
   comando para cadastrar cupons e condições ou informar tarifas na reserva. Numa instalação nova, o campo
