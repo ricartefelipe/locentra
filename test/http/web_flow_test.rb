@@ -200,4 +200,21 @@ class WebFlowTest < HttpTest
 
     assert_equal 400, last_response.status
   end
+
+  def test_staff_invitation_return_path_survives_login_with_several_organizations
+    second = staff_member_of(create_organization(name: "Locadora Beta", email: "dona@beta.test"), "dona@alfa.test")
+    back = "/convites?token=#{@org[:organization_id]}.qualquer"
+    post "/entrar", { "email" => "dona@alfa.test", "senha" => "senha-muito-segura-1", "voltar" => back }
+
+    refute_nil second
+    assert_equal back, last_response.location
+  end
+
+  def staff_member_of(org, email)
+    invitation = uc(:invite_member).call(org[:actor], email: email, role: "auditor")
+    token = "#{org[:organization_id]}.segredo-#{invitation["id"]}"
+    owner_query("UPDATE invitations SET token_digest = $1 WHERE id = $2", [A::Identity::Tokens.digest(token), invitation["id"]], tenant: org[:organization_id])
+    user = owner_query("SELECT id FROM users WHERE email = $1", [email], tenant: nil).first["id"]
+    uc(:accept_invitation).call(token: token, user_id: user)
+  end
 end

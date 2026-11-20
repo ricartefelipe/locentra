@@ -7,8 +7,10 @@ module Locentra
         # Entrada, cadastro, seleção de organização, saída, confirmação de e-mail, recuperação de
         # senha e aceite de convite.
         class AuthController < Controller
-          # Página de aceite do convite do portal: pública, preservada após a entrada para vincular a conta.
-          PORTAL_INVITATION = "/portal/convite"
+          # Páginas de aceite de convite (portal e equipe): públicas, preservadas após a entrada para vincular
+          # a conta, qualquer que seja o número de organizações do usuário (o aceite funciona com sessão sem
+          # organização ativa).
+          INVITATIONS = ["/portal/convite", "/convites"].freeze
 
           def login_form(ctx)
             return redirect(ctx, home_of(ctx.session["kind"])) if ctx.session && ctx.session["organization_id"]
@@ -121,7 +123,7 @@ module Locentra
           def kind_for(memberships) = memberships.size == 1 ? memberships.first["kind"] : "staff"
 
           def login_target(memberships, back)
-            return back if back&.start_with?(PORTAL_INVITATION)
+            return back if back && INVITATIONS.any? { |path| back == path || back.start_with?("#{path}?") }
             return "/organizacoes" unless memberships.size == 1
 
             landing(memberships.first, back)
