@@ -3,6 +3,7 @@
 require "erb"
 require "cgi"
 require "json"
+require "securerandom"
 require "uri"
 
 module Locentra
@@ -193,6 +194,9 @@ module Locentra
 
         # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.
         def open_if(errors, *fields) = raw(fields.any? { |field| errors&.key?(field.to_s) } ? " open" : "")
+
+        # Chave de envio único de formulários que movimentam dinheiro (idempotência do envio).
+        def submission_field = raw(%(<input type="hidden" name="envio" value="#{SecureRandom.uuid}">))
 
         def selected(current, value) = raw(current.to_s == value.to_s ? " selected" : "")
         def checked(flag) = raw(flag ? " checked" : "")

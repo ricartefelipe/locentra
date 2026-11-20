@@ -82,6 +82,8 @@ module Locentra
       # Cobrança pelo provedor configurado (simulador ou Asaas). O envio ocorre no worker
       # ('payments.submit'), fora de transação, com a referência externa estável (id do pagamento).
       class RequestPayment
+        include Composable
+
         DEFAULT_DUE_DAYS = 3
 
         def initialize(uow:, payments:, accounts:, organizations:, target:, queue:, audit:, clock:, ids:)
@@ -97,9 +99,9 @@ module Locentra
         end
 
         # input: purpose, receivable_id | deposit_id, method, amount (Money), due_on (Date), scenario, notes.
-        def call(actor, input)
+        def call(actor, input, tx: nil)
           purpose = input.fetch(:purpose, "receivable").to_s
-          @uow.run(actor, @target.permission(purpose)) do |tx, current|
+          within(actor, @target.permission(purpose), tx) do |tx, current|
             account = @accounts.active(tx) || raise(Domain::ValidationError.field("provedor", "configure um provedor de pagamentos ativo"))
             target = @target.lock!(tx, purpose, purpose == "deposit" ? input[:deposit_id] : input[:receivable_id])
             amount = @target.check_amount!(target, F::Amount.positive!(input[:amount]))
