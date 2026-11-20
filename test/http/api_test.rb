@@ -190,4 +190,16 @@ class ApiTest < HttpTest
       assert spec["paths"][path].key?(route.verb.downcase), "verbo não documentado: #{route.verb} #{path}"
     end
   end
+
+  def test_confirming_an_expired_hold_records_the_expiration
+    hold = reserve(@actor, @customer, @org[:branch], period("2026-03-25T08:00:00Z", "2026-03-25T12:00:00Z"), [line(@camera, 1)], hold_minutes: 5)
+    @clock.advance(6 * 60)
+    post "/api/v1/reservations/#{hold.id}/confirm", "{}", auth.merge("HTTP_IDEMPOTENCY_KEY" => "confirmar-vencido-1")
+
+    assert_equal 409, last_response.status
+    assert_equal "hold_expired", json_body["error"]["code"]
+    assert_equal "expired", uc(:get_reservation).call(@actor, hold.id)[:reservation].status
+    assert_equal 1, owner_query("SELECT count(*) AS n FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'reservation.expired'",
+                                [hold.id]).first["n"].to_i
+  end
 end

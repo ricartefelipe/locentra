@@ -106,10 +106,14 @@ module Locentra
             end
           end
 
+          # Bloqueio vencido: a transação composta com a idempotência é desfeita junto com a expiração
+          # gravada nela; a confirmação isolada grava a expiração (com evento e auditoria) e responde 409.
           def confirm_reservation(ctx)
             idempotent(ctx, "reservations.write", "POST /api/v1/reservations/#{ctx.param(:id)}/confirm", {}) do |tx, actor|
               [200, S.reservation(uc(:confirm_reservation).call(actor, ctx.param(:id), tx: tx))]
             end
+          rescue Domain::HoldExpired
+            uc(:confirm_reservation).call(ctx.actor, ctx.param(:id))
           end
 
           def cancel_reservation(ctx)
