@@ -5,6 +5,7 @@ require "optparse"
 require_relative "../../config"
 require_relative "../../infrastructure"
 require_relative "../../infrastructure/observability/logger"
+require_relative "output"
 
 module Locentra
   module Interfaces
@@ -42,12 +43,21 @@ module Locentra
         rescue Infrastructure::Database::MigrationError, ConfigError => e
           @err.puts("erro: #{e.message}")
           1
-        rescue PG::ConnectionBad => e
-          @err.puts("erro: não foi possível conectar ao banco (#{e.message.lines.first&.strip&.gsub(/password=\S+/, "password=***")})")
-          2
+        rescue PG::Error => e
+          database_error(e)
         end
 
         private
+
+        # Falha de conexão (inclusive URL que o libpq não consegue interpretar, que levanta PG::Error
+        # com a URL inteira na mensagem) sai com 2; erro de comando no banco, com 1. A mensagem passa
+        # pelo mesmo filtro da CLI operacional: senha de URL ou de parâmetros de conexão nunca é impressa.
+        def database_error(error)
+          message = Redactor.scrub(error.message.lines.first.to_s.strip)
+          connection = error.is_a?(PG::ConnectionBad) || error.instance_of?(PG::Error)
+          @err.puts(connection ? "erro: não foi possível conectar ao banco (#{message})" : "erro do banco: #{message}")
+          connection ? 2 : 1
+        end
 
         def build_parser(options)
           OptionParser.new do |opts|

@@ -6,10 +6,14 @@ require "logger"
 module Locentra
   module Infrastructure
     module Observability
-      # Logger estruturado (JSON por linha) com redação de campos sensíveis.
+      # Logger estruturado (JSON por linha) com redação de campos sensíveis: valores de chaves com nome
+      # sensível são substituídos, e senhas em URLs (postgres://usuario:senha@...) ou em parâmetros de
+      # conexão (password=...) são mascaradas em qualquer texto, inclusive mensagens de erro.
       class StructuredLogger
         LEVELS = { "debug" => 0, "info" => 1, "warn" => 2, "error" => 3 }.freeze
-        SENSITIVE = /pass(word)?|senha|token|secret|segredo|authorization|cookie|csrf|api[_-]?key|card|cvv|pan|access[_-]?token/i
+        SENSITIVE = /pass(word)?|senha|token|secret|segredo|authorization|cookie|csrf|api[_-]?key|card|cvv|(?:\A|_)pan(?:_|\z)|access[_-]?token/i
+        URL_PASSWORD = %r{(\b[a-z][a-z0-9+.-]*://[^/\s:@]*):[^@\s/]*@}i
+        CONNINFO_PASSWORD = /\bpassword\s*=\s*('[^']*'|\S+)/i
         REDACTED = "[REDACTED]"
 
         def initialize(io: $stdout, level: "info", base: {})
@@ -34,9 +38,15 @@ module Locentra
           case value
           when Hash then value.to_h { |k, v| [k, redact(v, k)] }
           when Array then value.map { |v| redact(v) }
-          when String then value.length > 4000 ? "#{value[0, 4000]}…" : value
+          when String then scrub(value.length > 4000 ? "#{value[0, 4000]}…" : value)
           else value
           end
+        end
+
+        def self.scrub(text)
+          return text unless text.include?("@") || text.match?(/password/i)
+
+          text.gsub(URL_PASSWORD, "\\1:#{REDACTED}@").gsub(CONNINFO_PASSWORD, "password=#{REDACTED}")
         end
 
         private
