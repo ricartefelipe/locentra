@@ -5,16 +5,18 @@
 
 ## Última verificação completa
 
-Executada na integração do PR #9 (código idêntico ao de `develop` após o merge; esta branch acrescenta
-apenas documentação e scripts operacionais):
+Executada na branch `release/1.0.0`, depois das correções da estabilização (segurança das rotas públicas,
+webhooks, fila, financeiro, backup, configuração e interface), em 20/11/2026:
 
 | Verificação | Resultado |
 |---|---|
-| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 553 testes, 0 falhas |
-| Cobertura de domínio + aplicação | 99,05% de linhas, 92,01% de branches (metas 90% / 80%) |
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 623 testes, 0 falhas |
+| Cobertura de domínio + aplicação | 99,10% de linhas, 92,10% de branches (metas 90% / 80%) |
 | `rake test:browser` (Ferrum, Chrome headless) | 9 testes, 0 falhas |
-| `rubocop`, actionlint | sem ofensas |
-| CI do PR #9 | 7 checks aprovados (análise, segredos, unitários, PostgreSQL, navegador, reconstrução do banco, imagem) |
+| `rubocop` (árvore da branch, com os modos de arquivo do repositório), actionlint | sem ofensas |
+| Backup e restauração com o esquema final (14 migrations) | exercitados; registro em `RUNBOOKS.md` |
+
+Verificação anterior, na integração do PR #9: 553 testes, 0 falhas; 7 checks de CI aprovados.
 
 ## Entregas por incremento
 
@@ -29,7 +31,8 @@ apenas documentação e scripts operacionais):
 | #7 | Portal do cliente | Integrado e testado |
 | #8 | CLI operacional e correção do detalhe de reserva na API | Integrado e testado |
 | #9 | Testes de navegador, métricas, correlação de logs, demonstração de ponta a ponta | Integrado e testado |
-| esta branch | Documentação consolidada, backup e restauração, publicação de imagem por tag | Backup e restauração exercitados (ver `RUNBOOKS.md`) |
+| #10 | Documentação consolidada, backup e restauração, publicação de imagem por tag | Integrado; backup e restauração exercitados (ver `RUNBOOKS.md`) |
+| release/1.0.0 | Estabilização: correções de segurança, concorrência, operação, documentação e interface | Testado (ver acima) |
 
 ## Casos obrigatórios cobertos por testes
 
