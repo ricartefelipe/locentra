@@ -3,6 +3,7 @@
 require_relative "integration_helper"
 require_relative "../support/worker_support"
 require_relative "../support/barrier"
+require "tmpdir"
 
 class WorkerTest < DatabaseTest
   include WorkerHelpers
@@ -216,6 +217,22 @@ class WorkerTest < DatabaseTest
 
     assert_operator events.fetch("worker.thread_crashed"), :<=, 9, events.inspect
     assert_operator events.fetch("worker.scheduler_failed"), :<=, 3, events.inspect
+  end
+
+  # Healthcheck do contêiner do worker (bin/worker --check): arquivo de vida atualizado pela thread de
+  # heartbeat, considerado vencido depois de 90 s sem atualização.
+  def test_heartbeat_thread_keeps_the_health_file_fresh
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "vida", "worker.alive")
+      alive = Locentra::Interfaces::Worker::Runner.new(system: worker_system, handlers: nil, concurrency: 0, webhook_concurrency: 0,
+                                                       logger: worker_system.logger, scheduler: false, health_file: path)
+      threads = alive.start_threads
+
+      assert Locentra::Interfaces::Worker::Runner.alive?(path)
+      refute Locentra::Interfaces::Worker::Runner.alive?(path, now: File.mtime(path) + 91)
+      refute Locentra::Interfaces::Worker::Runner.alive?(File.join(dir, "inexistente"))
+      alive.stop(threads, timeout: 2)
+    end
   end
 
   def test_unknown_job_kind_fails_permanently

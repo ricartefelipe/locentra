@@ -78,6 +78,8 @@ services:
       - "127.0.0.1:9292:9292"
     volumes:
       - storage:/app/storage
+    # Acima dos 25 s de encerramento gracioso do Puma (worker_shutdown_timeout).
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,6 +92,16 @@ services:
     environment: *app-env
     volumes:
       - storage:/app/storage
+    # O worker não serve HTTP: o healthcheck da imagem (liveness do web) é substituído pelo arquivo de
+    # vida atualizado pela thread de heartbeat.
+    healthcheck:
+      test: ["CMD", "ruby", "bin/worker", "--check"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # Acima dos 25 s que o Runner espera as tarefas em execução ao receber TERM.
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy

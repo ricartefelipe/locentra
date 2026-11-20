@@ -3,14 +3,20 @@
 Cada procedimento indica se foi **exercitado** (executado de ponta a ponta com resultado registrado) ou se é
 **procedimento escrito** (ainda não executado em ambiente real).
 
-## 1. Subir o ambiente local — exercitado
+## 1. Subir o ambiente local — procedimento escrito (o healthcheck do worker mudou depois do último exercício)
 
 ```bash
 bin/setup        # build, PostgreSQL + Mailpit, migrations, seed, web e worker
 ```
 
 Verificar: `curl -fsS localhost:9292/health/live` e `localhost:9292/health/ready` (200 com banco e migrations
-em dia; 503 caso contrário). Mailpit em `localhost:8025`.
+em dia; 503 caso contrário); `docker compose ps` com web e worker `healthy`. Mailpit em `localhost:8025`.
+
+O healthcheck da imagem consulta `/health/live` e vale para o processo web. O worker não serve HTTP: o
+serviço `worker` do Compose usa `ruby bin/worker --check`, que confere o arquivo de vida
+(`WORKER_HEALTH_FILE`, padrão `/app/tmp/worker.alive`) atualizado a cada 20 s pela thread de heartbeat
+(vencido após 90 s). Em outro orquestrador, configure o mesmo comando como liveness do worker. Web e worker
+têm `stop_grace_period` de 30 s, acima dos 25 s de encerramento gracioso de cada um.
 
 ## 2. Aplicar migrations — exercitado (CI "Reconstrução do banco e seed" a cada PR)
 

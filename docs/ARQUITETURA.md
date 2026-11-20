@@ -106,7 +106,9 @@ rede nunca ocorrem com transação aberta.
   `WORKER_CONCURRENCY + WEBHOOK_CONCURRENCY + 2` conexões; encerramento gracioso em TERM/INT. As entregas
   de webhook vão para fila própria: um destino lento ocupa somente as threads dessa fila, nunca as de
   e-mails, pagamentos e varreduras. Cada entrega tem prazo total de 15 s e lê no máximo 4 KiB da resposta.
-  Banco indisponível faz os laços esperarem com backoff exponencial limitado a 30 s.
+  Banco indisponível faz os laços esperarem com backoff exponencial limitado a 30 s. Sinal de vida próprio:
+  a thread de heartbeat atualiza `WORKER_HEALTH_FILE`, conferido por `bin/worker --check` (healthcheck do
+  serviço no Compose).
 - Toda exclusão entre processos é feita no banco (locks de linha, exclusion constraints, advisory locks,
   `SKIP LOCKED`, chaves únicas); mutex local é usado apenas para estruturas em memória do processo.
 - Limites: não há medições de desempenho publicadas; o dimensionamento acima é a regra de configuração,

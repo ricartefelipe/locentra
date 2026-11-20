@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require_relative "handlers"
 
 module Locentra
@@ -20,13 +21,22 @@ module Locentra
       #   destino lento ocupa somente essas threads, nunca as de e-mails, pagamentos e varreduras.
       # - Falha de infraestrutura (banco indisponível) nos laços espera com backoff exponencial
       #   limitado antes de tentar de novo, com log a cada potência de 2 de falhas seguidas.
+      # - Sinal de vida próprio (o worker não serve HTTP): a thread de heartbeat atualiza
+      #   `health_file` a cada ciclo; `bin/worker --check` confere a idade do arquivo.
       class Runner
         SCHEDULE_INTERVAL = 30
+        HEARTBEAT_INTERVAL = 20
+        HEALTH_MAX_AGE = 90
         WEBHOOK_QUEUE = "webhooks"
         MAX_FAILURE_PAUSE = 30
 
+        # Verdadeiro quando o arquivo de vida foi atualizado há menos de `max_age` segundos.
+        def self.alive?(path, now: Time.now, max_age: HEALTH_MAX_AGE)
+          File.exist?(path) && now - File.mtime(path) < max_age
+        end
+
         def initialize(system:, handlers:, concurrency:, logger:, poll_interval: 1.0, queues: ["default"], webhook_concurrency: 1,
-                       scheduler: true)
+                       scheduler: true, health_file: nil)
           @system = system
           @handlers = handlers
           @concurrency = concurrency
@@ -35,6 +45,7 @@ module Locentra
           @lanes = [[queues, concurrency], [[WEBHOOK_QUEUE], webhook_concurrency]].reject { |_, threads| threads.zero? }
           @queues = @lanes.flat_map(&:first).uniq
           @scheduler = scheduler
+          @health_file = health_file
           @wakeup = Thread::Queue.new
           @running = {}
           @running_mutex = Thread::Mutex.new
@@ -55,6 +66,7 @@ module Locentra
         end
 
         def start_threads
+          beat
           workers = @lanes.flat_map { |queues, threads| Array.new(threads) { queues } }.each_with_index.map do |queues, i|
             Thread.new { work_loop(i, queues) }
           end
@@ -113,7 +125,8 @@ module Locentra
 
         def heartbeat_loop
           resilient("worker.heartbeat_failed") do
-            @wakeup.pop(timeout: 20)
+            @wakeup.pop(timeout: HEARTBEAT_INTERVAL)
+            beat
             jobs = @running_mutex.synchronize { @running.values }
             jobs.each do |job|
               renewed = @system.transactor.call { |tx| @system.queue.heartbeat(tx, job) }
@@ -146,6 +159,13 @@ module Locentra
               @wakeup.pop(timeout: [2**[failures - 1, 5].min, MAX_FAILURE_PAUSE].min)
             end
           end
+        end
+
+        def beat
+          return unless @health_file
+
+          FileUtils.mkdir_p(File.dirname(@health_file))
+          FileUtils.touch(@health_file)
         end
 
         # Chaves únicas por janela de tempo: vários workers agendando ao mesmo tempo geram uma tarefa.
