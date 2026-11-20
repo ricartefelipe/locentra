@@ -135,12 +135,7 @@ module Locentra
 
           def discount_bps(value) = percent_bps(value, "desconto")
 
-          def percent_text(bps)
-            return "" if bps.zero?
-
-            whole, fraction = bps.divmod(100)
-            fraction.zero? ? whole.to_s : format("%<whole>d,%<fraction>02d", whole: whole, fraction: fraction)
-          end
+          def percent_text(bps) = bps.zero? ? "" : Domain::Percent.value(bps)
         end
       end
     end

@@ -45,7 +45,7 @@
 </fieldset>
 <div><label for="desconto">Desconto manual (%)</label><input id="desconto" name="desconto" inputmode="decimal" value="<%= @values["desconto"] %>"<%= invalid(@errors, "desconto") %>>
   <%= field_errors(@errors, "desconto") %>
-  <p class="muted">Limite do seu papel: <%= Locentra::Domain::Identity.discount_limit_bps(request.actor.role) / 100 %>%. Cupons não se aplicam a orçamentos.</p></div>
+  <p class="muted">Limite do seu papel: <%= percent(Locentra::Domain::Identity.discount_limit_bps(request.actor.role)) %>. Cupons não se aplicam a orçamentos.</p></div>
 <div class="full"><label for="condicoes">Condições e termos do orçamento</label>
   <textarea id="condicoes" name="condicoes" rows="4" maxlength="5000"<%= invalid(@errors, "condicoes") %>><%= @values["condicoes"] %></textarea>
   <p class="muted">Os preços são calculados com a tabela vigente e ficam congelados nesta versão.</p></div>

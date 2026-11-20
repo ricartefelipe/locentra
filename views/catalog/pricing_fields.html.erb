@@ -24,7 +24,7 @@
       <label for="faixa_minimo_<%= i %>">A partir de</label>
       <input id="faixa_minimo_<%= i %>" name="faixa_minimo[]" type="number" min="2" value="<%= tiers[i] && tiers[i]["min_quantity"] %>">
       <label for="faixa_desconto_<%= i %>">Desconto (%)</label>
-      <input id="faixa_desconto_<%= i %>" name="faixa_desconto[]" inputmode="decimal" value="<%= tiers[i] && (tiers[i]["discount_bps"] / 100.0) %>">
+      <input id="faixa_desconto_<%= i %>" name="faixa_desconto[]" inputmode="decimal" value="<%= tiers[i] && percent_value(tiers[i]["discount_bps"]) %>">
     </div>
   <% end %>
 </fieldset>

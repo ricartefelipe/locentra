@@ -149,6 +149,10 @@ module Locentra
         # Rótulo em português de um código interno (ver Labels::GROUPS).
         def label(group, value) = Labels.label(group, value)
 
+        # Percentual a partir de pontos-base, com aritmética inteira (Domain::Percent).
+        def percent(bps) = Domain::Percent.label(bps)
+        def percent_value(bps) = Domain::Percent.value(bps)
+
         def asset_status(status) = Domain::Catalog::ASSET_STATUSES.fetch(status.to_s) { Labels.label(:field, status) }
 
         def status_badge(status, label)

@@ -51,7 +51,7 @@
     </fieldset>
     <div><label for="cupom">Cupom</label><input id="cupom" name="cupom" value="<%= @values["cupom"] %>"<%= invalid(@errors, "cupom") %>><%= field_errors(@errors, "cupom") %></div>
     <div><label for="desconto">Desconto manual (%)</label><input id="desconto" name="desconto" inputmode="decimal" value="<%= @values["desconto"] %>">
-      <p class="muted">Limite do seu papel: <%= Locentra::Domain::Identity.discount_limit_bps(request.actor.role) / 100.0 %>%</p></div>
+      <p class="muted">Limite do seu papel: <%= percent(Locentra::Domain::Identity.discount_limit_bps(request.actor.role)) %></p></div>
     <div class="full"><label for="observacoes">Observações</label><textarea id="observacoes" name="observacoes" rows="2"><%= @values["observacoes"] %></textarea></div>
     <div class="full actions"><button type="submit" class="primary">Registrar reserva</button> <a href="/reservas">Cancelar</a></div>
   </form>
