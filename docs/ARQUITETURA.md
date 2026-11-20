@@ -1,68 +1,124 @@
 # Arquitetura do Locentra
 
-Monólito modular com arquitetura hexagonal pragmática. Este documento evolui junto com o código;
-o estado de cada parte está em `docs/STATUS.md`.
+Monólito modular com arquitetura hexagonal pragmática, escrito em Ruby 4.0.9 sem framework de aplicação
+e sem ORM. Estado de implementação em [`STATUS.md`](STATUS.md); decisões em [`DECISOES.md`](DECISOES.md).
+
+## C4 — Contexto
+
+```mermaid
+flowchart LR
+  equipe["Equipe da locadora<br/>(proprietário, gerente, atendente,<br/>estoque, financeiro, auditor)"]
+  cliente["Cliente da locadora<br/>(portal)"]
+  integra["Sistemas da locadora<br/>(ERP, BI) via API e webhooks"]
+  locentra(["Locentra<br/>gestão de locações e ativos"])
+  smtp["Servidor SMTP<br/>(Mailpit no ambiente local)"]
+  pag["Provedor de pagamentos<br/>(simulador local / Asaas sandbox)"]
+  equipe -- "interface web" --> locentra
+  cliente -- "portal web" --> locentra
+  integra -- "API v1 (Bearer, idempotência)" --> locentra
+  locentra -- "webhooks assinados" --> integra
+  locentra -- "e-mails transacionais" --> smtp
+  locentra -- "cobranças, consultas, estornos" --> pag
+  pag -- "webhooks de pagamento" --> locentra
+```
+
+## C4 — Contêineres
+
+```mermaid
+flowchart TB
+  subgraph locentra[Locentra]
+    web["Processo web<br/>Puma + aplicação Rack<br/>(interface, portal, API, webhooks recebidos)"]
+    worker["Worker<br/>bin/worker: fila com lease,<br/>agendador, e-mails, webhooks, pagamentos"]
+    cli["CLI<br/>bin/locentra (operacional)<br/>bin/locentra-admin (banco)"]
+    db[("PostgreSQL 18<br/>RLS forçada, exclusion constraints,<br/>fila, outbox, auditoria")]
+    files[("Armazenamento de anexos<br/>(local, fora do diretório público)")]
+  end
+  web -- "locentra_app" --> db
+  cli -- "locentra_app / locentra_owner (migrations)" --> db
+  worker -- "locentra_worker" --> db
+  web --> files
+  worker --> files
+  worker -- SMTP --> smtp[(SMTP)]
+  worker -- HTTPS --> pag[(Provedor de pagamentos)]
+  worker -- "HTTPS (proteção SSRF)" --> hooks[(Destinos de webhook)]
+```
 
 ## Camadas
 
-| Camada | Diretório | Responsabilidade | Pode depender de |
+| Camada | Diretório | Responsabilidade | Depende de |
 |---|---|---|---|
-| Domínio | `lib/locentra/domain` | Entidades, value objects, máquinas de estado e regras puras | stdlib, tzinfo |
-| Aplicação | `lib/locentra/application` | Casos de uso: autorização, coordenação de domínio, transações e portas | Domínio |
-| Infraestrutura | `lib/locentra/infrastructure` | PostgreSQL, pool, repositórios SQL, fila, e-mail, PDF, arquivos, provedores | Domínio, Aplicação |
-| Interfaces | `lib/locentra/interfaces/{http,cli}` | Rack/Puma, API, interface web, CLI | Aplicação |
-| Composição | `lib/locentra/system.rb` | Composition root: monta dependências a partir da configuração | Todas |
+| Domínio | `lib/locentra/domain` | Entidades, value objects (`Money`, `Period`, `TimeZone`), máquinas de estado, regras puras | stdlib, tzinfo |
+| Aplicação | `lib/locentra/application` | Casos de uso: autorização, coordenação do domínio, transações, portas | Domínio |
+| Infraestrutura | `lib/locentra/infrastructure` | PostgreSQL, pool, repositórios SQL, fila, SMTP, PDF, armazenamento, provedores, HTTP seguro | Domínio, Aplicação |
+| Interfaces | `lib/locentra/interfaces/{http,cli,worker}` | Rack/Puma, interface web, portal, API, CLI, worker | Aplicação |
+| Composição | `lib/locentra/system.rb` | Composition root explícito; nenhuma conexão aberta na montagem | Todas |
 
-Carregar `locentra/domain` não abre conexões, não inicia threads e não lê variáveis de ambiente.
+Carregar `locentra/domain` não abre conexões, não inicia threads e não lê variáveis de ambiente. A suíte
+unitária carrega apenas domínio e aplicação.
 
-## Motor de disponibilidade (domínio)
+## Contextos
 
-- `Period`: intervalo `[início, fim)` em UTC; períodos adjacentes não se sobrepõem.
-- `Availability::Peak`: ocupação máxima simultânea por varredura de eventos, recortada à janela
-  consultada. Em empates, saídas são processadas antes de entradas.
-- `Availability::StockLedger`: capacidade de estoque quantitativo; disponível = capacidade − pico.
-- `Availability::AssetSchedule`/`AssetPicker`: ativos individuais livres na janela, considerando
-  bloqueios operacionais (inspeção, manutenção, trânsito) e seleção determinística sem repetição.
-- `Availability::DemandExpander`: expande kits em componentes e agrega a demanda por produto físico,
-  para que o mesmo componente pedido por caminhos diferentes seja verificado contra uma única capacidade.
-
-As garantias sob concorrência ficam no PostgreSQL (seção a ser detalhada com a fatia de reservas).
+| Contexto | Domínio | Casos de uso | Documentação |
+|---|---|---|---|
+| Organizações e identidade | `identity.rb`, `organizations.rb` | `identity.rb`, `organizations.rb`, `integrations.rb` | [Permissões](PERMISSOES.md), [Isolamento](ISOLAMENTO.md) |
+| Clientes | `customers.rb` | `customers.rb` | — |
+| Catálogo e ativos | `catalog.rb` | `catalog.rb` | [Máquinas de estado](MAQUINAS-DE-ESTADO.md) |
+| Disponibilidade e reservas | `availability.rb`, `reservations.rb` | `availability.rb`, `reservations.rb` | [Motor de disponibilidade](DISPONIBILIDADE.md) |
+| Precificação | `pricing.rb` | `reservations.rb` (`Pricer`) | [Precificação](PRECIFICACAO.md) |
+| Orçamentos e contratos | `quotes.rb`, `contracts.rb` | `quotes.rb`, `contracts.rb` | [Módulo](modulos/orcamentos-contratos.md) |
+| Retirada, devolução, manutenção | `fulfillment.rb`, `maintenance.rb`, `transfers.rb`, `alerts.rb` | `fulfillment.rb`, `returns.rb`, `inspections.rb`, `maintenance.rb`, `transfers.rb`, `overdue.rb` | [Módulo](modulos/retirada-devolucao-manutencao.md) |
+| Financeiro e cauções | `finance/*` | `finance/*` | [Módulo](modulos/financeiro.md), [Caução](CAUCAO.md) |
+| Portal do cliente | `portal.rb` | `portal.rb` | [Módulo](modulos/portal-cliente.md) |
+| Notificações e integrações | — | `notifications.rb`, `webhooks.rb`, `attachments.rb`, `external_calls.rb` | ADR-020 a ADR-022 |
+| CLI operacional | — | `integrations.rb`, `jobs.rb` | [Módulo](modulos/cli-operacional.md) |
+| Observabilidade e navegador | — | métricas e correlação | [Módulo](modulos/navegador-observabilidade.md) |
+| Auditoria | — | `AuditTrail` em `base.rb` | — |
+| Assinaturas da plataforma | — | `PlanLimits` em `organizations.rb` | ADR-012 |
 
 ## Persistência e transações
 
-- `Infrastructure::Database::ConnectionPool`: pool por processo (gem `connection_pool`), conexões
-  criadas sob demanda, descarte das herdadas após fork, `ROLLBACK` defensivo e descarte de conexões
-  quebradas na devolução, `statement_timeout` e `idle_in_transaction_session_timeout`.
-- `Transactor`: abre a transação, define `app.tenant_id`/`app.user_id` com escopo local, repete em
-  deadlock ou falha de serialização e proíbe transações aninhadas na mesma thread.
-- `Transaction`: SQL parametrizado (`exec_params`), codificação explícita de parâmetros, tradução de
-  violações de constraint para erros de domínio, savepoints e ações pós-commit.
-- Repositórios em `infrastructure/persistence` mapeiam linhas para entidades explicitamente.
-  Ordenação e filtros dinâmicos usam allowlist; buscas escapam curingas de `LIKE`.
+- `ConnectionPool`: pool por processo (gem `connection_pool`), conexões sob demanda, descarte das herdadas
+  após fork, `ROLLBACK` defensivo e descarte de conexões quebradas na devolução; `statement_timeout` e
+  `idle_in_transaction_session_timeout`.
+- `Transactor`: abre a transação, define `app.tenant_id`/`app.user_id` com escopo local, repete em deadlock
+  ou falha de serialização e proíbe transações aninhadas na mesma thread (composição por `tx:`; rollback
+  parcial por `savepoint`).
+- Repositórios recebem a transação como primeiro argumento e nunca acessam o pool; SQL parametrizado,
+  ordenação e filtros por allowlist, mapeamento explícito para entidades.
+- Migrations SQL versionadas com checksum e `pg_advisory_lock`, executadas com credencial própria.
 
-## Isolamento entre organizações
+Modelo de dados em [`MODELO-DE-DADOS.md`](MODELO-DE-DADOS.md).
 
-1. O tenant vem do ator autenticado (sessão, credencial ou portal), nunca de parâmetros.
-2. `UnitOfWork` revalida o vínculo na transação e autoriza pela matriz de permissões.
-3. Consultas filtram `organization_id` explicitamente.
-4. RLS forçada em todas as tabelas de tenant, com papéis sem `BYPASSRLS`.
-5. Chaves estrangeiras compostas impedem referências entre organizações.
-6. Recursos de outro tenant retornam "não encontrado" (sem enumeração).
+## Processamento assíncrono
 
-## Garantias de disponibilidade sob concorrência
+Fila no PostgreSQL (`jobs`) com prioridade, agendamento, tentativas, backoff, lease com token de fencing,
+recuperação de leases vencidos e histórico (`job_attempts`). Eventos de negócio são gravados na outbox na
+mesma transação da alteração, com a tarefa de despacho enfileirada atomicamente. O despacho fan-out gera
+entregas de webhook (únicas por endpoint e evento), e-mails e tarefas de assinantes (financeiro). Chamadas de
+rede nunca ocorrem com transação aberta.
 
-| Recurso | Mecanismo | Efeito |
-|---|---|---|
-| Ativo individual | Exclusion constraint em `asset_allocations` | Duas alocações ativas do mesmo ativo não podem se sobrepor; a segunda transação recebe violação e tenta outra unidade livre |
-| Estoque quantitativo | `SELECT ... FOR UPDATE` no `stock_pools`, em ordem de id | Cálculo de pico e inserção serializados por estoque |
-| Bloqueio temporário | Lock da reserva + comparação com `hold_expires_at` | Confirmação e expiração concorrentes têm resultado determinístico |
-| Varredura de expiração | `FOR UPDATE SKIP LOCKED` | Não disputa reservas em confirmação |
-| Contador de códigos | Atualização no fechamento da transação | Não serializa alocações |
+## Execução e concorrência
+
+- **Web:** Puma com `PUMA_THREADS` threads por processo e `WEB_CONCURRENCY` processos; sem `preload_app`,
+  de modo que cada processo monta o próprio `System` depois do fork. `DB_POOL_SIZE` ≥ `PUMA_THREADS`.
+- **Worker:** `WORKER_CONCURRENCY` threads de execução + thread de heartbeat + thread de agendamento;
+  pool com `WORKER_CONCURRENCY + 2` conexões; encerramento gracioso em TERM/INT.
+- Toda exclusão entre processos é feita no banco (locks de linha, exclusion constraints, advisory locks,
+  `SKIP LOCKED`, chaves únicas); mutex local é usado apenas para estruturas em memória do processo.
+- Limites: não há medições de desempenho publicadas; o dimensionamento acima é a regra de configuração,
+  não uma promessa de vazão.
 
 ## Camada HTTP
 
-Aplicação Rack explícita (`interfaces/http/app.rb`): `RequestLogger` (request id, log estruturado e
-métricas por rota modelo) → `Rack::Static` → `BodyLimit` → `SecurityHeaders` (CSP sem
-`unsafe-inline`) → roteador com tabela explícita → autenticação por modo (`public`, `login`,
-`session`, `portal`, `api`) → CSRF → controlador → erros centralizados (HTML ou JSON estruturado).
-Templates ERB compilados uma vez, com escape automático. JavaScript em módulos ES sem scripts inline.
+`RequestLogger` (request id, log estruturado, métricas por rota modelo) → `Rack::Static` → `BodyLimit` →
+`SecurityHeaders` (CSP sem `unsafe-inline`, HSTS em produção) → roteador com tabela explícita →
+autenticação por modo (`public`, `login`, `session`, `portal`, `api`, `staff_or_portal`) → CSRF →
+controlador → erros centralizados (HTML ou JSON estruturado com `request_id`). Templates ERB compilados uma
+vez, com escape automático; JavaScript em módulos ES sem scripts inline. API v1 documentada em
+[`openapi.yaml`](openapi.yaml), com idempotência por chave, escopo e fingerprint.
+
+## Observabilidade
+
+Logs JSON por linha com redação de campos sensíveis e correlação por `request_id` (requisição → outbox →
+tarefa → operação externa). Métricas Prometheus em `/metrics` (protegido por `METRICS_TOKEN` quando
+definido) com rótulos de baixa cardinalidade. `/health/live` e `/health/ready` (banco e migrations).
