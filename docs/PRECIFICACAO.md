@@ -41,6 +41,11 @@ organização; os planos da plataforma são hipóteses de produto.
 
 ## Composição do total
 
+> Na versão 1.0.0, cupons (passo 5), condições negociadas (passo 3) e tarifas adicionais (passo 7) são
+> calculados pelo motor e cobertos por testes, mas não há tela, API nem comando para cadastrá-los ou
+> informá-los; o campo "Cupom" da nova reserva só aceita cupons já existentes no banco. Ver
+> [`STATUS.md`](STATUS.md).
+
 1. Linha = preço unitário × quantidade.
 2. Desconto da faixa de quantidade (maior faixa atingida).
 3. Condição negociada do cliente (`customer_price_agreements`, por produto ou geral, maior vigente).

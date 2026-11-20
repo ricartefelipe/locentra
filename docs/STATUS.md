@@ -52,6 +52,11 @@ contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
 - Métricas de duração de tarefas e de chamadas externas ficam no processo do worker; com vários processos
   Puma o coletor precisa somar as séries.
 - Sem API v1 para orçamentos, contratos, operação e portal (disponíveis pela interface e casos de uso).
+- Cupons, condições negociadas por cliente e tarifas adicionais: o motor de preços os aplica
+  (`Domain::Pricing`, `Reservations::Pricer`) e há testes, mas não existe caso de uso, tela, endpoint nem
+  comando para cadastrar cupons e condições ou informar tarifas na reserva. Numa instalação nova, o campo
+  "Cupom" da reserva responde "cupom inexistente". Fica para uma versão com funcionalidade nova (branches
+  `release/*` aceitam somente correções).
 - Sem medições de desempenho publicadas.
 - Proteções de branch exigem os checks; aprovação de revisão não é exigida porque o repositório tem um único
   mantenedor (revisões independentes não são simuladas).
