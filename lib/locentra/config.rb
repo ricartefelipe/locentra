@@ -11,7 +11,7 @@ module Locentra
   SMTP_AUTH_METHODS = %w[plain login cram_md5].freeze
 
   # Configuração lida do ambiente somente quando o sistema é montado (nunca ao carregar o domínio).
-  Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :database_url, :worker_database_url,
+  Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :previous_encryption_keys, :database_url, :worker_database_url,
                        :migration_database_url, :pool_size, :pool_timeout, :worker_concurrency, :webhook_concurrency, :log_level, :smtp,
                        :payment_providers, :asaas_base_url, :storage_root, :max_upload_bytes, :bcrypt_cost,
                        :metrics_token, :trusted_proxies, :api_rate_limit, :worker_health_file) do
@@ -22,6 +22,7 @@ module Locentra
         base_url: env.fetch("APP_BASE_URL", "http://localhost:9292"),
         secret_key_base: env["APP_SECRET_KEY_BASE"],
         encryption_key: env["APP_ENCRYPTION_KEY"],
+        previous_encryption_keys: list(env["APP_ENCRYPTION_KEY_PREVIOUS"]),
         database_url: env["DATABASE_URL"],
         worker_database_url: env["WORKER_DATABASE_URL"],
         migration_database_url: env["MIGRATION_DATABASE_URL"],
@@ -61,12 +62,14 @@ module Locentra
       }.freeze
     end
 
+    def self.list(text) = text.to_s.split(",").map(&:strip).reject(&:empty?).freeze
+
     # Provedores de pagamento que as organizações podem configurar neste processo. A chave de cada
     # conta é cadastrada por organização (Financeiro → Provedor), nunca no ambiente. O simulador
     # confirma pagamentos sem dinheiro real: fora da lista padrão de produção.
     def self.payment_providers(text, app_env)
       default = app_env == "production" ? "asaas" : PAYMENT_PROVIDER_NAMES.join(",")
-      (text.to_s.strip.empty? ? default : text).split(",").map(&:strip).reject(&:empty?).uniq.freeze
+      list(text.to_s.strip.empty? ? default : text).uniq.freeze
     end
 
     # Endereços (IP ou CIDR, separados por vírgula) dos proxies reversos cujo X-Forwarded-For é

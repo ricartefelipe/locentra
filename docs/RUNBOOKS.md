@@ -142,12 +142,19 @@ tentativa permitida termina `dead`.
 - Credencial de API/CLI: Usuários e permissões → Revogar. Requisições seguintes recebem 401.
 - Sessões de um usuário: redefinição de senha revoga todas as sessões.
 
-## 8. Rotação de segredos — procedimento escrito
+## 8. Rotação de segredos — procedimento escrito (rotação da chave de cifragem coberta por teste de integração)
 
 - `APP_SECRET_KEY_BASE`: rotacionar invalida apenas mensagens de retorno (flash) em trânsito.
-- `APP_ENCRYPTION_KEY`: decifrar os segredos de webhook e chaves de provedor com a chave antiga e cifrar com a
-  nova em uma migração de dados controlada antes de trocar a variável (sem isso, entregas de webhook e
-  chamadas ao provedor falham com erro de decifragem, sem expor dados).
+- `APP_ENCRYPTION_KEY` (segredos de webhook e chaves de API dos provedores, AES-256-GCM):
+  1. Gere a chave nova e configure web e worker com `APP_ENCRYPTION_KEY=<nova>` e
+     `APP_ENCRYPTION_KEY_PREVIOUS=<antiga>`; reinicie. Valores novos já saem com a chave nova e os antigos
+     continuam legíveis, sem interromper entregas de webhook nem chamadas ao provedor.
+  2. Regrave todos os segredos com a chave nova (percorre as organizações com o papel do worker; idempotente):
+     `docker compose run --rm --no-deps worker ruby bin/locentra-admin secrets:reencrypt --json`
+     (o serviço worker já tem `WORKER_DATABASE_URL` e as duas chaves).
+  3. Remova `APP_ENCRYPTION_KEY_PREVIOUS` e reinicie. A chave antiga não decifra mais nada; descarte-a.
+  Em caso de comprometimento, siga os mesmos passos imediatamente e, em seguida, troque os segredos de
+  webhook (novo endpoint) e as chaves de API no provedor, porque os valores antigos podem ter sido lidos.
 - Senhas dos papéis do banco: `ALTER ROLE ... PASSWORD` e atualização das URLs; reiniciar processos.
 
 ## 9. Dimensionamento de conexões — procedimento escrito

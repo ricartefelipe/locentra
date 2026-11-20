@@ -16,7 +16,8 @@ module Locentra
         COMMANDS = {
           "db:migrate" => "Aplica migrations pendentes (exclusão mútua por advisory lock)",
           "db:status" => "Lista migrations aplicadas, pendentes e com checksum divergente",
-          "db:seed" => "Carrega dados demonstrativos idempotentes (duas organizações); recusado com APP_ENV=production"
+          "db:seed" => "Carrega dados demonstrativos idempotentes (duas organizações); recusado com APP_ENV=production",
+          "secrets:reencrypt" => "Regrava com APP_ENCRYPTION_KEY os segredos cifrados (usa WORKER_DATABASE_URL e APP_ENCRYPTION_KEY_PREVIOUS)"
         }.freeze
 
         def initialize(env: ENV, out: $stdout, err: $stderr)
@@ -77,6 +78,7 @@ module Locentra
           when "db:migrate" then db_migrate(options)
           when "db:status" then db_status(options)
           when "db:seed" then db_seed(options)
+          when "secrets:reencrypt" then secrets_reencrypt(options)
           end
         end
 
@@ -118,6 +120,29 @@ module Locentra
           0
         ensure
           system&.shutdown
+        end
+
+        # Rotação de APP_ENCRYPTION_KEY (docs/RUNBOOKS.md, seção 8): com a chave nova em
+        # APP_ENCRYPTION_KEY e a antiga em APP_ENCRYPTION_KEY_PREVIOUS, regrava todos os segredos com a
+        # chave nova. Usa o papel do worker, que percorre as organizações com o contexto de tenant.
+        def secrets_reencrypt(options)
+          url = @env["WORKER_DATABASE_URL"].to_s
+          raise ConfigError, "WORKER_DATABASE_URL não definido" if url.empty?
+
+          box = secret_box
+          metrics = Infrastructure::Observability::Metrics.new
+          pool = Infrastructure::Database::ConnectionPool.new(url: url, size: 1, timeout: 5, name: "admin", metrics: metrics)
+          totals = Infrastructure::SecretRotation.new(transactor: Infrastructure::Database::Transactor.new(pool: pool, metrics: metrics), box: box).call
+          emit(options, totals, "Segredos regravados com a chave atual: #{totals.map { |table, n| "#{table} #{n}" }.join(", ")}")
+          0
+        ensure
+          pool&.shutdown
+        end
+
+        def secret_box
+          Infrastructure::SecretBox.new(@env["APP_ENCRYPTION_KEY"], previous: Config.list(@env["APP_ENCRYPTION_KEY_PREVIOUS"]))
+        rescue ArgumentError
+          raise ConfigError, "APP_ENCRYPTION_KEY e APP_ENCRYPTION_KEY_PREVIOUS devem ter ao menos 16 caracteres"
         end
 
         def emit(options, data, text)

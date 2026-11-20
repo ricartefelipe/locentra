@@ -79,7 +79,7 @@ module Locentra
         pricer: A::Reservations::Pricer.new(pricing: repos[:pricing]),
         pricing_rules: Domain::Pricing::Rules.new,
         mailer: @mailer, http: @http,
-        box: I::SecretBox.new(config.encryption_key),
+        box: I::SecretBox.new(config.encryption_key, previous: config.previous_encryption_keys),
         storage: I::Storage::Local.new(root: config.storage_root),
         mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__)),
         contract_renderer: I::Documents::ContractPdf.new,

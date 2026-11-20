@@ -114,6 +114,21 @@ class SecurityAdaptersTest < UnitTest
     assert_raises(ArgumentError) { I::SecretBox.new("curta") }
   end
 
+  def test_secret_box_rotation_decrypts_with_previous_keys_and_encrypts_with_the_current
+    old = I::SecretBox.new("chave-antiga-com-tamanho-suficiente")
+    sealed = old.encrypt("whsec_segredo")
+    rotated = I::SecretBox.new("chave-nova-com-tamanho-suficiente", previous: ["chave-antiga-com-tamanho-suficiente"])
+
+    assert_equal "whsec_segredo", rotated.decrypt(sealed)
+    refute rotated.current?(sealed)
+    resealed = rotated.reencrypt(sealed)
+
+    assert rotated.current?(resealed)
+    assert_equal "whsec_segredo", I::SecretBox.new("chave-nova-com-tamanho-suficiente").decrypt(resealed)
+    assert_raises(ArgumentError) { old.decrypt(resealed) }
+    assert_raises(ArgumentError) { I::SecretBox.new("chave-nova-com-tamanho-suficiente", previous: ["curta"]) }
+  end
+
   def test_webhook_signature_validation_with_timestamp_tolerance
     now = Time.utc(2026, 3, 2, 12)
     header = I::WebhookSignature.header("segredo", now.to_i, '{"a":1}')
