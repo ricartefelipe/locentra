@@ -3,6 +3,10 @@
 module Locentra
   module Application
     module Integrations
+      # Destino de chamada externa recusado pela porta HTTP (proteção contra SSRF), levantado pelo
+      # adaptador.
+      class UnsafeDestination < StandardError; end
+
       TOKEN_PATTERN = /\Alcn_([0-9a-f]{32})_([A-Za-z0-9_-]{43})\z/
 
       # Escopos que a credencial pode usar agora: os gravados, limitados às permissões atuais de

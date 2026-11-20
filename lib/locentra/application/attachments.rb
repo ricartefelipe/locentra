@@ -3,6 +3,11 @@
 module Locentra
   module Application
     module Attachments
+      # Erros da porta de armazenamento (`put/get/delete/exist?`), levantados pelos adaptadores: a
+      # aplicação não depende das classes de infraestrutura.
+      class InvalidStorageKey < StandardError; end
+      class ContentMissing < StandardError; end
+
       # Tipos aceitos, identificados pelos bytes iniciais do conteúdo (o tipo declarado pelo cliente
       # não é usado para decidir).
       SIGNATURES = {
@@ -112,7 +117,7 @@ module Locentra
             found
           end
           [row, @storage.get(row["storage_key"])]
-        rescue Infrastructure::Storage::InvalidKey, Errno::ENOENT
+        rescue InvalidStorageKey, ContentMissing
           raise Domain::NotFound, "anexo"
         end
 

@@ -32,7 +32,7 @@ module Locentra
 
           begin
             @http.resolve!(url)
-          rescue Infrastructure::Integrations::UnsafeDestination => e
+          rescue Integrations::UnsafeDestination => e
             raise Domain::ValidationError.field("url", e.message)
           end
           @uow.run(actor, "integrations.manage") do |tx, current|
@@ -139,15 +139,17 @@ module Locentra
       # Entrega de um webhook: assinatura com timestamp e identificador estável. A chamada de rede
       # ocorre fora de transação; o resultado é gravado em transação curta. A chamada é registrada
       # (`external.call`, serviço "webhook") com a organização e o correlation_id da tarefa, que é o
-      # request_id da operação que gerou o evento.
+      # request_id da operação que gerou o evento. Portas: `http.post(url, body, headers)`,
+      # `box.decrypt(texto)` e `signer.header(segredo, timestamp, corpo)`.
       class Deliver
         HTTP_OUTCOME = ->(response) { response.status.between?(200, 299) ? "ok" : "http_#{response.status / 100}xx" }
 
-        def initialize(transactor:, webhooks:, http:, box:, clock:, calls:)
+        def initialize(transactor:, webhooks:, http:, box:, signer:, clock:, calls:)
           @transactor = transactor
           @webhooks = webhooks
           @http = http
           @box = box
+          @signer = signer
           @clock = clock
           @calls = calls
         end
@@ -162,7 +164,7 @@ module Locentra
                                "organization_id" => organization_id, "data" => data["payload"])
           timestamp = @clock.now.to_i
           headers = { "x-locentra-event-id" => data["event_id"], "x-locentra-delivery-id" => delivery_id, "x-locentra-event" => data["event_type"],
-                      "x-locentra-signature" => Infrastructure::WebhookSignature.header(@box.decrypt(data["secret_ciphertext"]), timestamp, body) }
+                      "x-locentra-signature" => @signer.header(@box.decrypt(data["secret_ciphertext"]), timestamp, body) }
           context = { organization_id: organization_id, correlation_id: correlation_id,
                       details: { delivery_id: delivery_id, event_type: data["event_type"] } }
           outcome = attempt(data["url"], body, headers, context)
@@ -177,13 +179,13 @@ module Locentra
         private
 
         def attempt(url, body, headers, context)
-          blocked = { Infrastructure::Integrations::UnsafeDestination => "blocked" }
+          blocked = { Integrations::UnsafeDestination => "blocked" }
           response = @calls.track(service: "webhook", operation: "deliver", outcome: HTTP_OUTCOME, errors: blocked, **context) do
             @http.post(url, body, headers)
           end
           { success: response.status.between?(200, 299), status: response.status,
             error: response.status.between?(300, 399) ? "redirecionamento não seguido" : nil }
-        rescue Infrastructure::Integrations::UnsafeDestination => e
+        rescue Integrations::UnsafeDestination => e
           { success: false, status: nil, error: "destino bloqueado: #{e.message}" }
         rescue StandardError => e
           { success: false, status: nil, error: "#{e.class.name}: #{e.message}"[0, 300] }

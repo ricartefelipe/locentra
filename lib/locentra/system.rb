@@ -96,7 +96,7 @@ module Locentra
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
                                                                   clock: clock, ids: ids, subscribers: [@services[:finance_subscriber]])
       @services[:deliver_webhook] = A::Webhooks::Deliver.new(transactor: transactor, webhooks: repos[:webhooks], http: @http, box: @services[:box],
-                                                             clock: clock, calls: @services[:external_calls])
+                                                             signer: I::WebhookSignature, clock: clock, calls: @services[:external_calls])
     end
 
     def common = { uow: uow, clock: clock }

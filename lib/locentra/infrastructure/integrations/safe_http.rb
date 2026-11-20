@@ -9,7 +9,8 @@ require "uri"
 module Locentra
   module Infrastructure
     module Integrations
-      class UnsafeDestination < StandardError; end
+      # Erro declarado pela aplicação (porta HTTP de destinos configurados por usuários).
+      UnsafeDestination = Application::Integrations::UnsafeDestination
 
       # Resposta que não terminou dentro do prazo total da entrega.
       class DeadlineExceeded < StandardError; end

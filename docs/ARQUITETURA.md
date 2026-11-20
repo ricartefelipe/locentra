@@ -53,8 +53,13 @@ flowchart TB
 | Interfaces | `lib/locentra/interfaces/{http,cli,worker}` | Rack/Puma, interface web, portal, API, CLI, worker | Aplicação |
 | Composição | `lib/locentra/system.rb` | Composition root explícito; nenhuma conexão aberta na montagem | Todas |
 
-Carregar `locentra/domain` não abre conexões, não inicia threads e não lê variáveis de ambiente. A suíte
-unitária carrega apenas domínio e aplicação.
+Carregar `locentra/domain` e `locentra/application` não abre conexões, não inicia threads, não lê variáveis
+de ambiente e não carrega infraestrutura. A aplicação declara as exceções das portas que os adaptadores
+levantam (`Integrations::UnsafeDestination`, `Attachments::InvalidStorageKey`, `Attachments::ContentMissing`)
+e recebe por injeção o que é de infraestrutura (o assinador de webhooks, por exemplo).
+`LayerIsolationTest` verifica isso em processo separado e executa a entrega de webhook e o download de
+anexo só com portas falsas. A suíte unitária não usa banco, rede nem servidor, mas também exercita alguns
+adaptadores de infraestrutura (cifragem, armazenamento, HTTP seguro, Asaas) no mesmo processo.
 
 ## Contextos
 
