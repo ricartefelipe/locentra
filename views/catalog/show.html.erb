@@ -30,7 +30,7 @@
             <select id="filial_id" name="filial_id"><% @branches.each do |b| %><option value="<%= b.id %>"><%= b.name %></option><% end %></select>
             <label for="condicao">Condição</label>
             <select id="condicao" name="condicao"><% Locentra::Domain::Catalog::CONDITIONS.each do |k, l| %><option value="<%= k %>"<%= selected("good", k) %>><%= l %></option><% end %></select>
-            <label for="custo_aquisicao">Custo de aquisição (R$)</label><input id="custo_aquisicao" name="custo_aquisicao" inputmode="decimal">
+            <label for="custo_aquisicao">Custo de aquisição (R$)</label><input id="custo_aquisicao" name="custo_aquisicao" inputmode="decimal"<%= invalid(@errors, "custo_aquisicao") %>><%= field_errors(@errors, "custo_aquisicao") %>
             <label for="data_aquisicao">Data de aquisição</label><input id="data_aquisicao" name="data_aquisicao" type="date">
             <button type="submit">Cadastrar ativo</button>
           </form>

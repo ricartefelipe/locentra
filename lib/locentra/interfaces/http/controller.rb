@@ -73,10 +73,17 @@ module Locentra
           (match[1].to_i * 100) + match[2].to_s.ljust(2, "0").to_i
         end
 
-        # Conversões de entrada de formulário.
-        def money_param(value)
+        # Conversões de entrada de formulário. O erro de formato vai para o campo do formulário que
+        # enviou o valor (o domínio usa a chave genérica "valor").
+        def money_param(value, field = "valor")
           text = value.to_s.strip
-          text.empty? ? Domain::Money.zero : Domain::Money.parse(text)
+          text.empty? ? Domain::Money.zero : money!(text, field)
+        end
+
+        def money!(text, field)
+          Domain::Money.parse(text)
+        rescue Domain::ValidationError => e
+          raise Domain::ValidationError.field(field, e.errors.values.flatten.first || "formato monetário inválido")
         end
 
         def local_time(ctx, value, field)

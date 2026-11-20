@@ -40,7 +40,7 @@ module Locentra
           def create(ctx)
             f = ctx.form
             report = uc(:create_damage_report).call(ctx.actor, return_line_id: f["item"], description: f["descricao"], severity: f["severidade"].to_s,
-                                                               estimated_cost: money_param(f["custo"]))
+                                                               estimated_cost: money_param(f["custo"], "custo_estimado"))
             redirect(ctx, "/operacao/avarias/#{report.id}", notice: "Avaria #{report.code} registrada. Anexe as evidências para aprovação.")
           rescue *FORM_ERRORS => e
             redirect(ctx, "/operacao/inspecoes", alert: "Avaria não registrada: #{e.message}")
@@ -54,7 +54,7 @@ module Locentra
           def update(ctx)
             f = ctx.form
             uc(:revise_damage_report).call(ctx.actor, ctx.param(:id), description: f["descricao"], severity: f["severidade"].to_s,
-                                                                      estimated_cost: money_param(f["custo"]))
+                                                                      estimated_cost: money_param(f["custo"], "custo_estimado"))
             redirect(ctx, "/operacao/avarias/#{ctx.param(:id)}", notice: "Registro atualizado.")
           rescue *FORM_ERRORS => e
             show(ctx, errors: errors_of(e), status: status_of(e))
@@ -113,7 +113,7 @@ module Locentra
 
           def complete(ctx)
             f = ctx.form
-            order = uc(:complete_maintenance).call(ctx.actor, ctx.param(:id), cost: money_param(f["custo"]), requires_inspection: f["inspecao"] == "1",
+            order = uc(:complete_maintenance).call(ctx.actor, ctx.param(:id), cost: money_param(f["custo"], "custo"), requires_inspection: f["inspecao"] == "1",
                                                                               notes: f["observacoes"])
             outcome = order.requires_inspection ? "o item segue para inspeção" : "o item está disponível"
             redirect(ctx, "/manutencao/#{ctx.param(:id)}", notice: "Manutenção concluída; #{outcome}.")

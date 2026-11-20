@@ -2,9 +2,9 @@
 <fieldset class="full">
   <legend>Tabela de preços</legend>
   <div class="form-grid">
-    <div><label for="preco_hora">Preço por hora (R$)</label><input id="preco_hora" name="preco_hora" inputmode="decimal" value="<%= @values["preco_hora"] || (t["hourly_cents"] && Locentra::Domain::Money.new(t["hourly_cents"]).to_decimal_string) %>"></div>
-    <div><label for="preco_diaria">Preço da diária (R$)</label><input id="preco_diaria" name="preco_diaria" inputmode="decimal" value="<%= @values["preco_diaria"] || (t["daily_cents"] && Locentra::Domain::Money.new(t["daily_cents"]).to_decimal_string) %>"></div>
-    <div><label for="preco_semana">Preço semanal (R$)</label><input id="preco_semana" name="preco_semana" inputmode="decimal" value="<%= @values["preco_semana"] || (t["weekly_cents"] && Locentra::Domain::Money.new(t["weekly_cents"]).to_decimal_string) %>"></div>
+    <div><label for="preco_hora">Preço por hora (R$)</label><input id="preco_hora" name="preco_hora" inputmode="decimal" value="<%= @values["preco_hora"] || (t["hourly_cents"] && Locentra::Domain::Money.new(t["hourly_cents"]).to_decimal_string) %>"<%= invalid(@errors, "preco_hora") %>><%= field_errors(@errors, "preco_hora") %></div>
+    <div><label for="preco_diaria">Preço da diária (R$)</label><input id="preco_diaria" name="preco_diaria" inputmode="decimal" value="<%= @values["preco_diaria"] || (t["daily_cents"] && Locentra::Domain::Money.new(t["daily_cents"]).to_decimal_string) %>"<%= invalid(@errors, "preco_diaria") %>><%= field_errors(@errors, "preco_diaria") %></div>
+    <div><label for="preco_semana">Preço semanal (R$)</label><input id="preco_semana" name="preco_semana" inputmode="decimal" value="<%= @values["preco_semana"] || (t["weekly_cents"] && Locentra::Domain::Money.new(t["weekly_cents"]).to_decimal_string) %>"<%= invalid(@errors, "preco_semana") %>><%= field_errors(@errors, "preco_semana") %></div>
     <div><label for="modalidade_diaria">Modalidade da diária</label>
       <select id="modalidade_diaria" name="modalidade_diaria">
         <% Locentra::Domain::Pricing::DAILY_MODES.each do |key, label| %><option value="<%= key %>"<%= selected(@values["modalidade_diaria"] || t["daily_mode"], key) %>><%= label %></option><% end %>
@@ -15,7 +15,7 @@
         <% [60, 30, 15].each do |m| %><option value="<%= m %>"<%= selected((@values["arredondamento"] || t["rounding_minutes"] || 60).to_s, m) %>><%= m %></option><% end %>
       </select></div>
     <div><label for="tolerancia">Tolerância (minutos)</label><input id="tolerancia" name="tolerancia" type="number" min="0" max="240" value="<%= @values["tolerancia"] || t["grace_minutes"] %>"></div>
-    <div><label for="caucao">Caução por unidade (R$)</label><input id="caucao" name="caucao" inputmode="decimal" value="<%= @values["caucao"] || @deposit %>"></div>
+    <div><label for="caucao">Caução por unidade (R$)</label><input id="caucao" name="caucao" inputmode="decimal" value="<%= @values["caucao"] || @deposit %>"<%= invalid(@errors, "caucao") %>><%= field_errors(@errors, "caucao") %></div>
   </div>
   <p class="muted">Faixas por quantidade (desconto aplicado à linha):</p>
   <% tiers = Array(t["quantity_tiers"]) %>

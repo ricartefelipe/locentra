@@ -52,7 +52,7 @@
       <option value="production">Produção</option>
     </select>
     <label for="chave-api">Chave de API do Asaas</label>
-    <input id="chave-api" name="chave_api" type="password" maxlength="300" aria-describedby="ajuda-chave"<%= invalid(@errors, "chave_api") %>>
+    <input id="chave-api" name="chave_api" type="password" maxlength="300"<%= invalid(@errors, "chave_api", describedby: "ajuda-chave") %>>
     <p class="muted" id="ajuda-chave">Obrigatória para o Asaas: chaves de sandbox começam com <code>$aact_hmlg_</code> e de produção com <code>$aact_prod_</code>.</p>
     <%= field_errors(@errors, "chave_api") %>
     <p class="muted">Configurar uma nova conta desativa a conta atual.</p>

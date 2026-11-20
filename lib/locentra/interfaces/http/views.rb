@@ -185,10 +185,15 @@ module Locentra
           raw(%(<p class="field-error" id="erro-#{h(field)}" role="alert">#{h(messages.join("; "))}</p>))
         end
 
-        def invalid(errors, field)
-          return raw("") unless errors&.key?(field.to_s)
-
-          raw(%( aria-invalid="true" aria-describedby="erro-#{h(field)}"))
+        # Atributos de acessibilidade do campo: um único aria-describedby com a ajuda do campo
+        # (`describedby`) e, havendo erro, a mensagem de erro.
+        def invalid(errors, field, describedby: nil)
+          error = errors&.key?(field.to_s)
+          ids = [describedby, error ? "erro-#{field}" : nil].compact
+          attributes = +""
+          attributes << ' aria-invalid="true"' if error
+          attributes << %( aria-describedby="#{h(ids.join(" "))}") unless ids.empty?
+          raw(attributes)
         end
 
         # Valor reenviado de um campo indexado (nome[chave]); ignora formatos inesperados.

@@ -46,6 +46,26 @@ class InputValidationTest < HttpTest
     assert_includes last_response.body, "percentual inválido"
   end
 
+  def test_invalid_money_is_reported_on_the_field_that_sent_it
+    login("dona@alfa.test")
+    get "/produtos/novo"
+    post_form "/produtos", product_form("custo_reposicao" => "12,34,5")
+
+    assert_equal 422, last_response.status
+    assert_match(/id="custo_reposicao"[^>]*aria-invalid="true" aria-describedby="erro-custo_reposicao"/, last_response.body)
+    assert_includes last_response.body, %(<p class="field-error" id="erro-custo_reposicao" role="alert">formato monetário inválido</p>)
+    refute_includes last_response.body, %(id="erro-valor")
+    get "/produtos/novo"
+    post_form "/produtos", product_form("preco_diaria" => "abc")
+
+    assert_match(/id="preco_diaria"[^>]*aria-invalid="true"/, last_response.body)
+    view = Locentra::Interfaces::HTTP::ViewContext.new(nil, nil, {})
+
+    assert_equal ' aria-invalid="true" aria-describedby="ajuda-validade erro-validade"',
+                 view.invalid({ "validade" => ["anterior ao início"] }, "validade", describedby: "ajuda-validade").to_s
+    assert_equal ' aria-describedby="ajuda-validade"', view.invalid({}, "validade", describedby: "ajuda-validade").to_s
+  end
+
   def test_api_reservation_items_must_be_objects
     token = uc(:create_credential).call(@org[:actor], name: "ERP", scopes: %w[reservations.write], expires_in_days: 1)["token"]
     base = { "customer_id" => @customer.id, "branch_id" => @org[:branch].id, "starts_at" => "2026-03-10T08:00:00Z",

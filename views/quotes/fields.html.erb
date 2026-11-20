@@ -8,7 +8,7 @@
   <input id="fim" name="fim" type="datetime-local" required value="<%= @values["fim"] %>"<%= invalid(@errors, "fim") %>><%= field_errors(@errors, "fim") %>
   <%= field_errors(@errors, "periodo") %></div>
 <div><label for="validade">Validade do orçamento</label>
-  <input id="validade" name="validade" type="datetime-local" required value="<%= @values["validade"] %>" aria-describedby="ajuda-validade"<%= invalid(@errors, "validade") %>>
+  <input id="validade" name="validade" type="datetime-local" required value="<%= @values["validade"] %>"<%= invalid(@errors, "validade", describedby: "ajuda-validade") %>>
   <p class="muted" id="ajuda-validade">Até <%= Locentra::Domain::Quotes::MAX_VALIDITY_DAYS %> dias e no máximo até o início da locação.</p>
   <%= field_errors(@errors, "validade") %></div>
 <fieldset class="full">
