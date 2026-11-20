@@ -101,8 +101,12 @@ rede nunca ocorrem com transação aberta.
 
 - **Web:** Puma com `PUMA_THREADS` threads por processo e `WEB_CONCURRENCY` processos; sem `preload_app`,
   de modo que cada processo monta o próprio `System` depois do fork. `DB_POOL_SIZE` ≥ `PUMA_THREADS`.
-- **Worker:** `WORKER_CONCURRENCY` threads de execução + thread de heartbeat + thread de agendamento;
-  pool com `WORKER_CONCURRENCY + 2` conexões; encerramento gracioso em TERM/INT.
+- **Worker:** `WORKER_CONCURRENCY` threads de execução da fila `default` + `WEBHOOK_CONCURRENCY` threads
+  (padrão 1) da fila `webhooks` + thread de heartbeat + thread de agendamento; pool com
+  `WORKER_CONCURRENCY + WEBHOOK_CONCURRENCY + 2` conexões; encerramento gracioso em TERM/INT. As entregas
+  de webhook vão para fila própria: um destino lento ocupa somente as threads dessa fila, nunca as de
+  e-mails, pagamentos e varreduras. Cada entrega tem prazo total de 15 s e lê no máximo 4 KiB da resposta.
+  Banco indisponível faz os laços esperarem com backoff exponencial limitado a 30 s.
 - Toda exclusão entre processos é feita no banco (locks de linha, exclusion constraints, advisory locks,
   `SKIP LOCKED`, chaves únicas); mutex local é usado apenas para estruturas em memória do processo.
 - Limites: não há medições de desempenho publicadas; o dimensionamento acima é a regra de configuração,

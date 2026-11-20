@@ -7,7 +7,7 @@ module Locentra
 
   # Configuração lida do ambiente somente quando o sistema é montado (nunca ao carregar o domínio).
   Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :database_url, :worker_database_url, :migration_database_url,
-                       :pool_size, :pool_timeout, :worker_concurrency, :log_level, :smtp_host, :smtp_port, :mail_from,
+                       :pool_size, :pool_timeout, :worker_concurrency, :webhook_concurrency, :log_level, :smtp_host, :smtp_port, :mail_from,
                        :payment_provider, :asaas_base_url, :asaas_api_key, :storage_root, :max_upload_bytes, :bcrypt_cost,
                        :metrics_token) do
     def self.from_env(env = ENV, overrides = {})
@@ -23,6 +23,7 @@ module Locentra
         pool_size: Integer(env.fetch("DB_POOL_SIZE", env.fetch("PUMA_THREADS", "5"))),
         pool_timeout: Integer(env.fetch("DB_POOL_TIMEOUT", "5")),
         worker_concurrency: Integer(env.fetch("WORKER_CONCURRENCY", "4")),
+        webhook_concurrency: Integer(env.fetch("WEBHOOK_CONCURRENCY", "1")),
         log_level: env.fetch("LOG_LEVEL", "info"),
         smtp_host: env.fetch("SMTP_HOST", "localhost"),
         smtp_port: Integer(env.fetch("SMTP_PORT", "1025")),

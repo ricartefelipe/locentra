@@ -182,11 +182,11 @@ class ObservabilityTest < HttpTest
     assert_operator value.call("locentra_domain_conflicts_total", code: "unavailable"), :>=, 1
     assert_in_delta 1, value.call("locentra_domain_conflicts_total", code: "invalid_transition").to_f, 0.001, "transição recusada contada uma vez"
     assert_operator value.call("locentra_external_calls_total", provider: "simulator", kind: "list_charges", outcome: "ok"), :>=, 1
-    assert_operator value.call("locentra_jobs_queue_size", queue: "default", status: "pending"), :>=, 1, "entrega reagendada"
+    assert_operator value.call("locentra_jobs_queue_size", queue: "webhooks", status: "pending"), :>=, 1, "entrega reagendada"
     assert_in_delta 1, value.call("locentra_jobs_queue_size", queue: "default", status: "dead")
-    refute_nil value.call("locentra_jobs_oldest_age_seconds", queue: "default", status: "pending")
+    refute_nil value.call("locentra_jobs_oldest_age_seconds", queue: "webhooks", status: "pending")
     refute_nil value.call("locentra_jobs_queue_stats_age_seconds")
-    assert_in_delta 1, value.call("locentra_jobs_retries_total", queue: "default", kind: "webhooks.deliver")
+    assert_in_delta 1, value.call("locentra_jobs_retries_total", queue: "webhooks", kind: "webhooks.deliver")
     assert_in_delta 1, value.call("locentra_jobs_dead_total", queue: "default", kind: "tarefa.desconhecida")
     identifiers = [@org[:organization_id], @customer.id, reservation.id, @chairs.id, @account["id"]]
     samples.flat_map { |s| s[:labels].values }.each do |label|

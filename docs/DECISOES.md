@@ -151,7 +151,10 @@ atualizado.
 
 - **Decisão:** somente HTTPS em produção; todos os IPs resolvidos devem ser públicos (bloqueio de
   privados, loopback, link-local, metadados, multicast, reservados e IPv4 mapeado); conexão pelo IP
-  validado (`Net::HTTP#ipaddr`); redirecionamentos não são seguidos; tempos limite curtos. Assinatura
+  validado (`Net::HTTP#ipaddr`); redirecionamentos não são seguidos; tempos limite por operação de rede,
+  prazo total de 15 s por entrega e leitura da resposta em partes interrompida em 4 KiB; sem nova
+  tentativa automática do `Net::HTTP`. Entregas na fila `webhooks`, atendida por threads próprias do
+  worker (`WEBHOOK_CONCURRENCY`), isoladas das demais tarefas. Assinatura
   `t=<timestamp>,v1=<HMAC-SHA256>` com identificadores estáveis de evento e entrega. O segredo de
   assinatura é cifrado com AES-256-GCM (chave derivada por HKDF).
 

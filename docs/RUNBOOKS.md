@@ -103,6 +103,7 @@ worker antigo não consegue concluí-las (fencing por `lease_token`).
 
 ## 9. Dimensionamento de conexões — procedimento escrito
 
-Conexões máximas = processos web × `DB_POOL_SIZE` (≥ `PUMA_THREADS`) + workers × (`WORKER_CONCURRENCY` + 2) +
+Conexões máximas = processos web × `DB_POOL_SIZE` (≥ `PUMA_THREADS`) + workers × (`WORKER_CONCURRENCY` +
+`WEBHOOK_CONCURRENCY` + 2) +
 execuções de CLI/migrations. Mantenha abaixo de `max_connections` com folga. Espera por conexão aparece em
 `locentra_db_pool_wait_seconds` e esgotamento em `locentra_db_pool_timeouts_total` (resposta 503).

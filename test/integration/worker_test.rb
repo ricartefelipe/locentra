@@ -2,6 +2,7 @@
 
 require_relative "integration_helper"
 require_relative "../support/worker_support"
+require_relative "../support/barrier"
 
 class WorkerTest < DatabaseTest
   include WorkerHelpers
@@ -121,6 +122,47 @@ class WorkerTest < DatabaseTest
 
     assert_equal [[1, "a", "lease_lost", nil], [2, "b", "dead", "falha definitiva"], [3, "c", "succeeded", nil]], history
     assert(wtx { |tx| queue.attempts(tx, id) }.all? { |row| row["finished_at"] })
+  end
+
+  def test_webhook_deliveries_use_their_own_queue_and_threads
+    server = CaptureServer.new
+    uc(:create_webhook).call(@org[:actor], url: server.url, events: ["*"])
+    customer = create_customer(@org[:actor])
+    chairs = create_product(@org[:actor], sku: "CAD-Q", tracking: "bulk")
+    stock(@org[:actor], chairs, @org[:branch], 5)
+    reserve(@org[:actor], customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-10T10:00:00Z"), [line(chairs, 1)], mode: "confirm")
+    drain
+
+    assert server.requests.pop(timeout: 5), "drain atende também a fila de webhooks"
+    queues = PG.connect(TestDatabase.worker_url).then do |c|
+      c.exec("SELECT kind, queue FROM jobs WHERE kind = 'webhooks.deliver'").to_a.tap { c.close }
+    end
+
+    refute_empty queues
+    assert(queues.all? { |row| row["queue"] == "webhooks" })
+    lanes = runner.instance_variable_get(:@lanes)
+
+    assert_equal [[["default"], 1], [["webhooks"], 1]], lanes
+  ensure
+    server&.stop
+  end
+
+  # Banco indisponível: os laços esperam com backoff em vez de girar sem pausa.
+  def test_loops_wait_with_backoff_when_the_database_is_unavailable
+    failing = Object.new
+    def failing.call(*, **) = raise(PG::ConnectionBad, "banco indisponível")
+    fake = Struct.new(:transactor, :queue, :clock, :metrics) { def shutdown = nil }.new(failing, queue, @clock, worker_system.metrics)
+    log = StringIO.new
+    logger = Locentra::Infrastructure::Observability::StructuredLogger.new(io: log, level: "info")
+    loops = Locentra::Interfaces::Worker::Runner.new(system: fake, handlers: nil, concurrency: 2, logger: logger, scheduler: true)
+    threads = loops.start_threads
+    Thread.pass until log.string.scan("worker.scheduler_failed").size >= 1 && log.string.scan("worker.thread_crashed").size >= 3
+    sleep 1.2
+    loops.stop(threads, timeout: 2)
+    events = log.string.lines.map { |line| JSON.parse(line)["event"] }.tally
+
+    assert_operator events.fetch("worker.thread_crashed"), :<=, 9, events.inspect
+    assert_operator events.fetch("worker.scheduler_failed"), :<=, 3, events.inspect
   end
 
   def test_unknown_job_kind_fails_permanently

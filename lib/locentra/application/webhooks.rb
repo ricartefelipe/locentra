@@ -10,6 +10,8 @@ module Locentra
         reservation.picked_up reservation.returned contract.issued payment.confirmed payment.refunded
         quote.sent quote.approved quote.rejected quote.expired quote.converted contract.accepted contract.amended contract.cancelled
       ].freeze
+      # Fila própria das entregas, atendida por threads dedicadas do worker (WEBHOOK_CONCURRENCY).
+      DELIVERY_QUEUE = "webhooks"
 
       class CreateEndpoint
         def initialize(uow:, webhooks:, limits:, http:, box:, audit:, clock:, ids:)
@@ -92,7 +94,8 @@ module Locentra
             raise Domain::Conflict.new("entrega já concluída", code: "already_delivered") if delivery["status"] == "delivered"
 
             @webhooks.reset_delivery(tx, delivery["id"])
-            @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => delivery["id"] }, priority: 40, correlation_id: current.request_id)
+            @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => delivery["id"] },
+                           priority: 40, correlation_id: current.request_id, queue: DELIVERY_QUEUE)
             @audit.record(tx, current, "webhook.redelivery_requested", "webhook_delivery", delivery["id"])
             true
           end
@@ -123,7 +126,8 @@ module Locentra
             next unless @webhooks.insert_delivery(tx, "id" => delivery_id, "endpoint_id" => endpoint["id"], "event_id" => event["id"],
                                                       "event_type" => event["event_type"], "created_at" => @clock.now)
 
-            @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => delivery_id }, priority: 40, correlation_id: event["correlation_id"])
+            @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => delivery_id },
+                           priority: 40, correlation_id: event["correlation_id"], queue: DELIVERY_QUEUE)
           end
           @notifications.for_event(tx, event)
           @subscribers.each { |subscriber| subscriber.call(tx, event) }
