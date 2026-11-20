@@ -124,6 +124,28 @@ class WorkerTest < DatabaseTest
     assert(wtx { |tx| queue.attempts(tx, id) }.all? { |row| row["finished_at"] })
   end
 
+  # Processo que morre durante o handler (falta de memória, SIGKILL) não chama retry_later: o limite
+  # de tentativas é aplicado na recuperação do lease vencido.
+  def test_expired_lease_on_the_last_attempt_ends_the_job_as_dead
+    id = wtx { |tx| queue.enqueue(tx, "email.send", { "template" => "nao_existe" }, max_attempts: 2) }
+    2.times do
+      refute_nil(worker_system.transactor.call { |tx| queue.claim(tx, worker: "morto", limit: 1).first })
+      @clock.advance(121)
+    end
+
+    assert_nil(worker_system.transactor.call { |tx| queue.claim(tx, worker: "c", limit: 1).first })
+    row = jobs("kind = 'email.send'").first
+
+    assert_equal(["dead", 2, Q::EXHAUSTED_LEASE], row.values_at("status", "attempts", "last_error").then { |a| [a[0], a[1].to_i, a[2]] })
+    history = wtx { |tx| queue.attempts(tx, id) }
+
+    assert_equal([%w[1 lease_lost], %w[2 lease_lost]], history.map { |r| [r["attempt"].to_s, r["outcome"]] })
+    assert(history.all? { |r| r["finished_at"] })
+    totals = PG.connect(TestDatabase.worker_url).then { |c| c.exec("SELECT kind, outcome, total FROM job_outcome_totals").to_a.tap { c.close } }
+
+    assert_equal([{ "kind" => "email.send", "outcome" => "dead", "total" => "1" }], totals.map { |t| t.transform_values(&:to_s) })
+  end
+
   def test_webhook_deliveries_use_their_own_queue_and_threads
     server = CaptureServer.new
     uc(:create_webhook).call(@org[:actor], url: server.url, events: ["*"])

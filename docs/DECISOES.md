@@ -141,7 +141,9 @@ atualizado.
   thread de renovação de leases e thread de agendamento. Reivindicação com `FOR UPDATE SKIP LOCKED` em
   transação curta; conclusão e reagendamento exigem o `lease_token` atual. Backoff exponencial com
   variação determinística e teto de 6 horas; tarefas esgotadas ficam `dead` e podem ser reprocessadas
-  por usuário com `jobs.manage`. O agendador usa `unique_key` por janela de 60 s, de modo que vários
+  por usuário com `jobs.manage`. Uma tarefa com lease vencido na última tentativa permitida (processo
+  morto durante o handler) também termina `dead`, sem nova reivindicação; a tentativa abandonada é
+  registrada como `lease_lost`. O agendador usa `unique_key` por janela de 60 s, de modo que vários
   workers geram uma única tarefa. Encerramento por `TERM`/`INT` via self-pipe, aguardando as threads.
 - **Consequências:** entrega "pelo menos uma vez"; handlers são idempotentes (despacho da outbox marca
   `dispatched_at` sob lock; entregas de webhook são únicas por `(endpoint, evento)`; e-mails podem ser
