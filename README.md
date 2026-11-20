@@ -93,7 +93,9 @@ Variáveis em [`.env.example`](.env.example): URLs separadas para aplicação (`
 (`WORKER_DATABASE_URL`), migrations (`MIGRATION_DATABASE_URL`) e backup (`BACKUP_DATABASE_URL`);
 `APP_SECRET_KEY_BASE`, `APP_ENCRYPTION_KEY`, `APP_BASE_URL` (HTTPS obrigatório em produção), dimensionamento
 (`PUMA_THREADS`, `WEB_CONCURRENCY`, `DB_POOL_SIZE`, `DB_POOL_TIMEOUT`, `WORKER_CONCURRENCY`,
-`WEBHOOK_CONCURRENCY`), proxies confiáveis (`TRUSTED_PROXIES`), limite da API (`API_RATE_LIMIT`), SMTP,
+`WEBHOOK_CONCURRENCY`), proxies confiáveis (`TRUSTED_PROXIES`), limite da API (`API_RATE_LIMIT`), SMTP
+(`SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_AUTH`, `MAIL_FROM`; TLS
+obrigatório em produção),
 provedores de pagamento habilitados (`PAYMENT_PROVIDERS`; a conta e a chave de cada organização são
 cadastradas em Financeiro → Provedor), armazenamento (`STORAGE_ROOT`, `MAX_UPLOAD_BYTES`) e `METRICS_TOKEN`
 (obrigatório para expor `/metrics` em produção). O Compose repassa essas variáveis do `.env` aos contêineres.

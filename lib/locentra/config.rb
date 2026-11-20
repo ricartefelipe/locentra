@@ -7,10 +7,12 @@ module Locentra
   class ConfigError < StandardError; end
 
   PAYMENT_PROVIDER_NAMES = %w[simulator asaas].freeze
+  SMTP_TLS_MODES = %w[none starttls tls].freeze
+  SMTP_AUTH_METHODS = %w[plain login cram_md5].freeze
 
   # Configuração lida do ambiente somente quando o sistema é montado (nunca ao carregar o domínio).
-  Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :database_url, :worker_database_url, :migration_database_url,
-                       :pool_size, :pool_timeout, :worker_concurrency, :webhook_concurrency, :log_level, :smtp_host, :smtp_port, :mail_from,
+  Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :database_url, :worker_database_url,
+                       :migration_database_url, :pool_size, :pool_timeout, :worker_concurrency, :webhook_concurrency, :log_level, :smtp,
                        :payment_providers, :asaas_base_url, :storage_root, :max_upload_bytes, :bcrypt_cost,
                        :metrics_token, :trusted_proxies, :api_rate_limit, :worker_health_file) do
     def self.from_env(env = ENV, overrides = {})
@@ -28,9 +30,7 @@ module Locentra
         worker_concurrency: Integer(env.fetch("WORKER_CONCURRENCY", "4")),
         webhook_concurrency: Integer(env.fetch("WEBHOOK_CONCURRENCY", "1")),
         log_level: env.fetch("LOG_LEVEL", "info"),
-        smtp_host: env.fetch("SMTP_HOST", "localhost"),
-        smtp_port: Integer(env.fetch("SMTP_PORT", "1025")),
-        mail_from: env.fetch("MAIL_FROM", "Locentra <nao-responda@locentra.local>"),
+        smtp: smtp(env, app_env),
         payment_providers: payment_providers(env["PAYMENT_PROVIDERS"], app_env),
         asaas_base_url: env.fetch("ASAAS_BASE_URL", "https://api-sandbox.asaas.com/v3"),
         storage_root: env.fetch("STORAGE_ROOT", File.expand_path("../../storage", __dir__)),
@@ -47,6 +47,19 @@ module Locentra
     end
 
     def self.optional(env, key) = env[key].to_s.empty? ? nil : env[key]
+
+    # Envio de e-mail: servidor, remetente, TLS (none, starttls obrigatório ou tls implícito na conexão)
+    # e autenticação. Em produção o padrão é starttls e `none` é recusado: links de recuperação de senha,
+    # convites e contratos não trafegam em texto claro.
+    def self.smtp(env, app_env)
+      {
+        host: env.fetch("SMTP_HOST", "localhost"), port: Integer(env.fetch("SMTP_PORT", "1025")),
+        from: env.fetch("MAIL_FROM", "Locentra <nao-responda@locentra.local>"),
+        tls: env.fetch("SMTP_TLS", app_env == "production" ? "starttls" : "none"),
+        user_name: optional(env, "SMTP_USERNAME"), password: optional(env, "SMTP_PASSWORD"),
+        authentication: env.fetch("SMTP_AUTH", "plain")
+      }.freeze
+    end
 
     # Provedores de pagamento que as organizações podem configurar neste processo. A chave de cada
     # conta é cadastrada por organização (Financeiro → Provedor), nunca no ambiente. O simulador
@@ -77,7 +90,16 @@ module Locentra
       raise ConfigError, "APP_BASE_URL deve usar https em produção" if production? && !base_url.start_with?("https://")
       raise ConfigError, "API_RATE_LIMIT deve ser positivo" unless api_rate_limit.positive?
 
+      validate_smtp!
+
       true
+    end
+
+    def validate_smtp!
+      raise ConfigError, "SMTP_TLS inválido (use none, starttls ou tls)" unless SMTP_TLS_MODES.include?(smtp[:tls])
+      raise ConfigError, "SMTP_TLS deve ser starttls ou tls em produção" if production? && smtp[:tls] == "none"
+      raise ConfigError, "SMTP_AUTH inválido (use plain, login ou cram_md5)" unless SMTP_AUTH_METHODS.include?(smtp[:authentication])
+      raise ConfigError, "SMTP_USERNAME e SMTP_PASSWORD devem ser definidos juntos" if smtp[:user_name].nil? != smtp[:password].nil?
     end
 
     def secure_cookies? = production? || base_url.start_with?("https://")

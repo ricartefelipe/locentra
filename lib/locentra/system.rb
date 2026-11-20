@@ -30,7 +30,7 @@ module Locentra
       @metrics = metrics || I::Observability::Metrics.new
       @pool = I::Database::ConnectionPool.new(url: database_url || config.database_url, size: pool_size || config.pool_size,
                                               timeout: config.pool_timeout, name: pool_name, metrics: @metrics, logger: @logger)
-      @mailer = mailer || I::SmtpMailer.new(host: config.smtp_host, port: config.smtp_port, from: config.mail_from)
+      @mailer = mailer || I::SmtpMailer.new(**config.smtp)
       @http = http || I::Integrations::SafeHttp.new(allow_http: !config.production?, allow_private: config.test?)
       @transactor = I::Database::Transactor.new(pool: @pool, logger: @logger, metrics: @metrics)
       build_repositories

@@ -18,6 +18,10 @@ x-app-env: &app-env
   API_RATE_LIMIT: ${API_RATE_LIMIT:-1200}
   SMTP_HOST: ${SMTP_HOST:-mailpit}
   SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_TLS: ${SMTP_TLS:-none}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_AUTH: ${SMTP_AUTH:-plain}
   MAIL_FROM: ${MAIL_FROM:-Locentra <nao-responda@locentra.local>}
   PAYMENT_PROVIDERS: ${PAYMENT_PROVIDERS:-}
   ASAAS_BASE_URL: ${ASAAS_BASE_URL:-https://api-sandbox.asaas.com/v3}
