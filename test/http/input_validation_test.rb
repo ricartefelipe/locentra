@@ -23,6 +23,29 @@ class InputValidationTest < HttpTest
       "modalidade_diaria" => "rolling_24h" }.merge(extra)
   end
 
+  def test_percentages_accept_two_decimals_and_refuse_infinity_nan_and_extra_digits
+    login("dona@alfa.test")
+    %w[Infinity NaN -Infinity 1e2 12.345 abc].each do |value|
+      get "/reservas/nova"
+      post_form "/reservas", reservation_form("desconto" => value)
+
+      assert_equal 422, last_response.status, value
+      assert_includes last_response.body, "percentual inválido", value
+    end
+    get "/reservas/nova"
+    post_form "/reservas", reservation_form("desconto" => "2,5")
+
+    assert_equal 303, last_response.status
+    id = last_response.location[%r{/reservas/(.+)}, 1]
+
+    assert_equal 250, owner_query("SELECT pricing->>'manual_discount_bps' AS bps FROM reservations WHERE id = $1", [id]).first["bps"].to_i
+    get "/produtos/novo"
+    post_form "/produtos", product_form("faixa_minimo" => ["5"], "faixa_desconto" => ["NaN"])
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "percentual inválido"
+  end
+
   def test_api_reservation_items_must_be_objects
     token = uc(:create_credential).call(@org[:actor], name: "ERP", scopes: %w[reservations.write], expires_in_days: 1)["token"]
     base = { "customer_id" => @customer.id, "branch_id" => @org[:branch].id, "starts_at" => "2026-03-10T08:00:00Z",

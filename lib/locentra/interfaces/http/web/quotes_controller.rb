@@ -133,14 +133,7 @@ module Locentra
 
           def errors_of(error) = error.is_a?(Domain::ValidationError) ? error.errors : { "base" => [error.message] }
 
-          def discount_bps(value)
-            text = value.to_s.strip.tr(",", ".")
-            return 0 if text.empty?
-
-            (BigDecimal(text) * 100).to_i
-          rescue ArgumentError
-            raise Domain::ValidationError.field("desconto", "percentual inválido")
-          end
+          def discount_bps(value) = percent_bps(value, "desconto")
 
           def percent_text(bps)
             return "" if bps.zero?

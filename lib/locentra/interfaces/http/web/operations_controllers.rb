@@ -128,9 +128,7 @@ module Locentra
             tiers = Array(form["faixa_minimo"]).zip(Array(form["faixa_desconto"])).filter_map do |min, pct|
               next if min.to_s.strip.empty? || pct.to_s.strip.empty?
 
-              { "min_quantity" => min.to_s.strip, "discount_bps" => (BigDecimal(pct.to_s.tr(",", ".")) * 100).to_i }
-            rescue ArgumentError
-              raise Domain::ValidationError.field("faixas", "percentual inválido")
+              { "min_quantity" => min.to_s.strip, "discount_bps" => percent_bps(pct, "faixas") }
             end
             {
               "hourly_cents" => cents(form["preco_hora"]), "daily_cents" => cents(form["preco_diaria"]), "weekly_cents" => cents(form["preco_semana"]),
@@ -265,14 +263,7 @@ module Locentra
 
           def blank(value) = value.to_s.empty? ? nil : value
 
-          def discount_bps(value)
-            text = value.to_s.strip.tr(",", ".")
-            return 0 if text.empty?
-
-            (BigDecimal(text) * 100).to_i
-          rescue ArgumentError
-            raise Domain::ValidationError.field("desconto", "percentual inválido")
-          end
+          def discount_bps(value) = percent_bps(value, "desconto")
         end
       end
     end
