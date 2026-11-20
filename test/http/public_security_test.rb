@@ -92,4 +92,20 @@ class PublicSecurityTest < HttpTest
     assert_equal "203.0.113.9", resolve.call("::1", "203.0.113.9")
     assert_raises(Locentra::ConfigError) { Locentra::Config.trusted_proxies("10.0.0.0/8, não-é-ip") }
   end
+
+  def test_csrf_failure_page_explains_what_to_do
+    login("dona@alfa.test")
+    post "/clientes", { "tipo" => "individual", "nome" => "Formulário antigo", "documento" => "52998224725", "_csrf" => "x" * 43 }
+
+    assert_equal 403, last_response.status
+    assert_includes last_response.body, "O formulário expirou ou a sessão mudou. Recarregue a página e tente novamente."
+    refute_includes last_response.body, "Locentra::"
+  end
+
+  def test_unauthenticated_api_message_is_readable
+    get "/api/v1/customers"
+
+    assert_equal 401, last_response.status
+    assert_equal "Autenticação necessária", json_body["error"]["message"]
+  end
 end

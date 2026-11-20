@@ -9,8 +9,14 @@ module Locentra
     module HTTP
       class BadRequest < StandardError; end
       class PayloadTooLarge < StandardError; end
-      class Unauthenticated < StandardError; end
-      class CsrfFailure < StandardError; end
+
+      class Unauthenticated < StandardError
+        def initialize(message = "Autenticação necessária") = super
+      end
+
+      class CsrfFailure < StandardError
+        def initialize(message = "O formulário expirou ou a sessão mudou. Recarregue a página e tente novamente.") = super
+      end
 
       # Sessão válida usada na área de outro tipo de acesso (portal do cliente x equipe). `home` é o
       # início da área da sessão; páginas redirecionam para ele e as demais requisições recebem 403.
