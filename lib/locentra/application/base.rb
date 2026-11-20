@@ -127,7 +127,7 @@ module Locentra
                   "credencial inválida ou revogada"
           end
 
-          actor.with(scopes: credential.fetch("scopes"))
+          actor.with(scopes: Integrations.effective_scopes(credential))
         when "customer"
           portal = @access.active_portal_access(tx, actor.organization_id, actor.user_id)
           raise Domain::AccessDenied, "acesso ao portal revogado" unless portal && portal.fetch("customer_id") == actor.customer_id

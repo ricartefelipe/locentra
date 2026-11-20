@@ -225,11 +225,14 @@ module Locentra
         end
       end
 
+      # Revogação do vínculo: encerra as sessões do membro na organização e revoga as credenciais de
+      # API e CLI criadas por ele, na mesma transação.
       class RevokeMembership
-        def initialize(uow:, organizations:, sessions_repository:, audit:, clock:)
+        def initialize(uow:, organizations:, sessions_repository:, credentials:, audit:, clock:)
           @uow = uow
           @organizations = organizations
           @sessions = sessions_repository
+          @credentials = credentials
           @audit = audit
           @clock = clock
         end
@@ -247,7 +250,8 @@ module Locentra
             now = @clock.now
             @organizations.revoke_membership(tx, member["id"], current.user_id, now)
             @sessions.revoke_for_organization(tx, member["user_id"], tx.tenant_id!, now, "membership_revoked")
-            @audit.record(tx, current, "member.revoked", "membership", member["id"], "user_id" => member["user_id"])
+            revoked = @credentials.revoke_created_by(tx, member["user_id"], now)
+            @audit.record(tx, current, "member.revoked", "membership", member["id"], "user_id" => member["user_id"], "credentials_revoked" => revoked)
             true
           end
         end

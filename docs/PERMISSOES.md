@@ -47,7 +47,9 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
   papéis abaixo de administrador e só altera membros com esses papéis; o proprietário não pode ser
   removido nem rebaixado; administradores só são alterados e removidos pelo proprietário.
 - **Credenciais de integração (API e CLI):** cada credencial tem escopos (subconjunto das permissões de quem a
-  criou), organização, validade e revogação. O tenant vem do token, nunca de parâmetros.
+  criou), organização, validade e revogação. O tenant vem do token, nunca de parâmetros. Os escopos
+  efetivos ficam limitados às permissões do papel atual de quem a criou (rebaixamento vale na requisição
+  seguinte), e a revogação do vínculo desse membro revoga as credenciais criadas por ele.
 - **Cliente (portal):** ator `customer` com a permissão `portal.access`, sempre restrito ao próprio
   `customer_id`; recursos de outros clientes respondem como inexistentes.
 - **Worker (`system`):** executa somente tarefas enfileiradas pela própria aplicação, sempre no contexto de

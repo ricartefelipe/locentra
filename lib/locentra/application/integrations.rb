@@ -5,6 +5,14 @@ module Locentra
     module Integrations
       TOKEN_PATTERN = /\Alcn_([0-9a-f]{32})_([A-Za-z0-9_-]{43})\z/
 
+      # Escopos que a credencial pode usar agora: os gravados, limitados às permissões atuais de
+      # quem a criou (rebaixamento reduz os escopos na requisição seguinte).
+      def self.effective_scopes(row)
+        scopes = row.fetch("scopes")
+        role = row["creator_role"]
+        role ? scopes & Domain::Identity.permissions_for(role) : scopes
+      end
+
       # Credenciais de integração: escopos (permissões), tenant, validade e revogação. O segredo é
       # exibido uma única vez; o banco guarda apenas o SHA-256.
       class CreateCredential
@@ -106,7 +114,7 @@ module Locentra
           end
           return nil unless row
 
-          Actor.credential(kind: row["kind"], credential_id: row["id"], organization_id: org_id, scopes: row["scopes"],
+          Actor.credential(kind: row["kind"], credential_id: row["id"], organization_id: org_id, scopes: Integrations.effective_scopes(row),
                            request_id: request_id, ip: ip, user_id: nil)
         end
       end

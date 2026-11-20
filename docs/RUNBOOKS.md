@@ -89,7 +89,9 @@ worker antigo não consegue concluí-las (fencing por `lease_token`).
 
 ## 7. Revogar acesso ou credencial comprometida — exercitado (testes de isolamento e API)
 
-- Membro: Usuários e permissões → Revogar acesso (encerra sessões da organização; efeito imediato).
+- Membro: Usuários e permissões → Revogar acesso (encerra sessões da organização e revoga as credenciais de
+  API/CLI criadas pelo membro; efeito imediato). Rebaixar o papel limita, na requisição seguinte, os escopos
+  das credenciais criadas por ele.
 - Credencial de API/CLI: Usuários e permissões → Revogar. Requisições seguintes recebem 401.
 - Sessões de um usuário: redefinição de senha revoga todas as sessões.
 

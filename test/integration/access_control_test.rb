@@ -31,4 +31,25 @@ class AccessControlTest < DatabaseTest
     assert_equal "manager", uc(:change_member_role).call(first, membership_id: membership_of(attendant)["id"], role: "manager")
   end
 
+  def test_credentials_follow_the_membership_and_the_current_role_of_their_creator
+    admin = staff_member(@org, "admin@alfa.test", "admin")
+    token = uc(:create_credential).call(admin, name: "ERP", scopes: %w[customers.read customers.write], expires_in_days: 30)["token"]
+    other = uc(:create_credential).call(@owner, name: "BI", scopes: %w[customers.read], expires_in_days: 30)["token"]
+    actor = uc(:authenticate_credential).call(token)
+
+    assert_equal %w[customers.read customers.write], actor.scopes
+    uc(:change_member_role).call(@owner, membership_id: membership_of(admin)["id"], role: "auditor")
+    demoted = uc(:authenticate_credential).call(token)
+
+    assert_equal %w[customers.read], demoted.scopes, "escopos limitados ao papel atual do criador"
+    assert_raises(D::AccessDenied) { uc(:create_customer).call(actor, kind: "individual", name: "Cliente", document: "52998224725") }
+    uc(:revoke_membership).call(@owner, membership_id: membership_of(admin)["id"])
+
+    assert_nil uc(:authenticate_credential).call(token), "vínculo revogado"
+    assert_raises(D::AccessDenied) { uc(:list_customers).call(actor) }
+    revoked = owner_query("SELECT name FROM api_credentials WHERE revoked_at IS NOT NULL").map { |r| r["name"] }
+
+    assert_equal ["ERP"], revoked
+    refute_nil uc(:authenticate_credential).call(other), "credenciais de outros membros continuam válidas"
+  end
 end

@@ -140,7 +140,8 @@ module Locentra
                                                                                 hasher: s[:hasher], audit: audit, ids: ids)
       uc[:change_member_role] = A::Organizations::ChangeMemberRole.new(**common, organizations: r[:organizations], audit: audit)
       uc[:revoke_membership] = A::Organizations::RevokeMembership.new(**common, organizations: r[:organizations],
-                                                                                sessions_repository: r[:sessions], audit: audit)
+                                                                                sessions_repository: r[:sessions], credentials: r[:credentials],
+                                                                                audit: audit)
       uc[:list_members] = A::Organizations::ListMembers.new(uow: uow, organizations: r[:organizations])
       uc[:get_organization] = A::Organizations::GetOrganization.new(uow: uow, organizations: r[:organizations])
       uc[:create_credential] = A::Integrations::CreateCredential.new(**common, credentials: r[:credentials], limits: s[:limits], audit: audit, ids: ids)
