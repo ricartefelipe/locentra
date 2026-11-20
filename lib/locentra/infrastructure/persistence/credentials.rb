@@ -11,19 +11,29 @@ module Locentra
           SQL
         end
 
-        # Credencial válida de organização ativa (suspensa ou encerrada não autentica).
+        # Credencial válida de organização ativa (suspensa ou encerrada não autentica) cujo criador
+        # continua membro ativo; `creator_role` limita os escopos efetivos.
         def find_active(tx, digest, now)
           tx.query_one(<<~SQL, [tx.tenant_id!, digest, now])
-            SELECT c.id, c.kind, c.scopes FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
+            SELECT c.id, c.kind, c.scopes, m.role AS creator_role
+              FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
+              LEFT JOIN memberships m ON m.organization_id = c.organization_id AND m.user_id = c.created_by AND m.status = 'active'
              WHERE c.organization_id = $1 AND c.token_digest = $2 AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > $3)
-               AND o.status = 'active'
+               AND o.status = 'active' AND (c.created_by IS NULL OR m.id IS NOT NULL)
+          SQL
+        end
+
+        # Credenciais ativas criadas pelo usuário (revogadas junto com o vínculo dele).
+        def revoke_created_by(tx, user_id, now)
+          tx.query(<<~SQL, [tx.tenant_id!, user_id, now]).map { |row| row["id"] }
+            UPDATE api_credentials SET revoked_at = $3 WHERE organization_id = $1 AND created_by = $2 AND revoked_at IS NULL RETURNING id
           SQL
         end
 
         def touch(tx, id, now)
-          tx.execute(<<~SQL, [id, now])
+          tx.execute(<<~SQL, [id, now, tx.tenant_id!])
             UPDATE api_credentials SET last_used_at = $2
-             WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < $2::timestamptz - interval '1 minute')
+             WHERE organization_id = $3 AND id = $1 AND (last_used_at IS NULL OR last_used_at < $2::timestamptz - interval '1 minute')
           SQL
         end
 

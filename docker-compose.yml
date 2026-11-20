@@ -5,20 +5,30 @@ x-app-env: &app-env
   APP_BASE_URL: ${APP_BASE_URL:-http://localhost:9292}
   APP_SECRET_KEY_BASE: ${APP_SECRET_KEY_BASE:?defina APP_SECRET_KEY_BASE no .env}
   APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?defina APP_ENCRYPTION_KEY no .env}
+  APP_ENCRYPTION_KEY_PREVIOUS: ${APP_ENCRYPTION_KEY_PREVIOUS:-}
   DATABASE_URL: ${DATABASE_URL:?defina DATABASE_URL no .env}
   WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?defina WORKER_DATABASE_URL no .env}
   PUMA_THREADS: ${PUMA_THREADS:-5}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-5}
   WEB_CONCURRENCY: ${WEB_CONCURRENCY:-0}
   WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+  WEBHOOK_CONCURRENCY: ${WEBHOOK_CONCURRENCY:-1}
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+  API_RATE_LIMIT: ${API_RATE_LIMIT:-1200}
   SMTP_HOST: ${SMTP_HOST:-mailpit}
   SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_TLS: ${SMTP_TLS:-none}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_AUTH: ${SMTP_AUTH:-plain}
   MAIL_FROM: ${MAIL_FROM:-Locentra <nao-responda@locentra.local>}
-  PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-simulator}
+  PAYMENT_PROVIDERS: ${PAYMENT_PROVIDERS:-}
   ASAAS_BASE_URL: ${ASAAS_BASE_URL:-https://api-sandbox.asaas.com/v3}
-  ASAAS_API_KEY: ${ASAAS_API_KEY:-}
   STORAGE_ROOT: /app/storage
   MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
 
 services:
   postgres:
@@ -75,6 +85,8 @@ services:
       - "127.0.0.1:9292:9292"
     volumes:
       - storage:/app/storage
+    # Acima dos 25 s de encerramento gracioso do Puma (worker_shutdown_timeout).
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,6 +99,16 @@ services:
     environment: *app-env
     volumes:
       - storage:/app/storage
+    # O worker não serve HTTP: o healthcheck da imagem (liveness do web) é substituído pelo arquivo de
+    # vida atualizado pela thread de heartbeat.
+    healthcheck:
+      test: ["CMD", "ruby", "bin/worker", "--check"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # Acima dos 25 s que o Runner espera as tarefas em execução ao receber TERM.
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy

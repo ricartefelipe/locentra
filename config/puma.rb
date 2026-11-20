@@ -13,6 +13,11 @@ environment ENV.fetch("APP_ENV", "development")
 preload_app! false
 
 worker_shutdown_timeout 25
+
+# Depois da parada graciosa por TERM, sai com código 0 em vez de relançar o sinal. Como PID 1 do
+# contêiner, o processo não morre pelo sinal relançado (o kernel ignora sinais sem tratador no PID 1) e
+# terminaria com código 1, registrado como falha a cada implantação.
+raise_exception_on_sigterm false
 persistent_timeout 20
 first_data_timeout 30
 

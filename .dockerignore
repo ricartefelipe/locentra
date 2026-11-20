@@ -1,9 +1,8 @@
-.git
-.github
-.idea
-.vscode
-.env
-.env.*
+# Arquivos e diretórios ocultos ficam fora do contexto de build (configurações locais de editores e
+# ferramentas, repositório, segredos); só os necessários à imagem são incluídos de volta.
+.*
+!.ruby-version
+!.rubocop.yml
 !.env.example
 coverage
 tmp

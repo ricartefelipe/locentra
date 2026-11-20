@@ -31,6 +31,20 @@ class TenantIsolationTest < DatabaseTest
     assert_equal "0", owner
   end
 
+  # Toda tabela com organization_id tem RLS habilitada e forçada, exceto as exceções documentadas em
+  # docs/ISOLAMENTO.md (sessions: a autenticação ocorre antes de existir contexto de organização).
+  def test_every_table_with_organization_id_has_forced_row_level_security
+    unprotected = app_connection.exec(<<~SQL).column_values(0)
+      SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+         AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'organization_id' AND NOT a.attisdropped)
+         AND NOT (c.relrowsecurity AND c.relforcerowsecurity)
+       ORDER BY c.relname
+    SQL
+
+    assert_equal %w[sessions], unprotected
+  end
+
   def test_missing_tenant_context_denies_access
     app_connection.exec("BEGIN")
     count = app_connection.exec("SELECT count(*) FROM customers").getvalue(0, 0)

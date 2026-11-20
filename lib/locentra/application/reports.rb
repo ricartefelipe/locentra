@@ -50,14 +50,18 @@ module Locentra
       #   (`job_outcome_totals`), publicados como contadores.
       #
       # Nenhum rótulo carrega organização ou identificador: somente fila, situação e tipo de tarefa.
+      #
+      # Falha na coleta não derruba o /metrics: a série `metrics_collect_success` vai a 0 e o motivo é
+      # registrado no log (`metrics.collect_failed`); as séries derivadas mantêm o último valor coletado.
       class CollectMetrics
         OUTCOME_COUNTERS = { "retry" => "jobs_retries_total", "dead" => "jobs_dead_total" }.freeze
 
-        def initialize(transactor:, reports:, metrics:, clock:)
+        def initialize(transactor:, reports:, metrics:, clock:, logger: nil)
           @transactor = transactor
           @reports = reports
           @metrics = metrics
           @clock = clock
+          @logger = logger
         end
 
         def call
@@ -68,8 +72,11 @@ module Locentra
             name = OUTCOME_COUNTERS[row["outcome"]]
             @metrics.set_counter(name, row["total"].to_i, queue: row["queue"], kind: row["kind"]) if name
           end
+          @metrics.gauge("metrics_collect_success", 1)
           true
-        rescue StandardError
+        rescue StandardError => e
+          @metrics.gauge("metrics_collect_success", 0)
+          @logger&.warn(event: "metrics.collect_failed", error: e.class.name, message: e.message)
           false
         end
 

@@ -27,11 +27,11 @@ module Locentra
 
           def blank(value) = value.to_s.strip.empty? ? nil : value.to_s.strip
 
-          def optional_money(value) = blank(value) && Domain::Money.parse(value)
+          def optional_money(value, field = "valor") = blank(value) && money!(value.to_s.strip, field)
 
           def back_path(ctx, fallback)
             target = ctx.form["voltar"].to_s
-            target.start_with?("/") && !target.start_with?("//") ? target : fallback
+            Controller.local_path?(target) ? target : fallback
           end
         end
 

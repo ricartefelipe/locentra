@@ -146,8 +146,13 @@ module Locentra
             json(checks.values.all? ? 200 : 503, { "status" => checks.values.all? ? "ok" : "degraded", "checks" => checks })
           end
 
+          # Em produção as métricas exigem METRICS_TOKEN: sem ele, o endpoint fica desativado (404) em vez
+          # de expor volume por rota, fila e falhas a qualquer pessoa.
           def metrics(ctx)
             expected = @system.config.metrics_token
+            if expected.nil? && @system.config.production?
+              return [404, { "content-type" => "text/plain; charset=utf-8" }, ["métricas desativadas: defina METRICS_TOKEN"]]
+            end
             if expected && !Rack::Utils.secure_compare(ctx.env["HTTP_AUTHORIZATION"].to_s, "Bearer #{expected}")
               return [401, { "content-type" => "text/plain" }, ["não autorizado"]]
             end
@@ -160,8 +165,8 @@ module Locentra
 
           def database_ok?
             @system.transactor.call { |tx| tx.query_value("SELECT 1") == 1 }
-          rescue StandardError
-            false
+          rescue StandardError => e
+            check_failed("database", e)
           end
 
           def migrations_ok?
@@ -170,7 +175,12 @@ module Locentra
               files = Dir.children(File.join(App::ROOT, "db/migrations")).filter_map { |f| f[/\A(\d{4})_/, 1] }
               (files - applied).empty?
             end
-          rescue StandardError
+          rescue StandardError => e
+            check_failed("migrations", e)
+          end
+
+          def check_failed(check, error)
+            @system.logger.warn(event: "health.check_failed", check: check, error: error.class.name, message: error.message)
             false
           end
         end

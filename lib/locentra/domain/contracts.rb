@@ -151,10 +151,7 @@ module Locentra
           end
         end
 
-        def percent_label(bps)
-          whole, fraction = bps.divmod(100)
-          fraction.zero? ? "#{whole}%" : "#{whole},#{format("%02d", fraction).delete_suffix("0")}%"
-        end
+        def percent_label(bps) = Percent.label(bps)
       end
 
       # Aceite eletrônico simples: identificação declarada, IP, navegador e instante.

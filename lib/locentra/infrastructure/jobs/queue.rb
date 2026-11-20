@@ -9,7 +9,10 @@ module Locentra
       #
       # - `enqueue` usa a transação do negócio: a tarefa existe se e somente se a alteração foi gravada.
       # - `claim` usa transação curta com FOR UPDATE SKIP LOCKED e grava um lease (prazo + token).
-      #   Tarefas 'running' com lease vencido voltam a ser elegíveis (recuperação após queda do worker).
+      #   Tarefas 'running' com lease vencido voltam a ser elegíveis (recuperação após queda do worker),
+      #   e a tentativa abandonada é encerrada como `lease_lost`. Uma tarefa com lease vencido que já
+      #   usou todas as tentativas (o processo morreu durante o handler, por exemplo por falta de
+      #   memória) é encerrada como `dead` em vez de ser reivindicada de novo.
       # - `complete`/`retry_later`/`kill` exigem o token do lease atual (fencing): um worker cujo lease
       #   venceu e foi assumido por outro não consegue registrar resultado.
       # - Nenhum lock de banco é mantido durante a execução da tarefa ou chamadas de rede.
@@ -48,12 +51,15 @@ module Locentra
           inserted == 1 ? id : nil
         end
 
+        EXHAUSTED_LEASE = "lease expirado sem retorno do worker após o limite de tentativas"
+
         def claim(tx, worker:, limit:, queues: ["default"])
           now = @clock.now
+          bury_exhausted(tx, now, queues)
           rows = tx.query(<<~SQL, [now, limit, queues])
             SELECT id FROM jobs
              WHERE queue = ANY($3::text[])
-               AND ((status = 'pending' AND run_at <= $1) OR (status = 'running' AND lease_expires_at <= $1))
+               AND ((status = 'pending' AND run_at <= $1) OR (status = 'running' AND lease_expires_at <= $1 AND attempts < max_attempts))
              ORDER BY priority, run_at
              LIMIT $2
                FOR UPDATE SKIP LOCKED
@@ -65,6 +71,7 @@ module Locentra
                WHERE id = $1
               RETURNING id, organization_id, kind, payload, attempts, max_attempts, lease_token, correlation_id
             SQL
+            close_abandoned(tx, [job["id"]], now, nil)
             attempt_id = @ids.uuid
             # A tarefa está bloqueada (FOR UPDATE) nesta transação: o próximo número é único.
             tx.execute(<<~SQL, [attempt_id, job["id"], job["organization_id"], worker, now])
@@ -144,8 +151,9 @@ module Locentra
         end
 
         def attempts(tx, job_id)
-          tx.query("SELECT attempt, worker, started_at, finished_at, outcome, error FROM job_attempts WHERE job_id = $1 ORDER BY attempt",
-                   [job_id])
+          tx.query(<<~SQL, [job_id, tx.tenant_id!])
+            SELECT attempt, worker, started_at, finished_at, outcome, error FROM job_attempts WHERE job_id = $1 AND organization_id = $2 ORDER BY attempt
+          SQL
         end
 
         def self.worker_name
@@ -153,6 +161,40 @@ module Locentra
         end
 
         private
+
+        # Tarefas cujo worker sumiu durante a última tentativa permitida: encerradas como mortas,
+        # com a tentativa aberta registrada como `lease_lost` e o total por fila e tipo atualizado.
+        def bury_exhausted(tx, now, queues)
+          ids = tx.query(<<~SQL, [now, queues, EXHAUSTED_LEASE]).map { |row| row["id"] }
+            WITH exhausted AS (
+              SELECT id FROM jobs
+               WHERE queue = ANY($2::text[]) AND status = 'running' AND lease_expires_at <= $1 AND attempts >= max_attempts
+               LIMIT 100
+                 FOR UPDATE SKIP LOCKED
+            )
+            UPDATE jobs j SET status = 'dead', last_error = $3, finished_at = $1, lease_token = NULL, lease_expires_at = NULL, locked_by = NULL,
+                              updated_at = $1
+              FROM exhausted e
+             WHERE j.id = e.id
+            RETURNING j.id
+          SQL
+          return if ids.empty?
+
+          close_abandoned(tx, ids, now, EXHAUSTED_LEASE)
+          tx.execute(<<~SQL, [ids, now])
+            INSERT INTO job_outcome_totals (queue, kind, outcome, total, updated_at)
+            SELECT queue, kind, 'dead', count(*), $2 FROM jobs WHERE id = ANY($1::uuid[]) GROUP BY queue, kind
+            ON CONFLICT (queue, kind, outcome) DO UPDATE SET total = job_outcome_totals.total + EXCLUDED.total, updated_at = EXCLUDED.updated_at
+          SQL
+        end
+
+        # Tentativas que ficaram abertas porque o worker perdeu o lease sem registrar resultado.
+        def close_abandoned(tx, job_ids, now, error)
+          tx.execute(<<~SQL, [job_ids, now, error])
+            UPDATE job_attempts SET finished_at = $2, outcome = 'lease_lost', error = COALESCE($3, error)
+             WHERE job_id = ANY($1::uuid[]) AND finished_at IS NULL
+          SQL
+        end
 
         def finish(tx, job, status, error, outcome)
           now = @clock.now

@@ -3,6 +3,9 @@
 # proprietários originais (locentra_owner) e as políticas de RLS. Nunca restaure sobre o banco em uso:
 # restaure em um banco novo, valide e só então troque a configuração da aplicação.
 #
+# O pg_dump não leva as permissões do banco: as mesmas de docker/postgres/init/01-roles.sh são
+# reaplicadas (PUBLIC sem acesso; CONNECT e TEMPORARY para os papéis da aplicação; CONNECT para o backup).
+#
 # Uso: RESTORE_ADMIN_URL=postgres://postgres:...@host/postgres bin/restore <diretório do backup> <banco novo> [STORAGE_DESTINO]
 set -euo pipefail
 src="${1:?uso: bin/restore <diretório do backup> <banco novo> [destino dos anexos]}"
@@ -11,15 +14,26 @@ storage_dest="${3:-}"
 : "${RESTORE_ADMIN_URL:?defina RESTORE_ADMIN_URL (superusuário do PostgreSQL)}"
 
 ( cd "$src" && sha256sum --check --quiet MANIFESTO.sha256 )
+if [ -n "$storage_dest" ] && [ ! -f "$src/anexos.tar.gz" ]; then
+  echo "erro: o backup não contém anexos (veja $src/SEM-ANEXOS)" >&2
+  exit 1
+fi
 psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$target\" OWNER locentra_owner"
-target_url="${RESTORE_ADMIN_URL%/*}/$target"
+
+# Troca só o nome do banco na URL, preservando parâmetros como ?sslmode=require.
+base="${RESTORE_ADMIN_URL%%\?*}"
+query=""
+[ "$base" != "$RESTORE_ADMIN_URL" ] && query="?${RESTORE_ADMIN_URL#*\?}"
+target_url="${base%/*}/$target$query"
+
 pg_restore --exit-on-error --dbname="$target_url" "$src/banco.dump"
 psql "$target_url" -v ON_ERROR_STOP=1 \
+  -c "REVOKE ALL ON DATABASE \"$target\" FROM PUBLIC" \
   -c "GRANT CONNECT, TEMPORARY ON DATABASE \"$target\" TO locentra_owner, locentra_app, locentra_worker" \
   -c "GRANT CONNECT ON DATABASE \"$target\" TO locentra_backup"
 
-if [ -n "$storage_dest" ] && [ -f "$src/anexos.tar.gz" ]; then
+if [ -n "$storage_dest" ]; then
   mkdir -p "$storage_dest"
   tar -C "$storage_dest" -xzf "$src/anexos.tar.gz"
 fi
-echo "Restaurado em $target. Valide com: MIGRATION_DATABASE_URL=<owner@$target> bin/locentra-admin db:status"
+echo "Restaurado em $target. Valide com db:status usando a credencial do proprietário no banco novo (docs/RUNBOOKS.md, seção 4)."

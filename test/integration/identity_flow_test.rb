@@ -23,10 +23,12 @@ class IdentityFlowTest < DatabaseTest
       uc(:sign_up).call(name: "Outra", email: "dona@alfa.test", password: "senha-muito-segura-1", organization_name: "Outra Empresa")
     end
     assert_equal "email_taken", error.code
-    slug = assert_raises(D::Conflict) do
-      uc(:sign_up).call(name: "Outra", email: "nova@alfa.test", password: "senha-muito-segura-1", organization_name: "Locadora Alfa")
-    end
-    assert_equal "slug_taken", slug.code
+    homonym = uc(:sign_up).call(name: "Outra", email: "nova@alfa.test", password: "senha-muito-segura-1", organization_name: "Locadora Alfa")
+    name, slug = owner_query("SELECT name, slug FROM organizations", [], tenant: homonym[:organization_id]).first.values_at("name", "slug")
+
+    refute_equal @org[:organization_id], homonym[:organization_id]
+    assert_equal "Locadora Alfa", name, "nome repetido não revela a outra organização"
+    assert_match(/\Alocadora-alfa-[0-9a-f]{6}\z/, slug)
     assert_raises(D::ValidationError) { uc(:sign_up).call(name: "X", email: "x@y.test", password: "curta", organization_name: "Empresa X") }
     assert_raises(D::ValidationError) { uc(:sign_up).call(name: "X", email: "x@y.test", password: "senha-muito-segura-1", organization_name: "Empresa X", plan_id: "ouro") }
   end
@@ -138,16 +140,6 @@ class IdentityFlowTest < DatabaseTest
 
     assert_raises(D::Conflict) { uc(:revoke_membership).call(@actor, membership_id: admin_membership["id"]) }
     assert_raises(D::NotFound) { uc(:revoke_membership).call(@actor, membership_id: SecureRandom.uuid) }
-  end
-
-  def test_switch_organization_requires_active_membership
-    _, session = sessions.create(user_id: @org[:user_id])
-    other = create_organization(name: "Locadora Delta", email: "delta@example.test")
-
-    assert_raises(D::AccessDenied) { uc(:switch_organization).call(session, other[:organization_id]) }
-    token, = uc(:switch_organization).call(session, @org[:organization_id])
-
-    assert_equal @org[:organization_id], sessions.resolve(token)["organization_id"]
   end
 
   def test_plan_limits_are_enforced

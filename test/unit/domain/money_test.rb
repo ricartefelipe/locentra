@@ -112,4 +112,11 @@ class MoneyTest < UnitTest
       assert_operator (Money.new(cents).percent(bps).cents - exact).abs, :<=, Rational(1, 2)
     end
   end
+
+  def test_percent_labels_use_integer_arithmetic
+    labels = [500, 250, 1234, 1205, 0, 10_000].map { |bps| Domain::Percent.label(bps) }
+
+    assert_equal %w[5% 2,5% 12,34% 12,05% 0% 100%], labels
+    assert_equal "2,5", Domain::Percent.value(250)
+  end
 end

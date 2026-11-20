@@ -113,15 +113,17 @@ module Locentra
           @ids = ids
         end
 
+        # O convite é conferido antes do bcrypt: token inválido ou expirado não custa um hash.
         def call(token:, user_id: nil, name: nil, password: nil)
           org_id, = token.to_s.split(".", 2)
           raise Domain::ValidationError.field("token", "convite inválido") unless Domain::Identifier.valid?(org_id)
 
+          now = @clock.now
           digest = if user_id.nil?
                      Domain::Identity::PasswordPolicy.validate!(password)
+                     pending!(org_id, token, now)
                      @hasher.hash(password)
                    end
-          now = @clock.now
           @uow.anonymous(tenant_id: org_id, user_id: user_id) do |tx|
             invitation = @portal.lock_invitation_by_digest(tx, Identity::Tokens.digest(token))
             raise Domain::ValidationError.field("token", "convite inválido ou expirado") unless invitation&.pending?(now)
@@ -140,6 +142,11 @@ module Locentra
         end
 
         private
+
+        def pending!(org_id, token, now)
+          pending = @uow.anonymous(tenant_id: org_id) { |tx| @portal.lock_invitation_by_digest(tx, Identity::Tokens.digest(token))&.pending?(now) }
+          raise Domain::ValidationError.field("token", "convite inválido ou expirado") unless pending
+        end
 
         def resolve_user(tx, invitation, user_id, name, digest, now)
           if user_id

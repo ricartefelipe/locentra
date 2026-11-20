@@ -4,7 +4,7 @@
   <% if @details && @details["fields"] %>
     <ul>
       <% @details["fields"].each do |field, messages| %>
-        <li><%= field %>: <%= Array(messages).join("; ") %></li>
+        <li><%= label(:field, field) %>: <%= Array(messages).join("; ") %></li>
       <% end %>
     </ul>
   <% end %>

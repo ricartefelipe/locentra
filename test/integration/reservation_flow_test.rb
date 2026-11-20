@@ -98,6 +98,27 @@ class ReservationFlowTest < DatabaseTest
 
     assert_equal "confirmed", fresh.status
     assert_equal "expired", uc(:get_reservation).call(@actor, stale.id)[:reservation].status
+    assert_expiration_recorded(stale.id, "allocation")
+  end
+
+  # Toda expiração publica reservation.expired (webhooks, sincronização financeira) e registra
+  # auditoria, qualquer que seja o gatilho.
+  def assert_expiration_recorded(id, trigger)
+    events = owner_query("SELECT event_type FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'reservation.expired'", [id])
+    audit = owner_query("SELECT details->>'trigger' AS t FROM audit_events WHERE resource_id = $1 AND action = 'reservation.expired'", [id])
+
+    assert_equal 1, events.size, "evento reservation.expired (#{trigger})"
+    assert_equal([trigger], audit.map { |r| r["t"] })
+  end
+
+  def test_expiration_on_confirmation_attempt_publishes_the_event
+    camera = create_product(@actor, sku: "CAM-EVT", tracking: "serialized")
+    register_assets(@actor, camera, @branch, 1)
+    hold = reserve(@actor, @customer, @branch, morning, [line(camera, 1)], hold_minutes: 5)
+    @clock.advance(6 * 60)
+
+    assert_raises(D::HoldExpired) { uc(:confirm_reservation).call(@actor, hold.id) }
+    assert_expiration_recorded(hold.id, "confirmation_attempt")
   end
 
   def test_requested_reservation_allocates_on_confirmation_and_rejects_incompatible_one
@@ -244,6 +265,7 @@ class ReservationFlowTest < DatabaseTest
     actions = owner_query("SELECT action FROM audit_events WHERE resource_id = $1 ORDER BY occurred_at", [hold.id]).map { |r| r["action"] }
 
     assert_equal %w[reservation.created reservation.expired], actions
+    assert_expiration_recorded(hold.id, "sweeper")
   end
 
   def test_blocked_customer_and_past_start_are_rejected

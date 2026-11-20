@@ -2,6 +2,8 @@
 
 require_relative "integration_helper"
 require_relative "../support/worker_support"
+require_relative "../support/barrier"
+require "tmpdir"
 
 class WorkerTest < DatabaseTest
   include WorkerHelpers
@@ -123,6 +125,158 @@ class WorkerTest < DatabaseTest
     assert(wtx { |tx| queue.attempts(tx, id) }.all? { |row| row["finished_at"] })
   end
 
+  # Processo que morre durante o handler (falta de memória, SIGKILL) não chama retry_later: o limite
+  # de tentativas é aplicado na recuperação do lease vencido.
+  def test_expired_lease_on_the_last_attempt_ends_the_job_as_dead
+    id = wtx { |tx| queue.enqueue(tx, "email.send", { "template" => "nao_existe" }, max_attempts: 2) }
+    2.times do
+      refute_nil(worker_system.transactor.call { |tx| queue.claim(tx, worker: "morto", limit: 1).first })
+      @clock.advance(121)
+    end
+
+    assert_nil(worker_system.transactor.call { |tx| queue.claim(tx, worker: "c", limit: 1).first })
+    row = jobs("kind = 'email.send'").first
+
+    assert_equal(["dead", 2, Q::EXHAUSTED_LEASE], row.values_at("status", "attempts", "last_error").then { |a| [a[0], a[1].to_i, a[2]] })
+    history = wtx { |tx| queue.attempts(tx, id) }
+
+    assert_equal([%w[1 lease_lost], %w[2 lease_lost]], history.map { |r| [r["attempt"].to_s, r["outcome"]] })
+    assert(history.all? { |r| r["finished_at"] })
+    totals = PG.connect(TestDatabase.worker_url).then { |c| c.exec("SELECT kind, outcome, total FROM job_outcome_totals").to_a.tap { c.close } }
+
+    assert_equal([{ "kind" => "email.send", "outcome" => "dead", "total" => "1" }], totals.map { |t| t.transform_values(&:to_s) })
+  end
+
+  def test_claim_takes_lower_priority_numbers_first
+    { 90 => "c", 10 => "a", 50 => "b" }.each { |priority, name| wtx { |tx| queue.enqueue(tx, "email.send", { "n" => name }, priority: priority) } }
+    order = Array.new(3) { worker_system.transactor.call { |tx| queue.claim(tx, worker: "w", limit: 1).first.payload["n"] } }
+
+    assert_equal %w[a b c], order
+  end
+
+  # Duas reivindicações simultâneas: a primeira mantém o lock da tarefa até o fim da transação; a
+  # segunda recebe a outra tarefa sem esperar (SKIP LOCKED).
+  def test_concurrent_claims_receive_distinct_jobs_without_blocking
+    2.times { |i| wtx { |tx| queue.enqueue(tx, "email.send", { "n" => i }) } }
+    holding = Barrier.new(2)
+    released = Barrier.new(2)
+    first = Thread.new do
+      worker_system.transactor.call do |tx|
+        job = queue.claim(tx, worker: "a", limit: 1).first
+        holding.wait
+        released.wait
+        job
+      end
+    end
+    holding.wait
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    second = worker_system.transactor.call { |tx| queue.claim(tx, worker: "b", limit: 1).first }
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    released.wait
+
+    refute_equal first.value.id, second.id
+    assert_operator elapsed, :<, 2, "a segunda reivindicação não espera o lock da primeira"
+  end
+
+  def test_webhook_deliveries_use_their_own_queue_and_threads
+    server = CaptureServer.new
+    uc(:create_webhook).call(@org[:actor], url: server.url, events: ["*"])
+    customer = create_customer(@org[:actor])
+    chairs = create_product(@org[:actor], sku: "CAD-Q", tracking: "bulk")
+    stock(@org[:actor], chairs, @org[:branch], 5)
+    reserve(@org[:actor], customer, @org[:branch], period("2026-03-10T08:00:00Z", "2026-03-10T10:00:00Z"), [line(chairs, 1)], mode: "confirm")
+    drain
+
+    assert server.requests.pop(timeout: 5), "drain atende também a fila de webhooks"
+    queues = PG.connect(TestDatabase.worker_url).then do |c|
+      c.exec("SELECT kind, queue FROM jobs WHERE kind = 'webhooks.deliver'").to_a.tap { c.close }
+    end
+
+    refute_empty queues
+    assert(queues.all? { |row| row["queue"] == "webhooks" })
+    lanes = runner.instance_variable_get(:@lanes)
+
+    assert_equal [[["default"], 1], [["webhooks"], 1]], lanes
+  ensure
+    server&.stop
+  end
+
+  # Banco indisponível: os laços esperam com backoff em vez de girar sem pausa.
+  def test_loops_wait_with_backoff_when_the_database_is_unavailable
+    failing = Object.new
+    def failing.call(*, **) = raise(PG::ConnectionBad, "banco indisponível")
+    fake = Struct.new(:transactor, :queue, :clock, :metrics) { def shutdown = nil }.new(failing, queue, @clock, worker_system.metrics)
+    log = StringIO.new
+    logger = Locentra::Infrastructure::Observability::StructuredLogger.new(io: log, level: "info")
+    loops = Locentra::Interfaces::Worker::Runner.new(system: fake, handlers: nil, concurrency: 2, logger: logger, scheduler: true)
+    threads = loops.start_threads
+    Thread.pass until log.string.scan("worker.scheduler_failed").size >= 1 && log.string.scan("worker.thread_crashed").size >= 3
+    sleep 1.2
+    loops.stop(threads, timeout: 2)
+    events = log.string.lines.map { |line| JSON.parse(line)["event"] }.tally
+
+    assert_operator events.fetch("worker.thread_crashed"), :<=, 9, events.inspect
+    assert_operator events.fetch("worker.scheduler_failed"), :<=, 3, events.inspect
+  end
+
+  # Healthcheck do contêiner do worker (bin/worker --check): arquivo de vida atualizado pela thread de
+  # heartbeat, considerado vencido depois de 90 s sem atualização.
+  def test_heartbeat_thread_keeps_the_health_file_fresh
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "vida", "worker.alive")
+      alive = Locentra::Interfaces::Worker::Runner.new(system: worker_system, handlers: nil, concurrency: 0, webhook_concurrency: 0,
+                                                       logger: worker_system.logger, scheduler: false, health_file: path)
+      threads = alive.start_threads
+
+      assert Locentra::Interfaces::Worker::Runner.alive?(path)
+      refute Locentra::Interfaces::Worker::Runner.alive?(path, now: File.mtime(path) + 91)
+      refute Locentra::Interfaces::Worker::Runner.alive?(File.join(dir, "inexistente"))
+      alive.stop(threads, timeout: 2)
+    end
+  end
+
+  # Retenção: tarefas concluídas saem depois de 14 dias, com as tentativas; mortas e recentes ficam.
+  def test_housekeeping_purges_old_finished_jobs_with_their_attempts
+    old = Array.new(2) { |i| wtx { |tx| queue.enqueue(tx, "email.send", { "n" => i }) } }
+    old.each { worker_system.transactor.call { |tx| queue.complete(tx, queue.claim(tx, worker: "w", limit: 1).first) } }
+    dead = wtx { |tx| queue.enqueue(tx, "email.send", { "n" => "morta" }) }
+    worker_system.transactor.call { |tx| queue.kill(tx, queue.claim(tx, worker: "w", limit: 1).first, "falha") }
+    @clock.advance(Locentra::Interfaces::Worker::Handlers::JOB_RETENTION + 60)
+    recent = wtx { |tx| queue.enqueue(tx, "email.send", { "n" => "recente" }) }
+    worker_system.transactor.call { |tx| queue.complete(tx, queue.claim(tx, worker: "w", limit: 1).first) }
+    handlers = Locentra::Interfaces::Worker::Handlers.new(worker_system, mailer: @mailer, templates: worker_system.services[:mail_templates])
+
+    purged = handlers.send(:platform_housekeeping, nil)["jobs_purged"]
+
+    assert_operator purged, :>=, 2, "as duas antigas (e as concluídas no setup)"
+    remaining = PG.connect(TestDatabase.worker_url).then do |c|
+      [c.exec("SELECT id FROM jobs WHERE kind = 'email.send'").column_values(0).sort,
+       c.exec_params("SELECT count(*) FROM job_attempts WHERE job_id = ANY($1::uuid[])", ["{#{old.join(",")}}"]).getvalue(0, 0).to_i].tap { c.close }
+    end
+
+    assert_equal [[dead, recent].sort, 0], remaining
+  end
+
+  # Encerramento gracioso: o TERM interrompe a espera das threads, mas a tarefa em execução termina e
+  # é concluída antes de o pool ser fechado.
+  def test_stop_waits_for_the_running_job_to_finish
+    wtx { |tx| queue.enqueue(tx, "teste.demorada", {}) }
+    started = Queue.new
+    handlers = Locentra::Interfaces::Worker::Handlers.new(worker_system, mailer: @mailer, templates: worker_system.services[:mail_templates])
+    handlers.register("teste.demorada", lambda do |_job|
+      started << true
+      sleep 0.5
+      :concluida
+    end)
+    graceful = Locentra::Interfaces::Worker::Runner.new(system: worker_system, handlers: handlers, concurrency: 1, webhook_concurrency: 0,
+                                                        logger: worker_system.logger, scheduler: false, poll_interval: 0.05)
+    threads = graceful.start_threads
+    started.pop
+    graceful.stop(threads, timeout: 5)
+
+    assert_equal "succeeded", jobs("kind = 'teste.demorada'").first["status"]
+  end
+
   def test_unknown_job_kind_fails_permanently
     wtx { |tx| queue.enqueue(tx, "desconhecido.tipo", {}) }
     drain
@@ -197,6 +351,16 @@ class WorkerTest < DatabaseTest
     assert_equal "failed", uc(:list_webhooks).call(@org[:actor])[:deliveries].first["status"]
   ensure
     server&.stop
+  end
+
+  # A auditoria é visível ao papel auditor: o caminho e a query da URL (que costumam levar segredos) ficam de fora.
+  def test_webhook_endpoint_audit_keeps_only_scheme_and_host
+    uc(:create_webhook).call(@org[:actor], url: "http://127.0.0.1:9/hooks/T000/B000/XXXX?token=segredo", events: ["*"])
+    details = owner_query("SELECT details FROM audit_events WHERE action = 'webhook.endpoint_created'").first["details"]
+
+    assert_equal "http://127.0.0.1:9/…", JSON.parse(details)["url"]
+    refute_includes details, "segredo"
+    assert_equal "https://hooks.example", A::Webhooks::CreateEndpoint.audit_url("https://hooks.example/")
   end
 
   def test_webhook_endpoint_validation_and_plan_gate

@@ -159,5 +159,19 @@ module Locentra
         raise ArgumentError, "moedas diferentes: #{currency} e #{other.currency}" unless other.currency == currency
       end
     end
+
+    # Percentuais em pontos-base exibidos com aritmética inteira (sem Float): 500 → "5%",
+    # 250 → "2,5%", 1234 → "12,34%".
+    module Percent
+      module_function
+
+      def label(bps) = "#{value(bps)}%"
+
+      # Mesmo texto, sem o símbolo (valor de campo de formulário).
+      def value(bps)
+        whole, fraction = Integer(bps).divmod(100)
+        fraction.zero? ? whole.to_s : "#{whole},#{format("%02d", fraction).delete_suffix("0")}"
+      end
+    end
   end
 end

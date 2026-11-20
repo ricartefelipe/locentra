@@ -25,6 +25,20 @@ module Locentra
             blank(value) && local_time(ctx, value, field)
           end
 
+          # Envio único de formulário que movimenta dinheiro: cada renderização leva uma chave própria
+          # (campo oculto `envio`), usada como chave de idempotência. Um duplo clique ou o reenvio do
+          # navegador repete a chave e recebe o resultado gravado, sem segundo pagamento. Sem a chave
+          # (cliente que não usa o formulário), a operação é executada normalmente.
+          def once(ctx, permission, &)
+            key = ctx.form["envio"].to_s
+            return yield(nil, ctx.actor).then { |status, body| [status, body, false] } if key.empty?
+
+            payload = ctx.form.except("_csrf", "envio")
+            result = uc(:idempotency).call(ctx.actor, permission: permission, scope: "web:#{ctx.path}", key: key,
+                                                      fingerprint: Application::Idempotency.fingerprint("POST", ctx.path, payload), &)
+            [result.status, result.body, result.replayed]
+          end
+
           def back_to(ctx, fallback)
             target = ctx.form["voltar"].to_s
             target.start_with?("/financeiro", "/reservas") ? target : fallback
@@ -90,20 +104,26 @@ module Locentra
 
           def register_payment(ctx)
             f = ctx.form
-            uc(:register_payment).call(ctx.actor, { purpose: "receivable", receivable_id: ctx.param(:id), method: f["metodo"].to_s,
-                                                    amount: money_param(f["valor"]), paid_at: optional_time(ctx, f["pago_em"], "pago_em"),
-                                                    notes: f["observacoes"] })
-            redirect(ctx, "/financeiro/cobrancas/#{ctx.param(:id)}", notice: "Pagamento registrado.")
+            input = { purpose: "receivable", receivable_id: ctx.param(:id), method: f["metodo"].to_s, amount: money_param(f["valor"]),
+                      paid_at: optional_time(ctx, f["pago_em"], "pago_em"), notes: f["observacoes"] }
+            _, _, replayed = once(ctx, "finance.write") do |tx, actor|
+              [201, { "id" => uc(:register_payment).call(actor, input, tx: tx).id }]
+            end
+            redirect(ctx, "/financeiro/cobrancas/#{ctx.param(:id)}",
+                     notice: replayed ? "Pagamento já registrado (envio repetido do formulário)." : "Pagamento registrado.")
           rescue *FAILURES => e
             show(ctx, errors: errors_of(e), status: 422)
           end
 
           def request_payment(ctx)
             f = ctx.form
-            payment = uc(:request_payment).call(ctx.actor, { purpose: "receivable", receivable_id: ctx.param(:id), method: f["metodo"].to_s,
-                                                             amount: money_param(f["valor"]), due_on: date_param(f["vencimento"], "vencimento"),
-                                                             scenario: f["cenario"], notes: f["observacoes"] })
-            redirect(ctx, "/financeiro/pagamentos/#{payment.id}", notice: "Cobrança enviada ao provedor em segundo plano.")
+            input = { purpose: "receivable", receivable_id: ctx.param(:id), method: f["metodo"].to_s, amount: money_param(f["valor"]),
+                      due_on: date_param(f["vencimento"], "vencimento"), scenario: f["cenario"], notes: f["observacoes"] }
+            _, body, replayed = once(ctx, "finance.write") do |tx, actor|
+              [201, { "id" => uc(:request_payment).call(actor, input, tx: tx).id }]
+            end
+            redirect(ctx, "/financeiro/pagamentos/#{body["id"]}",
+                     notice: replayed ? "Cobrança já solicitada (envio repetido do formulário)." : "Cobrança enviada ao provedor em segundo plano.")
           rescue *FAILURES => e
             show(ctx, errors: errors_of(e), status: 422)
           end

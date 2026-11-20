@@ -10,8 +10,9 @@ atualizado.
 - **Decisão:** Ruby 4.0.9, fixado em `.ruby-version`, no `Gemfile` (`ruby file:`) e na imagem
   `ruby:4.0.9-slim-trixie`.
 - **Consequências:** no Ruby 4.0, `bigdecimal`, `csv`, `logger`, `net-smtp`, `minitest` e `rake` são
-  bundled gems e precisam ser declaradas no `Gemfile`. `json`, `erb`, `date`, `time`, `securerandom`,
-  `openssl`, `optparse`, `net-http`, `uri` e `ipaddr` continuam default gems e não são declaradas.
+  bundled gems e precisam ser declaradas no `Gemfile`. `erb`, `date`, `time`, `securerandom`, `openssl`,
+  `optparse`, `net-http`, `uri` e `ipaddr` continuam default gems e não são declaradas; `json` passou a ser
+  declarada na versão corrigida (ADR-011).
 
 ## ADR-002 — Sem framework de aplicação e sem ORM
 
@@ -79,12 +80,14 @@ atualizado.
 
 - **Decisão:** toda operação de negócio abre transação com `set_config('app.tenant_id', ..., true)`
   (escopo local) a partir do ator autenticado. Políticas RLS (`ENABLE` e `FORCE`) comparam
-  `organization_id` com `app_tenant_id()`; ausência de contexto resulta em nenhuma linha. Três papéis:
-  `locentra_owner` (migrations, proprietário), `locentra_app` (web/CLI) e `locentra_worker` (fila),
-  todos sem superuser e sem `BYPASSRLS`. Chaves estrangeiras compostas `(organization_id, id)`
+  `organization_id` com `app_tenant_id()`; ausência de contexto resulta em nenhuma linha. Três papéis de
+  operação: `locentra_owner` (migrations, proprietário), `locentra_app` (web/CLI) e `locentra_worker`
+  (fila), todos sem superuser e sem `BYPASSRLS`; o papel de backup `locentra_backup`, com `BYPASSRLS`, foi
+  acrescentado pela ADR-024. Chaves estrangeiras compostas `(organization_id, id)`
   impedem relações entre tenants mesmo com SQL incorreto.
-- **Exceções globais documentadas:** `users`, `sessions`, `user_tokens`, `rate_limits`, `plans` e
-  `queue_stats`. `organizations` tem RLS com leitura pelo próprio tenant, por membros ativos e pelo
+- **Exceções globais documentadas:** `users`, `sessions`, `user_tokens`, `rate_limits`, `plans`,
+  `queue_stats` e `job_outcome_totals` (ADR-025); as políticas além do isolamento por tenant estão
+  consolidadas em `ISOLAMENTO.md`. `organizations` tem RLS com leitura pelo próprio tenant, por membros ativos e pelo
   worker. Tarefas de e-mail de identidade sem organização podem ser inseridas, mas não lidas, pela
   aplicação.
 
@@ -127,7 +130,9 @@ atualizado.
 
 - **Decisão:** cookie com token aleatório de 256 bits; o banco guarda SHA-256. HttpOnly, SameSite=Lax,
   Secure e prefixo `__Host-` com HTTPS. Rotação em login e troca de organização. CSRF por token
-  sincronizado por sessão. ERB com `<%= %>` escapando sempre (subclasse de `ERB` que altera o comando de
+  sincronizado por sessão; formulários públicos (entrada, cadastro, recuperação e redefinição de senha,
+  aceite de convites), que não têm sessão, recusam envios com `Sec-Fetch-Site: cross-site` ou `Origin`
+  diferente da aplicação (CSRF de login); com sessão, o aceite de convite exige o token. ERB com `<%= %>` escapando sempre (subclasse de `ERB` que altera o comando de
   inserção); HTML confiável só por `raw`/helpers. CSP sem `unsafe-inline`.
 
 ## ADR-019 — Tokens de uso único emitidos no envio
@@ -141,7 +146,9 @@ atualizado.
   thread de renovação de leases e thread de agendamento. Reivindicação com `FOR UPDATE SKIP LOCKED` em
   transação curta; conclusão e reagendamento exigem o `lease_token` atual. Backoff exponencial com
   variação determinística e teto de 6 horas; tarefas esgotadas ficam `dead` e podem ser reprocessadas
-  por usuário com `jobs.manage`. O agendador usa `unique_key` por janela de 60 s, de modo que vários
+  por usuário com `jobs.manage`. Uma tarefa com lease vencido na última tentativa permitida (processo
+  morto durante o handler) também termina `dead`, sem nova reivindicação; a tentativa abandonada é
+  registrada como `lease_lost`. O agendador usa `unique_key` por janela de 60 s, de modo que vários
   workers geram uma única tarefa. Encerramento por `TERM`/`INT` via self-pipe, aguardando as threads.
 - **Consequências:** entrega "pelo menos uma vez"; handlers são idempotentes (despacho da outbox marca
   `dispatched_at` sob lock; entregas de webhook são únicas por `(endpoint, evento)`; e-mails podem ser
@@ -151,7 +158,10 @@ atualizado.
 
 - **Decisão:** somente HTTPS em produção; todos os IPs resolvidos devem ser públicos (bloqueio de
   privados, loopback, link-local, metadados, multicast, reservados e IPv4 mapeado); conexão pelo IP
-  validado (`Net::HTTP#ipaddr`); redirecionamentos não são seguidos; tempos limite curtos. Assinatura
+  validado (`Net::HTTP#ipaddr`); redirecionamentos não são seguidos; tempos limite por operação de rede,
+  prazo total de 15 s por entrega e leitura da resposta em partes interrompida em 4 KiB; sem nova
+  tentativa automática do `Net::HTTP`. Entregas na fila `webhooks`, atendida por threads próprias do
+  worker (`WEBHOOK_CONCURRENCY`), isoladas das demais tarefas. Assinatura
   `t=<timestamp>,v1=<HMAC-SHA256>` com identificadores estáveis de evento e entrega. O segredo de
   assinatura é cifrado com AES-256-GCM (chave derivada por HKDF).
 
@@ -197,3 +207,19 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   tabela global sem dados de tenant e expostos pelo processo web; conflitos contados na unidade de trabalho;
   rótulos com aparência de identificador mascarados; `request_id` propagado à outbox, às tarefas e às chamadas
   externas.
+
+## ADR-026 — Limites de taxa e IP do cliente
+
+- **Decisão:** limites por janela fixa persistidos em `rate_limits` (valem entre processos). Entrada:
+  30 por IP em 5 min e 10 por e-mail em 15 min; recuperação de senha: 10 por IP e 3 por e-mail por
+  hora; cadastro: 10 por IP e 5 por e-mail por hora; redefinição de senha e aceite de convites (equipe
+  e portal): 20 por IP por hora; webhook de pagamento: 1200 por IP por minuto; API: `API_RATE_LIMIT`
+  por credencial por minuto (padrão 1200); solicitações de reserva do portal: 30 por usuário por hora.
+  Acima do limite a resposta é `429` com `Retry-After`. Tokens de redefinição e convites são conferidos
+  antes do bcrypt, e o cadastro confere o e-mail antes do hash. O IP do cliente é o par da conexão;
+  `X-Forwarded-For` só é considerado quando a conexão vem de um proxy listado em `TRUSTED_PROXIES`, e
+  `Forwarded` nunca é usado.
+- **Consequências:** clientes atrás do mesmo NAT compartilham os limites por IP. O cadastro informa
+  que o e-mail já tem conta (a conta nova entra direto na organização criada, então uma resposta neutra
+  não esconderia a diferença); a enumeração fica limitada pelos limites por IP e por e-mail. Nome de
+  organização repetido recebe sufixo aleatório no identificador, sem revelar a outra organização.

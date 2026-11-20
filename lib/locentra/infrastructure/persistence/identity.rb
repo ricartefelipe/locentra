@@ -105,6 +105,12 @@ module Locentra
           tx.execute("UPDATE user_tokens SET used_at = $3 WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL", [user_id, purpose, now])
         end
 
+        def usable?(tx, digest, purpose, now)
+          !tx.query_one(<<~SQL, [digest, purpose, now]).nil?
+            SELECT 1 FROM user_tokens WHERE token_digest = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > $3
+          SQL
+        end
+
         # Marca como usado e devolve a linha somente se ainda válido: uso único sob concorrência.
         def consume(tx, digest, purpose, now)
           tx.query_one(<<~SQL, [digest, purpose, now])
@@ -125,12 +131,17 @@ module Locentra
         end
 
         # Como no vínculo de usuários, a organização precisa estar ativa (não suspensa nem encerrada).
+        # Quem criou a credencial precisa continuar membro ativo; `creator_role` é o papel atual dele
+        # (os escopos efetivos não passam das permissões desse papel).
         def active_credential(tx, credential_id, now)
           return nil unless credential_id
 
           tx.query_one(<<~SQL, [credential_id, now])
-            SELECT c.id, c.organization_id, c.kind, c.scopes FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
+            SELECT c.id, c.organization_id, c.kind, c.scopes, m.role AS creator_role
+              FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
+              LEFT JOIN memberships m ON m.organization_id = c.organization_id AND m.user_id = c.created_by AND m.status = 'active'
              WHERE c.id = $1 AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > $2) AND o.status = 'active'
+               AND (c.created_by IS NULL OR m.id IS NOT NULL)
           SQL
         end
 

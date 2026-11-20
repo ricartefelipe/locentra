@@ -28,10 +28,6 @@ module Locentra
           raise Domain::Conflict.new("identificador da organização já utilizado; escolha outro nome", code: "slug_taken")
         end
 
-        def update_settings(tx, settings, now)
-          tx.execute("UPDATE organizations SET settings = $2, updated_at = $3 WHERE id = $1", [tx.tenant_id!, settings, now])
-        end
-
         def insert_branch(tx, branch, now)
           tx.execute(<<~SQL, [branch.id, branch.organization_id, branch.name, branch.code, branch.address, now])
             INSERT INTO branches (id, organization_id, name, code, address, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6)
@@ -138,7 +134,8 @@ module Locentra
         end
 
         def mark_invitation_accepted(tx, id, user_id, now)
-          tx.execute("UPDATE invitations SET accepted_at = $3, accepted_user_id = $2 WHERE id = $1", [id, user_id, now])
+          tx.execute("UPDATE invitations SET accepted_at = $3, accepted_user_id = $2 WHERE organization_id = $4 AND id = $1",
+                     [id, user_id, now, tx.tenant_id!])
         end
 
         def pending_invitations(tx)

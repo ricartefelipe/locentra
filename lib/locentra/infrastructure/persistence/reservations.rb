@@ -49,6 +49,12 @@ module Locentra
         end
 
         # Reserva resultante da conversão de um orçamento (no máximo uma, por índice único parcial).
+        # Leitura que aguarda alterações em andamento da reserva e impede novas até o fim da transação.
+        def lock_shared(tx, id)
+          row = tx.query_one("SELECT #{COLUMNS} FROM reservations WHERE organization_id = $1 AND id = $2 FOR SHARE", [tx.tenant_id!, id])
+          row && self.class.map(row)
+        end
+
         def find_by_quote(tx, quote_id)
           row = tx.query_one("SELECT #{COLUMNS} FROM reservations WHERE organization_id = $1 AND quote_id = $2", [tx.tenant_id!, quote_id])
           row && self.class.map(row)

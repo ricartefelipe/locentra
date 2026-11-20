@@ -7,6 +7,22 @@ module Locentra
       class Controller
         Dependencies = Data.define(:system, :templates, :flash)
 
+        # Caminho local seguro para redirecionamento: começa com uma única "/" e não tem barra
+        # invertida, espaço nem caractere de controle. Navegadores removem TAB e quebras de linha antes
+        # de resolver o endereço ("/\t/evil.example" vira "//evil.example"), por isso qualquer
+        # caractere de controle é recusado.
+        UNSAFE_PATH = /[\x00-\x20\x7F\\]/
+
+        # Percentual com até duas casas decimais ("12", "12,5", "12.34") em pontos-base, com aritmética
+        # inteira. Infinity, NaN, notação científica e casas além da segunda são recusados (não
+        # arredondados nem truncados em silêncio).
+        PERCENT = /\A(\d{1,3})(?:[.,](\d{1,2}))?\z/
+
+        def self.local_path?(value)
+          text = value.to_s
+          text.start_with?("/") && !text.start_with?("//") && !text.match?(UNSAFE_PATH)
+        end
+
         def initialize(deps)
           @system = deps.system
           @templates = deps.templates
@@ -40,22 +56,32 @@ module Locentra
         end
 
         def local_path(location)
-          text = location.to_s
-          return "/" unless text.start_with?("/") && !text.start_with?("//") && !text.include?("\\") && !text.match?(/[\r\n]/)
-
-          text
+          self.class.local_path?(location) ? location.to_s : "/"
         end
 
         def json(status, body, headers = {})
           [status, { "content-type" => "application/json; charset=utf-8" }.merge(headers), [JSON.generate(body)]]
         end
 
-        def form_errors(error) = error.errors
-
-        # Conversões de entrada de formulário.
-        def money_param(value)
+        def percent_bps(value, field)
           text = value.to_s.strip
-          text.empty? ? Domain::Money.zero : Domain::Money.parse(text)
+          return 0 if text.empty?
+
+          match = PERCENT.match(text) || raise(Domain::ValidationError.field(field, "percentual inválido (até duas casas decimais)"))
+          (match[1].to_i * 100) + match[2].to_s.ljust(2, "0").to_i
+        end
+
+        # Conversões de entrada de formulário. O erro de formato vai para o campo do formulário que
+        # enviou o valor (o domínio usa a chave genérica "valor").
+        def money_param(value, field = "valor")
+          text = value.to_s.strip
+          text.empty? ? Domain::Money.zero : money!(text, field)
+        end
+
+        def money!(text, field)
+          Domain::Money.parse(text)
+        rescue Domain::ValidationError => e
+          raise Domain::ValidationError.field(field, e.errors.values.flatten.first || "formato monetário inválido")
         end
 
         def local_time(ctx, value, field)

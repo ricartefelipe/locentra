@@ -53,8 +53,13 @@ flowchart TB
 | Interfaces | `lib/locentra/interfaces/{http,cli,worker}` | Rack/Puma, interface web, portal, API, CLI, worker | Aplicação |
 | Composição | `lib/locentra/system.rb` | Composition root explícito; nenhuma conexão aberta na montagem | Todas |
 
-Carregar `locentra/domain` não abre conexões, não inicia threads e não lê variáveis de ambiente. A suíte
-unitária carrega apenas domínio e aplicação.
+Carregar `locentra/domain` e `locentra/application` não abre conexões, não inicia threads, não lê variáveis
+de ambiente e não carrega infraestrutura. A aplicação declara as exceções das portas que os adaptadores
+levantam (`Integrations::UnsafeDestination`, `Attachments::InvalidStorageKey`, `Attachments::ContentMissing`)
+e recebe por injeção o que é de infraestrutura (o assinador de webhooks, por exemplo).
+`LayerIsolationTest` verifica isso em processo separado e executa a entrega de webhook e o download de
+anexo só com portas falsas. A suíte unitária não usa banco, rede nem servidor, mas também exercita alguns
+adaptadores de infraestrutura (cifragem, armazenamento, HTTP seguro, Asaas) no mesmo processo.
 
 ## Contextos
 
@@ -101,8 +106,14 @@ rede nunca ocorrem com transação aberta.
 
 - **Web:** Puma com `PUMA_THREADS` threads por processo e `WEB_CONCURRENCY` processos; sem `preload_app`,
   de modo que cada processo monta o próprio `System` depois do fork. `DB_POOL_SIZE` ≥ `PUMA_THREADS`.
-- **Worker:** `WORKER_CONCURRENCY` threads de execução + thread de heartbeat + thread de agendamento;
-  pool com `WORKER_CONCURRENCY + 2` conexões; encerramento gracioso em TERM/INT.
+- **Worker:** `WORKER_CONCURRENCY` threads de execução da fila `default` + `WEBHOOK_CONCURRENCY` threads
+  (padrão 1) da fila `webhooks` + thread de heartbeat + thread de agendamento; pool com
+  `WORKER_CONCURRENCY + WEBHOOK_CONCURRENCY + 2` conexões; encerramento gracioso em TERM/INT. As entregas
+  de webhook vão para fila própria: um destino lento ocupa somente as threads dessa fila, nunca as de
+  e-mails, pagamentos e varreduras. Cada entrega tem prazo total de 15 s e lê no máximo 4 KiB da resposta.
+  Banco indisponível faz os laços esperarem com backoff exponencial limitado a 30 s. Sinal de vida próprio:
+  a thread de heartbeat atualiza `WORKER_HEALTH_FILE`, conferido por `bin/worker --check` (healthcheck do
+  serviço no Compose).
 - Toda exclusão entre processos é feita no banco (locks de linha, exclusion constraints, advisory locks,
   `SKIP LOCKED`, chaves únicas); mutex local é usado apenas para estruturas em memória do processo.
 - Limites: não há medições de desempenho publicadas; o dimensionamento acima é a regra de configuração,
@@ -121,4 +132,4 @@ vez, com escape automático; JavaScript em módulos ES sem scripts inline. API v
 
 Logs JSON por linha com redação de campos sensíveis e correlação por `request_id` (requisição → outbox →
 tarefa → operação externa). Métricas Prometheus em `/metrics` (protegido por `METRICS_TOKEN` quando
-definido) com rótulos de baixa cardinalidade. `/health/live` e `/health/ready` (banco e migrations).
+definido; em produção, sem token, o endpoint fica desativado) com rótulos de baixa cardinalidade. `/health/live` e `/health/ready` (banco e migrations).

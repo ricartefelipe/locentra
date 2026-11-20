@@ -58,8 +58,10 @@ próprio, com PostgreSQL 18.7 como serviço e o mesmo script de papéis).
 ## Métricas
 
 Expostas em `GET /metrics` do processo web (formato texto 0.0.4, com `# HELP` e `# TYPE` por família;
-`METRICS_TOKEN` exige `Authorization: Bearer`). Cada processo mantém o próprio registro; o que vem do
-banco é coletado a cada leitura.
+`METRICS_TOKEN` exige `Authorization: Bearer`; em produção, sem `METRICS_TOKEN`, o endpoint responde 404).
+Cada processo mantém o próprio registro; o que vem do banco é coletado a cada leitura, e
+`locentra_metrics_collect_success` (0 ou 1) indica se a última coleta funcionou (a falha vai para o log
+como `metrics.collect_failed`).
 
 | Métrica | Tipo | Rótulos | Origem |
 |---|---|---|---|
@@ -74,6 +76,7 @@ banco é coletado a cada leitura.
 | `locentra_jobs_queue_size` | gauge | `queue`, `status` | `queue_stats` (worker) |
 | `locentra_jobs_oldest_age_seconds` | gauge | `queue`, `status` | `queue_stats` (worker) |
 | `locentra_jobs_queue_stats_age_seconds` | gauge | — | Idade da última atualização de `queue_stats` |
+| `locentra_metrics_collect_success` | gauge | — | 1 se a coleta das métricas derivadas do banco funcionou na última leitura |
 | `locentra_jobs_retries_total` | counter | `queue`, `kind` | `job_outcome_totals` (todos os workers) |
 | `locentra_jobs_dead_total` | counter | `queue`, `kind` | `job_outcome_totals` (todos os workers) |
 
@@ -214,9 +217,11 @@ esperando duas linhas `skipped`).
   das chamadas feitas no worker (envio de cobrança, estornos, conciliação agendada, entrega de webhooks)
   ficam apenas no registro do processo do worker; essas chamadas são rastreáveis pelos logs
   `external.call`. No processo web aparecem as chamadas feitas por ele (conciliação manual).
-- Com vários processos Puma (`WEB_CONCURRENCY` > 0), cada processo expõe o próprio registro: os
-  contadores HTTP precisam ser somados pelo coletor. Os valores vindos do banco (fila, retentativas e
-  falhas) são iguais em todos os processos.
+- Com vários processos Puma (`WEB_CONCURRENCY` > 0), cada processo tem o próprio registro e todos
+  compartilham a porta: cada coleta de `/metrics` é atendida por um processo arbitrário, sem rótulo de
+  processo, e o coletor não consegue separar nem somar as séries (a alternância entre registros aparece como
+  reinício de contador). Nesta versão, as métricas HTTP só são confiáveis com `WEB_CONCURRENCY=0`. Os valores
+  vindos do banco (fila, retentativas e falhas) são iguais em todos os processos.
 - Tarefas agendadas (`platform.fanout`, `organization.tick`, conciliação horária) não têm requisição
   de origem e ficam sem `correlation_id`; o log `job.finished` traz o `job_id`.
 - A entrega de webhook não envia o request_id de origem ao destinatário (somente identificadores do

@@ -12,7 +12,7 @@
       <label class="radio"><input type="radio" name="rastreamento" value="kit"<%= checked(@values["rastreamento"] == "kit") %>> Kit (composição de outros produtos)</label>
     </fieldset>
     <div><label for="categoria">Categoria</label><input id="categoria" name="categoria" value="<%= @values["categoria"] %>"></div>
-    <div><label for="custo_reposicao">Custo de reposição (R$)</label><input id="custo_reposicao" name="custo_reposicao" inputmode="decimal" value="<%= @values["custo_reposicao"] %>"></div>
+    <div><label for="custo_reposicao">Custo de reposição (R$)</label><input id="custo_reposicao" name="custo_reposicao" inputmode="decimal" value="<%= @values["custo_reposicao"] %>"<%= invalid(@errors, "custo_reposicao") %>><%= field_errors(@errors, "custo_reposicao") %></div>
     <div><label for="preparacao_antes">Preparação antes (minutos)</label><input id="preparacao_antes" name="preparacao_antes" type="number" min="0" value="<%= @values["preparacao_antes"] || 0 %>"></div>
     <div><label for="preparacao_depois">Preparação depois (minutos)</label><input id="preparacao_depois" name="preparacao_depois" type="number" min="0" value="<%= @values["preparacao_depois"] || 0 %>"></div>
     <div class="full"><label for="descricao">Descrição</label><textarea id="descricao" name="descricao" rows="2"><%= @values["descricao"] %></textarea></div>

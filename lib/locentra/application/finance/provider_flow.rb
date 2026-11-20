@@ -208,11 +208,16 @@ module Locentra
         end
       end
 
-      # Execução de reembolso no provedor. Antes de pedir o estorno, os reembolsos já registrados no
-      # provedor são consultados pela descrição estável: uma nova tentativa após tempo esgotado não
-      # estorna duas vezes. A situação devolvida pelo provedor decide: concluído confirma; em andamento
-      # (pendente ou aguardando autorização) mantém o reembolso pendente com nova consulta agendada;
-      # cancelado no provedor falha (sem novo pedido automático: a decisão foi tomada no provedor).
+      # Execução de reembolso no provedor, com o mesmo protocolo do envio de cobranças. A tentativa
+      # (número e início) é gravada em transação curta, sob lock, ANTES da chamada de rede. Os
+      # reembolsos já registrados no provedor são consultados pela descrição estável; a consulta vazia
+      # só prova a ausência quando não há tentativa dentro da janela (SUBMISSION_WINDOW_SECONDS, maior
+      # que os tempos limite do cliente HTTP). Dentro da janela (tempo esgotado na tentativa anterior,
+      # lease vencido com outro worker na mesma tarefa), nada é reenviado: uma consulta é agendada para o
+      # fim da janela, uma por tentativa. A situação devolvida pelo provedor decide: concluído confirma;
+      # em andamento (pendente ou aguardando autorização) mantém o reembolso pendente com nova consulta
+      # agendada; cancelado no provedor falha (sem novo pedido automático: a decisão foi tomada no
+      # provedor). Conexão recusada (requisição não enviada) libera a tentativa e a fila repete.
       class ProcessRefund
         RECHECK_DELAY = 1800
 
@@ -230,20 +235,34 @@ module Locentra
 
         def call(actor, refund_id)
           id = Domain::Identifier.parse(refund_id, "reembolso")
-          prepared = @uow.run(actor, "finance.refund") do |tx, _|
-            refund = @payments.find_refund(tx, id) || raise(Domain::NotFound, "reembolso")
-            next :"already_#{refund.status}" unless refund.pending?
-
-            payment = @payments.find(tx, refund.payment_id)
-            { refund: refund, payment: payment, account: @accounts.find(tx, payment.provider_account_id) }
-          end
+          prepared = @uow.run(actor, "finance.refund") { |tx, _| prepare(tx, id) }
           return prepared unless prepared.is_a?(Hash)
 
           outcome = execute(actor, prepared)
-          @uow.run(actor, "finance.refund") { |tx, current| record(tx, current, id, outcome) }
+          result = @uow.run(actor, "finance.refund") { |tx, current| record(tx, current, id, prepared[:attempt], outcome) }
+          # Requisição não enviada: a fila reagenda a tarefa com espera crescente.
+          raise outcome.last if result == :not_sent
+
+          result
         end
 
         private
+
+        def prepare(tx, id)
+          refund = @payments.lock_refund(tx, id) || raise(Domain::NotFound, "reembolso")
+          return :"already_#{refund.status}" unless refund.pending?
+
+          payment = @payments.find(tx, refund.payment_id)
+          account = @accounts.find(tx, payment.provider_account_id)
+          now = @clock.now
+          base = { payment: payment, account: account }
+          # Tentativa anterior dentro da janela: o pedido pode estar em processamento; só consulta.
+          return base.merge(refund: refund, submit: false, attempt: refund.submission_attempts) if refund.submission_in_flight?(now)
+
+          started = refund.begin_submission(now)
+          @payments.update_refund(tx, started, from: refund.status, now: now)
+          base.merge(refund: started, submit: true, attempt: started.submission_attempts)
+        end
 
         def execute(actor, prepared)
           provider = @providers.for(prepared[:account]["provider"], actor: actor)
@@ -252,10 +271,15 @@ module Locentra
           refund = prepared[:refund]
           previous = provider.refunds(account, charge).select { |r| r.description.to_s.include?(refund.id) }
           return outcome_of(previous) unless previous.empty?
+          return [:awaiting, nil] unless prepared[:submit]
 
           outcome_of([provider.refund(account, charge, amount: refund.amount, description: refund.provider_description)])
         rescue ProviderRejected => e
           [:failed, e.message]
+        rescue ProviderTimeout => e
+          [:awaiting, e.message]
+        rescue ProviderUnavailable => e
+          [:not_sent, e]
         end
 
         def outcome_of(items)
@@ -266,12 +290,16 @@ module Locentra
           [:failed, "estorno cancelado no provedor"]
         end
 
-        def record(tx, actor, id, outcome)
+        def record(tx, actor, id, attempt, outcome)
           kind, value = outcome
           refund = @payments.lock_refund(tx, id)
           return :"already_#{refund.status}" unless refund.pending?
 
           case kind
+          when :awaiting
+            return await(tx, actor, refund, value)
+          when :not_sent
+            return release(tx, actor, refund, attempt, value)
           when :confirmed
             done = refund.confirm(@clock.now, value)
             @payments.update_refund(tx, done, from: refund.status, now: @clock.now)
@@ -284,6 +312,26 @@ module Locentra
             RefundCompletion.failed(tx, actor, done, ledger: @ledger, audit: @audit)
           end
           done.status.to_sym
+        end
+
+        # Resultado da tentativa ainda desconhecido (tempo esgotado, ou tentativa de outra execução em
+        # andamento): nova consulta ao fim da janela da tentativa atual, uma por tentativa.
+        def await(tx, actor, refund, error)
+          run_at = refund.settles_at || (@clock.now + F::SUBMISSION_WINDOW_SECONDS)
+          @queue.enqueue(tx, "payments.refund", { "refund_id" => refund.id }, run_at: run_at, priority: 40,
+                                                                              unique_key: "refund-submission-check:#{refund.id}:#{refund.submission_attempts}",
+                                                                              correlation_id: actor.request_id)
+          @audit.record(tx, actor, "refund.submission_check_scheduled", "refund", refund.id,
+                        "run_at" => run_at.utc.iso8601, "error" => error && error.to_s[0, 300])
+          :awaiting_settlement
+        end
+
+        def release(tx, actor, refund, attempt, error)
+          return :not_sent unless refund.submission_attempts == attempt
+
+          @payments.update_refund(tx, refund.abandon_submission, from: refund.status, now: @clock.now)
+          @audit.record(tx, actor, "refund.submission_not_sent", "refund", refund.id, "error" => error.message.to_s[0, 300])
+          :not_sent
         end
 
         # Estorno em andamento no provedor: o reembolso continua pendente (o valor segue comprometido)

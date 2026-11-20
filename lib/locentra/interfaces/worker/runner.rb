@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require_relative "handlers"
 
 module Locentra
@@ -16,17 +17,35 @@ module Locentra
       # - Retentativas e falhas permanentes são somadas pela fila em `job_outcome_totals` (todos os
       #   workers) e expostas no /metrics do processo web; o log `job.finished` traz o correlation_id
       #   da requisição que originou a tarefa.
+      # - Entregas de webhooks (destinos escolhidos pelos clientes) têm fila e threads próprias: um
+      #   destino lento ocupa somente essas threads, nunca as de e-mails, pagamentos e varreduras.
+      # - Falha de infraestrutura (banco indisponível) nos laços espera com backoff exponencial
+      #   limitado antes de tentar de novo, com log a cada potência de 2 de falhas seguidas.
+      # - Sinal de vida próprio (o worker não serve HTTP): a thread de heartbeat atualiza
+      #   `health_file` a cada ciclo; `bin/worker --check` confere a idade do arquivo.
       class Runner
         SCHEDULE_INTERVAL = 30
+        HEARTBEAT_INTERVAL = 20
+        HEALTH_MAX_AGE = 90
+        WEBHOOK_QUEUE = "webhooks"
+        MAX_FAILURE_PAUSE = 30
 
-        def initialize(system:, handlers:, concurrency:, logger:, poll_interval: 1.0, queues: ["default"], scheduler: true)
+        # Verdadeiro quando o arquivo de vida foi atualizado há menos de `max_age` segundos.
+        def self.alive?(path, now: Time.now, max_age: HEALTH_MAX_AGE)
+          File.exist?(path) && now - File.mtime(path) < max_age
+        end
+
+        def initialize(system:, handlers:, concurrency:, logger:, poll_interval: 1.0, queues: ["default"], webhook_concurrency: 1,
+                       scheduler: true, health_file: nil)
           @system = system
           @handlers = handlers
           @concurrency = concurrency
           @logger = logger
           @poll_interval = poll_interval
-          @queues = queues
+          @lanes = [[queues, concurrency], [[WEBHOOK_QUEUE], webhook_concurrency]].reject { |_, threads| threads.zero? }
+          @queues = @lanes.flat_map(&:first).uniq
           @scheduler = scheduler
+          @health_file = health_file
           @wakeup = Thread::Queue.new
           @running = {}
           @running_mutex = Thread::Mutex.new
@@ -37,7 +56,7 @@ module Locentra
         def run
           reader, writer = IO.pipe
           %w[TERM INT].each { |signal| Signal.trap(signal) { writer.write_nonblock(".", exception: false) } }
-          @logger.info(event: "worker.started", worker: @name, concurrency: @concurrency)
+          @logger.info(event: "worker.started", worker: @name, concurrency: @concurrency, lanes: @lanes.to_h { |q, n| [q.join(","), n] })
           threads = start_threads
           reader.wait_readable
           stop(threads)
@@ -47,7 +66,10 @@ module Locentra
         end
 
         def start_threads
-          workers = Array.new(@concurrency) { |i| Thread.new { work_loop(i) } }
+          beat
+          workers = @lanes.flat_map { |queues, threads| Array.new(threads) { queues } }.each_with_index.map do |queues, i|
+            Thread.new { work_loop(i, queues) }
+          end
           extra = [Thread.new { heartbeat_loop }]
           extra << Thread.new { schedule_loop } if @scheduler
           workers + extra
@@ -63,7 +85,7 @@ module Locentra
           @logger.info(event: "worker.stopped", worker: @name)
         end
 
-        # Executa no máximo `limit` tarefas prontas e retorna quantas processou (usado em testes e na CLI).
+        # Executa no máximo `limit` tarefas prontas de todas as filas e retorna quantas processou (testes).
         def drain(limit: 100)
           processed = 0
           while processed < limit && (job = claim)
@@ -90,46 +112,60 @@ module Locentra
 
         private
 
-        def claim
-          @system.transactor.call { |tx| @system.queue.claim(tx, worker: @name, limit: 1, queues: @queues).first }
+        def claim(queues = @queues)
+          @system.transactor.call { |tx| @system.queue.claim(tx, worker: @name, limit: 1, queues: queues).first }
         end
 
-        def work_loop(index)
-          until @stopping
-            job = claim
-            if job
-              process(job)
-            else
-              @wakeup.pop(timeout: @poll_interval)
-            end
+        def work_loop(index, queues)
+          resilient("worker.thread_crashed", thread: index) do
+            job = claim(queues)
+            job ? process(job) : @wakeup.pop(timeout: @poll_interval)
           end
-        rescue StandardError => e
-          @logger.error(event: "worker.thread_crashed", worker: @name, thread: index, error: e.class.name, message: e.message)
-          retry unless @stopping
         end
 
         def heartbeat_loop
-          until @stopping
-            @wakeup.pop(timeout: 20)
+          resilient("worker.heartbeat_failed") do
+            @wakeup.pop(timeout: HEARTBEAT_INTERVAL)
+            beat
             jobs = @running_mutex.synchronize { @running.values }
             jobs.each do |job|
               renewed = @system.transactor.call { |tx| @system.queue.heartbeat(tx, job) }
               @logger.warn(event: "worker.lease_lost", job_id: job.id, kind: job.kind) unless renewed
             end
           end
-        rescue StandardError => e
-          @logger.error(event: "worker.heartbeat_failed", error: e.class.name, message: e.message)
-          retry unless @stopping
         end
 
         def schedule_loop
-          until @stopping
+          resilient("worker.scheduler_failed") do
             schedule
             @wakeup.pop(timeout: SCHEDULE_INTERVAL)
           end
-        rescue StandardError => e
-          @logger.error(event: "worker.scheduler_failed", error: e.class.name, message: e.message)
-          retry unless @stopping
+        end
+
+        # Repete o passo até o encerramento. Depois de uma falha, espera 1, 2, 4... até
+        # MAX_FAILURE_PAUSE segundos (o encerramento interrompe a espera) e zera a contagem no
+        # primeiro passo sem erro.
+        def resilient(event, **fields)
+          failures = 0
+          until @stopping
+            begin
+              yield
+              failures = 0
+            rescue StandardError => e
+              failures += 1
+              if failures.nobits?(failures - 1)
+                @logger.error(event: event, worker: @name, error: e.class.name, message: e.message, consecutive_failures: failures, **fields)
+              end
+              @wakeup.pop(timeout: [2**[failures - 1, 5].min, MAX_FAILURE_PAUSE].min)
+            end
+          end
+        end
+
+        def beat
+          return unless @health_file
+
+          FileUtils.mkdir_p(File.dirname(@health_file))
+          FileUtils.touch(@health_file)
         end
 
         # Chaves únicas por janela de tempo: vários workers agendando ao mesmo tempo geram uma tarefa.

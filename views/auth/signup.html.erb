@@ -12,7 +12,8 @@
     <input id="senha" name="senha" type="password" autocomplete="new-password" required minlength="12"<%= invalid(@errors, "senha") %>>
     <%= field_errors(@errors, "senha") %>
     <label for="organizacao">Nome da empresa</label>
-    <input id="organizacao" name="organizacao" required value="<%= @values["organizacao"] %>"<%= invalid(@errors, "nome") %>>
+    <input id="organizacao" name="organizacao" required value="<%= @values["organizacao"] %>"<%= invalid(@errors, "organizacao") %>>
+    <%= field_errors(@errors, "organizacao") %>
     <fieldset>
       <legend>Plano</legend>
       <% @plans.each do |plan| %>

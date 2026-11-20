@@ -26,8 +26,9 @@ plataforma é separada dos contratos de locação entre a organização e seus c
   confirmação com revalidação atômica, reagendamento, extensão, reservas com vários itens (tudo ou nada).
   [Motor de disponibilidade](docs/DISPONIBILIDADE.md)
 - **Precificação:** hora, diária de 24 h, dia de calendário, semana, mínimo, arredondamento, tolerância,
-  faixas por quantidade, cupons, descontos por papel, condições negociadas, multa por atraso, snapshots.
-  [Política](docs/PRECIFICACAO.md)
+  faixas por quantidade, descontos por papel, multa por atraso, snapshots. O motor aplica cupons, condições
+  negociadas e tarifas adicionais, mas nesta versão não há tela, API nem comando para cadastrá-los (ver
+  limitações em [`docs/STATUS.md`](docs/STATUS.md)). [Política](docs/PRECIFICACAO.md)
 - **Orçamentos e contratos:** versões, aprovação da versão aceita, conversão idempotente, contrato em PDF com
   versão e SHA-256, aceite eletrônico simples, aditivos e cancelamento com política explícita.
 - **Operação:** separação, conferência, retirada, devolução total ou parcial, inspeção, avarias e faltas com
@@ -78,10 +79,11 @@ seed (duas organizações) e inicia web e worker.
 Comandos úteis:
 
 ```bash
-docker compose --profile ops run --rm migrate                         # migrations
-docker compose run --rm --no-deps web ruby bin/locentra-admin db:status
-docker compose run --rm --no-deps web ruby bin/locentra-admin db:seed  # idempotente
-docker compose run --rm --no-deps -e LOCENTRA_TOKEN=... web ruby bin/locentra reservations list
+docker compose --profile ops run --rm migrate                                      # migrations
+docker compose --profile ops run --rm migrate ruby bin/locentra-admin db:status    # credencial do proprietário
+docker compose run --rm --no-deps web ruby bin/locentra-admin db:seed  # idempotente; somente demonstração (recusado em produção)
+read -rs LOCENTRA_TOKEN && export LOCENTRA_TOKEN                     # o token não fica no histórico nem no ps
+docker compose run --rm --no-deps -e LOCENTRA_TOKEN web ruby bin/locentra reservations list
 docker compose logs -f web worker
 ```
 
@@ -90,8 +92,13 @@ docker compose logs -f web worker
 Variáveis em [`.env.example`](.env.example): URLs separadas para aplicação (`DATABASE_URL`), worker
 (`WORKER_DATABASE_URL`), migrations (`MIGRATION_DATABASE_URL`) e backup (`BACKUP_DATABASE_URL`);
 `APP_SECRET_KEY_BASE`, `APP_ENCRYPTION_KEY`, `APP_BASE_URL` (HTTPS obrigatório em produção), dimensionamento
-(`PUMA_THREADS`, `WEB_CONCURRENCY`, `DB_POOL_SIZE`, `WORKER_CONCURRENCY`), SMTP, provedor de pagamento
-(`PAYMENT_PROVIDER`), armazenamento (`STORAGE_ROOT`, `MAX_UPLOAD_BYTES`) e `METRICS_TOKEN`.
+(`PUMA_THREADS`, `WEB_CONCURRENCY`, `DB_POOL_SIZE`, `DB_POOL_TIMEOUT`, `WORKER_CONCURRENCY`,
+`WEBHOOK_CONCURRENCY`), proxies confiáveis (`TRUSTED_PROXIES`), limite da API (`API_RATE_LIMIT`), SMTP
+(`SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_AUTH`, `MAIL_FROM`; TLS
+obrigatório em produção), rotação da chave de cifragem (`APP_ENCRYPTION_KEY_PREVIOUS`),
+provedores de pagamento habilitados (`PAYMENT_PROVIDERS`; a conta e a chave de cada organização são
+cadastradas em Financeiro → Provedor), armazenamento (`STORAGE_ROOT`, `MAX_UPLOAD_BYTES`) e `METRICS_TOKEN`
+(obrigatório para expor `/metrics` em produção). O Compose repassa essas variáveis do `.env` aos contêineres.
 
 ## Testes e qualidade
 

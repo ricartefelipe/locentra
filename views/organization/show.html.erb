@@ -8,7 +8,7 @@
     <% if sub %>
       <dl class="details">
         <dt>Plano</dt><dd><%= sub["plan_name"] %> — <%= money(sub["monthly_price_cents"]) %>/mês</dd>
-        <dt>Situação</dt><dd><%= sub["status"] %><%= sub["trial_ends_at"] ? " (avaliação até #{date(sub["trial_ends_at"])})" : "" %></dd>
+        <dt>Situação</dt><dd><%= label(:subscription_status, sub["status"]) %><%= sub["trial_ends_at"] ? " (avaliação até #{date(sub["trial_ends_at"])})" : "" %></dd>
         <dt>Período</dt><dd><%= date(sub["current_period_start"]) %> a <%= date(sub["current_period_end"]) %></dd>
         <dt>Limites</dt><dd><%= sub["max_assets"] || "∞" %> ativos · <%= sub["max_branches"] || "∞" %> filiais · <%= sub["max_users"] || "∞" %> usuários</dd>
         <dt>Funcionalidades</dt><dd><%= Array(sub["features"]).empty? ? "básicas" : Array(sub["features"]).join(", ") %></dd>

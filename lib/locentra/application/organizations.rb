@@ -32,12 +32,6 @@ module Locentra
           raise Domain::PlanLimitExceeded.new(feature, "Funcionalidade '#{feature}' não incluída no plano #{subscription["plan_name"]}")
         end
 
-        def feature?(tx, feature)
-          feature!(tx, feature)
-        rescue Domain::PlanLimitExceeded
-          false
-        end
-
         # Consulta sem lock para telas; gravações continuam usando `feature!`, que bloqueia a assinatura.
         def includes?(tx, feature)
           subscription = @subscriptions.current(tx)
@@ -76,25 +70,6 @@ module Locentra
             @audit.record(tx, current, "branch.created", "branch", branch.id, "code" => branch.code)
             branch
           end
-        end
-      end
-
-      # Troca de organização ativa: exige vínculo ativo e rotaciona a sessão.
-      class SwitchOrganization
-        def initialize(uow:, organizations:, sessions:)
-          @uow = uow
-          @organizations = organizations
-          @sessions = sessions
-        end
-
-        def call(session, organization_id)
-          org_id = Domain::Identifier.parse(organization_id, "organizacao")
-          membership = @uow.anonymous(tenant_id: org_id, user_id: session["user_id"]) do |tx|
-            @organizations.active_membership(tx, org_id, session["user_id"])
-          end
-          raise Domain::AccessDenied, "sem acesso à organização" unless membership
-
-          @sessions.rotate(session, organization_id: org_id)
         end
       end
 
@@ -147,16 +122,18 @@ module Locentra
           @ids = ids
         end
 
-        # Com `user_id`, vincula a conta autenticada; sem ele, cria a conta com nome e senha.
+        # Com `user_id`, vincula a conta autenticada; sem ele, cria a conta com nome e senha. O convite
+        # é conferido antes do bcrypt: token inválido ou expirado não custa um hash.
         def call(token:, user_id: nil, name: nil, password: nil)
           org_id, = token.to_s.split(".", 2)
           raise Domain::ValidationError.field("token", "convite inválido") unless Domain::Identifier.valid?(org_id)
 
+          now = @clock.now
           digest = if user_id.nil?
                      Domain::Identity::PasswordPolicy.validate!(password)
+                     pending!(org_id, token, now)
                      @hasher.hash(password)
                    end
-          now = @clock.now
           @uow.anonymous(tenant_id: org_id, user_id: user_id) do |tx|
             invitation = @organizations.lock_invitation(tx, Identity::Tokens.digest(token))
             raise Domain::ValidationError.field("token", "convite inválido ou expirado") unless usable?(invitation, now)
@@ -172,6 +149,11 @@ module Locentra
         end
 
         private
+
+        def pending!(org_id, token, now)
+          usable = @uow.anonymous(tenant_id: org_id) { |tx| usable?(@organizations.lock_invitation(tx, Identity::Tokens.digest(token)), now) }
+          raise Domain::ValidationError.field("token", "convite inválido ou expirado") unless usable
+        end
 
         def usable?(invitation, now)
           invitation && invitation["accepted_at"].nil? && invitation["revoked_at"].nil? && now < invitation["expires_at"]
@@ -214,6 +196,9 @@ module Locentra
             assignable = Domain::Identity.assignable_roles(current.role)
             raise Domain::AccessDenied, "papel não pode ser atribuído" unless assignable.include?(role)
             raise Domain::AccessDenied, "não é possível alterar o proprietário" if member["role"] == "owner"
+            # Somente membros com papel que o ator poderia atribuir: administrador não altera outro
+            # administrador (nem o rebaixa para depois removê-lo).
+            raise Domain::AccessDenied, "administradores só podem ser alterados pelo proprietário" unless assignable.include?(member["role"])
 
             @organizations.update_membership_role(tx, member["id"], role, @clock.now)
             @audit.record(tx, current, "member.role_changed", "membership", member["id"], "from" => member["role"], "to" => role)
@@ -222,11 +207,14 @@ module Locentra
         end
       end
 
+      # Revogação do vínculo: encerra as sessões do membro na organização e revoga as credenciais de
+      # API e CLI criadas por ele, na mesma transação.
       class RevokeMembership
-        def initialize(uow:, organizations:, sessions_repository:, audit:, clock:)
+        def initialize(uow:, organizations:, sessions_repository:, credentials:, audit:, clock:)
           @uow = uow
           @organizations = organizations
           @sessions = sessions_repository
+          @credentials = credentials
           @audit = audit
           @clock = clock
         end
@@ -244,7 +232,8 @@ module Locentra
             now = @clock.now
             @organizations.revoke_membership(tx, member["id"], current.user_id, now)
             @sessions.revoke_for_organization(tx, member["user_id"], tx.tenant_id!, now, "membership_revoked")
-            @audit.record(tx, current, "member.revoked", "membership", member["id"], "user_id" => member["user_id"])
+            revoked = @credentials.revoke_created_by(tx, member["user_id"], now)
+            @audit.record(tx, current, "member.revoked", "membership", member["id"], "user_id" => member["user_id"], "credentials_revoked" => revoked)
             true
           end
         end

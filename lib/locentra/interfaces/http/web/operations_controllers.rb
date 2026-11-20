@@ -20,8 +20,8 @@ module Locentra
             product = uc(:create_product).call(ctx.actor, {
                                                  sku: f["sku"], name: f["nome"], tracking: f["rastreamento"], description: f["descricao"],
                                                  category: f["categoria"], buffer_before_minutes: f["preparacao_antes"].to_s,
-                                                 buffer_after_minutes: f["preparacao_depois"].to_s, deposit: money_param(f["caucao"]),
-                                                 replacement_cost: money_param(f["custo_reposicao"]), pricing: pricing_from(f)
+                                                 buffer_after_minutes: f["preparacao_depois"].to_s, deposit: money_param(f["caucao"], "caucao"),
+                                                 replacement_cost: money_param(f["custo_reposicao"], "custo_reposicao"), pricing: pricing_from(f)
                                                })
             redirect(ctx, "/produtos/#{product.id}", notice: "Produto cadastrado.")
           rescue Domain::ValidationError, Domain::Conflict => e
@@ -37,7 +37,7 @@ module Locentra
           end
 
           def update_pricing(ctx)
-            uc(:update_product_pricing).call(ctx.actor, ctx.param(:id), pricing: pricing_from(ctx.form), deposit: money_param(ctx.form["caucao"]))
+            uc(:update_product_pricing).call(ctx.actor, ctx.param(:id), pricing: pricing_from(ctx.form), deposit: money_param(ctx.form["caucao"], "caucao"))
             redirect(ctx, "/produtos/#{ctx.param(:id)}", notice: "Tabela de preços atualizada. Reservas existentes mantêm o preço contratado.")
           rescue Domain::ValidationError => e
             show(ctx, errors: e.errors, status: 422)
@@ -57,7 +57,8 @@ module Locentra
             f = ctx.form
             uc(:register_asset).call(ctx.actor, { product_id: ctx.param(:id), branch_id: f["filial_id"], tag: f["patrimonio"],
                                                   serial_number: f["numero_serie"], condition: f["condicao"].to_s,
-                                                  acquisition_cost: money_param(f["custo_aquisicao"]), acquired_on: date_param(f["data_aquisicao"]) })
+                                                  acquisition_cost: money_param(f["custo_aquisicao"], "custo_aquisicao"),
+                                                  acquired_on: date_param(f["data_aquisicao"]) })
             redirect(ctx, "/produtos/#{ctx.param(:id)}", notice: "Ativo cadastrado.")
           rescue Domain::ValidationError, Domain::Conflict, Domain::PlanLimitExceeded => e
             show(ctx, errors: errors_of(e), status: 422)
@@ -119,21 +120,20 @@ module Locentra
             raise Domain::ValidationError.field("data_aquisicao", "data inválida")
           end
 
-          def cents(value)
+          def cents(value, field)
             text = value.to_s.strip
-            text.empty? ? nil : Domain::Money.parse(text).cents
+            text.empty? ? nil : money!(text, field).cents
           end
 
           def pricing_from(form)
             tiers = Array(form["faixa_minimo"]).zip(Array(form["faixa_desconto"])).filter_map do |min, pct|
               next if min.to_s.strip.empty? || pct.to_s.strip.empty?
 
-              { "min_quantity" => min.to_s.strip, "discount_bps" => (BigDecimal(pct.to_s.tr(",", ".")) * 100).to_i }
-            rescue ArgumentError
-              raise Domain::ValidationError.field("faixas", "percentual inválido")
+              { "min_quantity" => min.to_s.strip, "discount_bps" => percent_bps(pct, "faixas") }
             end
             {
-              "hourly_cents" => cents(form["preco_hora"]), "daily_cents" => cents(form["preco_diaria"]), "weekly_cents" => cents(form["preco_semana"]),
+              "hourly_cents" => cents(form["preco_hora"], "preco_hora"), "daily_cents" => cents(form["preco_diaria"], "preco_diaria"),
+              "weekly_cents" => cents(form["preco_semana"], "preco_semana"),
               "daily_mode" => form["modalidade_diaria"].to_s.empty? ? "rolling_24h" : form["modalidade_diaria"],
               "minimum_minutes" => form["periodo_minimo"].to_s.strip, "rounding_minutes" => form["arredondamento"].to_s.strip,
               "grace_minutes" => form["tolerancia"].to_s.strip, "quantity_tiers" => tiers
@@ -265,14 +265,7 @@ module Locentra
 
           def blank(value) = value.to_s.empty? ? nil : value
 
-          def discount_bps(value)
-            text = value.to_s.strip.tr(",", ".")
-            return 0 if text.empty?
-
-            (BigDecimal(text) * 100).to_i
-          rescue ArgumentError
-            raise Domain::ValidationError.field("desconto", "percentual inválido")
-          end
+          def discount_bps(value) = percent_bps(value, "desconto")
         end
       end
     end

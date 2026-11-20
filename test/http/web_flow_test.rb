@@ -200,4 +200,37 @@ class WebFlowTest < HttpTest
 
     assert_equal 400, last_response.status
   end
+
+  # A troca de organização (POST /organizacoes/ativar) exige vínculo ativo na organização escolhida.
+  def test_switching_to_an_organization_without_membership_is_refused_without_a_new_session
+    other = create_organization(name: "Locadora Delta", email: "delta@example.test")
+    login("dona@alfa.test")
+    sessions = -> { owner_query("SELECT count(*) AS n FROM sessions WHERE revoked_at IS NULL", [], tenant: nil).first["n"].to_i }
+    before = sessions.call
+    post_form "/organizacoes/ativar", { "organizacao_id" => other[:organization_id] }
+
+    assert_equal 403, last_response.status
+    assert_nil(last_response.headers["set-cookie"]&.then { |c| c[/locentra_session=[^;]+/] })
+    assert_equal before, sessions.call
+    get "/"
+
+    assert_includes last_response.body, "Painel", "a sessão atual continua válida"
+  end
+
+  def test_staff_invitation_return_path_survives_login_with_several_organizations
+    second = staff_member_of(create_organization(name: "Locadora Beta", email: "dona@beta.test"), "dona@alfa.test")
+    back = "/convites?token=#{@org[:organization_id]}.qualquer"
+    post "/entrar", { "email" => "dona@alfa.test", "senha" => "senha-muito-segura-1", "voltar" => back }
+
+    refute_nil second
+    assert_equal back, last_response.location
+  end
+
+  def staff_member_of(org, email)
+    invitation = uc(:invite_member).call(org[:actor], email: email, role: "auditor")
+    token = "#{org[:organization_id]}.segredo-#{invitation["id"]}"
+    owner_query("UPDATE invitations SET token_digest = $1 WHERE id = $2", [A::Identity::Tokens.digest(token), invitation["id"]], tenant: org[:organization_id])
+    user = owner_query("SELECT id FROM users WHERE email = $1", [email], tenant: nil).first["id"]
+    uc(:accept_invitation).call(token: token, user_id: user)
+  end
 end

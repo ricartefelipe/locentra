@@ -73,18 +73,19 @@ module Locentra
         end
 
         # Expira, na transação corrente, bloqueios vencidos que ainda ocupam os produtos informados.
+        # Devolve id e código de cada reserva expirada.
         def release_stale_holds(tx, product_ids, now)
           return [] if product_ids.empty?
 
-          ids = tx.query(<<~SQL, [tx.tenant_id!, now, product_ids]).map { |row| row["id"] }
+          rows = tx.query(<<~SQL, [tx.tenant_id!, now, product_ids])
             UPDATE reservations r SET status = 'expired', expired_at = $2, version = version + 1, updated_at = $2
              WHERE r.organization_id = $1 AND r.status = 'held' AND r.hold_expires_at <= $2
                AND (EXISTS (SELECT 1 FROM asset_allocations a WHERE a.organization_id = $1 AND a.reservation_id = r.id AND a.active AND a.product_id = ANY($3::uuid[]))
                  OR EXISTS (SELECT 1 FROM stock_allocations s WHERE s.organization_id = $1 AND s.reservation_id = r.id AND s.active AND s.product_id = ANY($3::uuid[])))
-            RETURNING r.id
+            RETURNING r.id, r.code
           SQL
-          deactivate(tx, ids, now) unless ids.empty?
-          ids
+          deactivate(tx, rows.map { |row| row["id"] }, now) unless rows.empty?
+          rows
         end
 
         def deactivate(tx, reservation_ids, now)

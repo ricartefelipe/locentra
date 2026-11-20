@@ -242,7 +242,7 @@ module Locentra
       # Confirmação com revalidação atômica sob lock da reserva e dos estoques envolvidos. O bloqueio
       # temporário de um orçamento é confirmado somente pela conversão (`via: :quote`).
       class ConfirmReservation
-        def initialize(uow:, reservations:, allocator:, audit:, events:, clock:, guard:)
+        def initialize(uow:, reservations:, allocator:, audit:, events:, clock:, guard:, expiry:)
           @uow = uow
           @reservations = reservations
           @allocator = allocator
@@ -250,6 +250,7 @@ module Locentra
           @events = events
           @clock = clock
           @guard = guard
+          @expiry = expiry
         end
 
         def call(actor, reservation_id, tx: nil, via: nil)
@@ -275,7 +276,7 @@ module Locentra
           @guard.ensure_changeable!(tx, reservation, "confirm", via: via)
 
           if reservation.hold_expired?(now)
-            expire(tx, current, reservation, now)
+            @expiry.expire(tx, current, reservation, now, "confirmation_attempt")
             raise Domain::HoldExpired
           end
 
@@ -294,14 +295,6 @@ module Locentra
           @audit.record(tx, current, "reservation.confirmed", "reservation", reservation.id, "code" => reservation.code)
           @events.publish(tx, "reservation.confirmed", "reservation", reservation.id, "code" => reservation.code)
           confirmed
-        end
-
-        # A expiração é gravada mesmo quando a confirmação falha (resultado determinístico).
-        def expire(tx, current, reservation, now)
-          expired = reservation.expire(now)
-          @reservations.update_status(tx, expired, now, "expired_at" => now)
-          @reservations.release_allocations(tx, reservation.id, now)
-          @audit.record(tx, current, "reservation.expired", "reservation", reservation.id, "trigger" => "confirmation_attempt")
         end
       end
 
@@ -466,12 +459,36 @@ module Locentra
       # Expira bloqueios temporários vencidos. Reservas bloqueadas por outra transação (por exemplo,
       # uma confirmação em andamento) são ignoradas nesta execução: o resultado é decidido por quem
       # obtiver o lock, sempre comparando o instante atual com `hold_expires_at`.
-      class ExpireHolds
-        def initialize(uow:, reservations:, audit:, events:, clock:)
-          @uow = uow
+      # Expiração de bloqueio temporário, qualquer que seja o gatilho (varredura, tentativa de
+      # confirmação ou alocação que encontra o bloqueio vencido): situação, liberação das alocações,
+      # auditoria e evento `reservation.expired` na mesma transação.
+      class HoldExpiry
+        def initialize(reservations:, audit:, events:)
           @reservations = reservations
           @audit = audit
           @events = events
+        end
+
+        def expire(tx, actor, reservation, now, trigger)
+          expired = reservation.expire(now)
+          @reservations.update_status(tx, expired, now, "expired_at" => now)
+          @reservations.release_allocations(tx, reservation.id, now)
+          record(tx, actor, reservation.id, reservation.code, trigger)
+          expired
+        end
+
+        # Reservas já gravadas como expiradas por uma instrução em lote (alocador).
+        def record(tx, actor, reservation_id, code, trigger)
+          @audit.record(tx, actor, "reservation.expired", "reservation", reservation_id, "trigger" => trigger)
+          @events.publish(tx, "reservation.expired", "reservation", reservation_id, "code" => code)
+        end
+      end
+
+      class ExpireHolds
+        def initialize(uow:, reservations:, expiry:, clock:)
+          @uow = uow
+          @reservations = reservations
+          @expiry = expiry
           @clock = clock
         end
 
@@ -479,11 +496,7 @@ module Locentra
           @uow.run(actor) do |tx, current|
             now = @clock.now
             @reservations.lock_expired_holds(tx, now, limit).map do |reservation|
-              expired = reservation.expire(now)
-              @reservations.update_status(tx, expired, now, "expired_at" => now)
-              @reservations.release_allocations(tx, reservation.id, now)
-              @audit.record(tx, current, "reservation.expired", "reservation", reservation.id, "trigger" => "sweeper")
-              @events.publish(tx, "reservation.expired", "reservation", reservation.id, "code" => reservation.code)
+              @expiry.expire(tx, current, reservation, now, "sweeper")
               reservation.id
             end
           end

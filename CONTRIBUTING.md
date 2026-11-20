@@ -40,6 +40,18 @@ Alterações incompatíveis usam `!` (`feat(api)!:`) e rodapé `BREAKING CHANGE:
 [SemVer](https://semver.org/lang/pt-BR/). A versão fica em `lib/locentra/version.rb` e é alterada
 somente em branches `release/*` ou `hotfix/*`. O histórico de mudanças fica em `CHANGELOG.md`.
 
+### Publicação da imagem
+
+1. Após o merge da release em `main`, crie a tag anotada da versão (`git tag -a v1.2.0 -m "Locentra 1.2.0"`)
+   e envie-a (`git push origin v1.2.0`).
+2. O workflow `.github/workflows/release.yml` confere que a tag corresponde a `Locentra::VERSION` e executa a
+   CI completa (`ci.yml` reutilizada: análise, segredos, suítes com cobertura, navegador, reconstrução do banco
+   com seed e inicialização da imagem).
+3. A publicação só ocorre com a variável de repositório `PUBLISH_IMAGE=true` (Settings → Secrets and variables
+   → Actions → Variables). A imagem é analisada com Trivy e publicada como `ghcr.io/<repositório>:X.Y.Z`,
+   somente com a tag da versão (sem `latest`).
+4. A implantação usa essa imagem e os procedimentos de `docs/RUNBOOKS.md`; não há deploy automático.
+
 ## Pull requests
 
 Use o modelo em `.github/pull_request_template.md`, com as seções **Problema**, **Alteração**,

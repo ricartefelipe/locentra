@@ -30,7 +30,7 @@ module Locentra
       @metrics = metrics || I::Observability::Metrics.new
       @pool = I::Database::ConnectionPool.new(url: database_url || config.database_url, size: pool_size || config.pool_size,
                                               timeout: config.pool_timeout, name: pool_name, metrics: @metrics, logger: @logger)
-      @mailer = mailer || I::SmtpMailer.new(host: config.smtp_host, port: config.smtp_port, from: config.mail_from)
+      @mailer = mailer || I::SmtpMailer.new(**config.smtp)
       @http = http || I::Integrations::SafeHttp.new(allow_http: !config.production?, allow_private: config.test?)
       @transactor = I::Database::Transactor.new(pool: @pool, logger: @logger, metrics: @metrics)
       build_repositories
@@ -76,26 +76,27 @@ module Locentra
         tokens: A::Identity::OneTimeTokens.new(repository: repos[:user_tokens], clock: clock, ids: ids),
         sessions: A::Identity::Sessions.new(uow: uow, repository: repos[:sessions], clock: clock, ids: ids),
         limits: A::Organizations::PlanLimits.new(subscriptions: repos[:subscriptions]),
-        allocator: A::Availability::Allocator.new(repository: repos[:availability], ids: ids),
         pricer: A::Reservations::Pricer.new(pricing: repos[:pricing]),
         pricing_rules: Domain::Pricing::Rules.new,
         mailer: @mailer, http: @http,
-        box: I::SecretBox.new(config.encryption_key),
+        box: I::SecretBox.new(config.encryption_key, previous: config.previous_encryption_keys),
         storage: I::Storage::Local.new(root: config.storage_root),
         mail_templates: I::MailTemplates.new(root: File.expand_path("../../views/mailer", __dir__)),
         contract_renderer: I::Documents::ContractPdf.new,
         reservation_guard: A::Reservations::ChangeGuard.new(contracts: repos[:contracts], quotes: repos[:quotes]),
         # Chamadas a provedores de pagamento e webhooks enviados: log com correlação e métricas.
-        external_calls: A::ExternalCalls.new(logger: logger, metrics: metrics),
+        external_calls: A::ExternalCalls.new(logger: logger, metrics: metrics, clock: clock),
         portal_scope: A::Portal::ContractDocumentScope.new(contracts: repos[:contracts])
       }
+      @services[:hold_expiry] = A::Reservations::HoldExpiry.new(reservations: repos[:reservations], audit: @services[:audit], events: @services[:events])
+      @services[:allocator] = A::Availability::Allocator.new(repository: repos[:availability], ids: ids, expiry: @services[:hold_expiry])
       @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
                                                                            quotes: repos[:quotes], contracts: repos[:contracts])
       @services[:finance_subscriber] = A::Finance::ReservationChargesSubscriber.new(queue: queue)
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
                                                                   clock: clock, ids: ids, subscribers: [@services[:finance_subscriber]])
       @services[:deliver_webhook] = A::Webhooks::Deliver.new(transactor: transactor, webhooks: repos[:webhooks], http: @http, box: @services[:box],
-                                                             clock: clock, calls: @services[:external_calls])
+                                                             signer: I::WebhookSignature, clock: clock, calls: @services[:external_calls])
     end
 
     def common = { uow: uow, clock: clock }
@@ -121,7 +122,8 @@ module Locentra
       r = repos
       audit = s[:audit]
       uc[:sign_up] = A::Identity::SignUp.new(uow: uow, users: r[:users], organizations: r[:organizations], hasher: s[:hasher],
-                                             notifier: s[:notifier], clock: clock, ids: ids, audit: audit)
+                                             notifier: s[:notifier], clock: clock, ids: ids, audit: audit,
+                                             rate_limiter: s[:rate_limiter])
       uc[:authenticate] =
         A::Identity::Authenticate.new(uow: uow, users: r[:users], hasher: s[:hasher], rate_limiter: s[:rate_limiter], clock: clock)
       uc[:confirm_email] = A::Identity::ConfirmEmail.new(uow: uow, tokens: s[:tokens], users: r[:users], clock: clock)
@@ -130,8 +132,6 @@ module Locentra
       uc[:reset_password] = A::Identity::ResetPassword.new(uow: uow, users: r[:users], tokens: s[:tokens], hasher: s[:hasher],
                                                            sessions_repository: r[:sessions], clock: clock)
       uc[:list_memberships] = A::Identity::ListMemberships.new(uow: uow, organizations: r[:organizations])
-      uc[:switch_organization] =
-        A::Organizations::SwitchOrganization.new(uow: uow, organizations: r[:organizations], sessions: s[:sessions])
       uc[:create_branch] =
         A::Organizations::CreateBranch.new(**common, organizations: r[:organizations], limits: s[:limits], audit: audit, ids: ids)
       uc[:invite_member] = A::Organizations::InviteMember.new(**common, organizations: r[:organizations], limits: s[:limits],
@@ -140,7 +140,8 @@ module Locentra
                                                                                 hasher: s[:hasher], audit: audit, ids: ids)
       uc[:change_member_role] = A::Organizations::ChangeMemberRole.new(**common, organizations: r[:organizations], audit: audit)
       uc[:revoke_membership] = A::Organizations::RevokeMembership.new(**common, organizations: r[:organizations],
-                                                                                sessions_repository: r[:sessions], audit: audit)
+                                                                                sessions_repository: r[:sessions], credentials: r[:credentials],
+                                                                                audit: audit)
       uc[:list_members] = A::Organizations::ListMembers.new(uow: uow, organizations: r[:organizations])
       uc[:get_organization] = A::Organizations::GetOrganization.new(uow: uow, organizations: r[:organizations])
       uc[:create_credential] = A::Integrations::CreateCredential.new(**common, credentials: r[:credentials], limits: s[:limits], audit: audit, ids: ids)
@@ -150,7 +151,8 @@ module Locentra
       uc[:idempotency] = A::Idempotency.new(**common, repository: r[:idempotency], ids: ids)
       uc[:dashboard] = A::Reports::Dashboard.new(**common, reports: r[:reports])
       uc[:list_audit] = A::Reports::ListAudit.new(uow: uow, audit: r[:audit])
-      uc[:collect_metrics] = A::Reports::CollectMetrics.new(transactor: transactor, reports: r[:reports], metrics: metrics, clock: clock)
+      uc[:collect_metrics] = A::Reports::CollectMetrics.new(transactor: transactor, reports: r[:reports], metrics: metrics, clock: clock,
+                                                            logger: logger)
     end
 
     def build_catalog_use_cases(cases)
@@ -195,7 +197,8 @@ module Locentra
                                                                        allocator: s[:allocator], pricer: s[:pricer], events: s[:events], ids: ids,
                                                                        **reservation_deps)
       uc[:confirm_reservation] = A::Reservations::ConfirmReservation.new(uow: uow, allocator: s[:allocator], events: s[:events],
-                                                                         guard: s[:reservation_guard], **reservation_deps)
+                                                                         guard: s[:reservation_guard], expiry: s[:hold_expiry],
+                                                                         **reservation_deps)
       uc[:cancel_reservation] = A::Reservations::CancelReservation.new(uow: uow, events: s[:events], guard: s[:reservation_guard],
                                                                        **reservation_deps)
       uc[:reschedule_reservation] = A::Reservations::RescheduleReservation.new(uow: uow, organizations: r[:organizations],
@@ -204,7 +207,7 @@ module Locentra
       uc[:extend_reservation] = A::Reservations::ExtendReservation.new(uow: uow, organizations: r[:organizations], allocator: s[:allocator],
                                                                        availability: r[:availability], events: s[:events], ids: ids,
                                                                        guard: s[:reservation_guard], **reservation_deps)
-      uc[:expire_holds] = A::Reservations::ExpireHolds.new(uow: uow, events: s[:events], **reservation_deps)
+      uc[:expire_holds] = A::Reservations::ExpireHolds.new(uow: uow, reservations: r[:reservations], expiry: s[:hold_expiry], clock: clock)
       uc[:list_reservations] = A::Reservations::ListReservations.new(uow: uow, reservations: r[:reservations])
       uc[:get_reservation] = A::Reservations::GetReservation.new(uow: uow, reservations: r[:reservations])
     end
@@ -390,7 +393,9 @@ module Locentra
       fn = A::Finance
       simulator = I::Payments::Simulator.new(transactor: transactor, clock: clock, ids: ids)
       asaas = I::Payments::Asaas.new(http: @payment_http || I::Payments::HttpClient.new, box: s[:box], sandbox_url: config.asaas_base_url)
-      providers = fn::Providers.new({ "simulator" => simulator, "asaas" => asaas }, s[:external_calls])
+      # Somente os provedores habilitados no processo (PAYMENT_PROVIDERS); em produção, o simulador fica
+      # fora por padrão.
+      providers = fn::Providers.new({ "simulator" => simulator, "asaas" => asaas }.slice(*config.payment_providers), s[:external_calls])
       s[:payment_providers] = providers
       ledger = fn::Ledger.new(entries: r[:ledger_entries], ids: ids, clock: clock)
       alert_book = fn::AlertBook.new(alerts: r[:finance_alerts], ids: ids, clock: clock)
@@ -423,13 +428,14 @@ module Locentra
       uc[:ingest_payment_webhook] = ingest
       uc[:process_payment_webhook] = fn::ProcessWebhook.new(uow: uow, inbound: r[:inbound_webhooks], payments: r[:payments], providers: providers,
                                                             settlement: settlement, alert_book: alert_book, clock: clock)
-      uc[:simulate_payment] = fn::SimulateProviderEvent.new(uow: uow, payments: r[:payments], **accounts, simulator: simulator, ingest: ingest)
+      uc[:simulate_payment] = fn::SimulateProviderEvent.new(uow: uow, payments: r[:payments], **accounts,
+                                                            simulator: config.payment_providers.include?("simulator") ? simulator : nil, ingest: ingest)
       uc[:open_deposit] = fn::OpenDeposit.new(uow: uow, reservations: r[:reservations], deposits: r[:deposits], audit: audit, clock: clock, ids: ids)
       uc[:move_deposit] = fn::MoveDeposit.new(uow: uow, deposits: r[:deposits], receivables: r[:receivables], **money)
       uc[:reconcile_payments] = fn::Reconcile.new(uow: uow, **accounts, payments: r[:payments], reports: r[:reconciliation], providers: providers,
                                                   resolver: resolver, remote: remote, audit: audit, clock: clock, ids: ids)
       uc[:configure_payment_account] = fn::ConfigureProviderAccount.new(uow: uow, **accounts, limits: s[:limits], box: s[:box], audit: audit,
-                                                                        clock: clock, ids: ids)
+                                                                        clock: clock, ids: ids, enabled: config.payment_providers)
       uc[:deactivate_payment_account] = fn::DeactivateProviderAccount.new(uow: uow, **accounts, audit: audit, clock: clock)
       uc[:resolve_finance_alert] = fn::ResolveAlert.new(uow: uow, alerts: r[:finance_alerts], audit: audit, clock: clock)
       uc[:issue_invoice] = fn::IssueInvoice.new(uow: uow, reservations: r[:reservations], receivables: r[:receivables], organizations: r[:organizations],

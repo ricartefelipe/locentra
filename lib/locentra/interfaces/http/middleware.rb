@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "ipaddr"
 require "securerandom"
 
 module Locentra
@@ -50,6 +51,52 @@ module Locentra
           @logger.info(event: "http.request", request_id: request_id, method: env["REQUEST_METHOD"], route: route, status: status,
                        duration_ms: (duration * 1000).round(1), organization_id: env["locentra.organization_id"],
                        actor_id: env["locentra.actor_id"])
+        end
+      end
+
+      # IP do cliente. Sem proxies confiáveis configurados (TRUSTED_PROXIES), é o par da conexão
+      # (REMOTE_ADDR) e nenhum cabeçalho é considerado. Com proxies configurados, e somente quando a
+      # conexão vem de um deles, X-Forwarded-For é percorrido da direita para a esquerda e o primeiro
+      # endereço que não é proxy confiável é o cliente. O cabeçalho `Forwarded` nunca é usado (proxies
+      # comuns não o removem nem o reescrevem). O resultado vai para sessões, auditoria, aceites e
+      # limites de taxa por IP.
+      class ClientAddress
+        def initialize(app, trusted:)
+          @app = app
+          @trusted = trusted
+        end
+
+        def call(env)
+          env["locentra.client_ip"] = resolve(env)
+          @app.call(env)
+        end
+
+        def resolve(env)
+          remote = env["REMOTE_ADDR"].to_s
+          return remote unless trusted?(remote)
+
+          client = remote
+          env["HTTP_X_FORWARDED_FOR"].to_s.split(",").map(&:strip).reverse_each do |hop|
+            address = parse(hop)
+            break unless address
+
+            client = address.to_s
+            break unless trusted?(client)
+          end
+          client
+        end
+
+        private
+
+        def trusted?(address)
+          ip = parse(address)
+          ip ? @trusted.any? { |range| range.family == ip.family && range.include?(ip) } : false
+        end
+
+        def parse(text)
+          text.to_s.include?("/") ? nil : IPAddr.new(text.to_s)
+        rescue IPAddr::Error
+          nil
         end
       end
 

@@ -7,7 +7,8 @@ require "securerandom"
 module Locentra
   module Infrastructure
     module Storage
-      class InvalidKey < StandardError; end
+      # Erros declarados pela aplicação (porta de armazenamento).
+      InvalidKey = Application::Attachments::InvalidStorageKey
 
       # Armazenamento local fora do diretório público. Chaves são geradas pelo servidor no formato
       # "<organização>/<anexo>" (UUIDs); qualquer outra forma é rejeitada e o caminho resolvido
@@ -32,6 +33,8 @@ module Locentra
 
         def get(key)
           File.binread(path_for(key))
+        rescue Errno::ENOENT
+          raise Application::Attachments::ContentMissing, "arquivo do anexo ausente"
         end
 
         def delete(key)

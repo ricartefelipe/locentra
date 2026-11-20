@@ -18,6 +18,10 @@ requested ──► held ──► confirmed ──► in_progress ──► com
 - Estados que ocupam disponibilidade: `held`, `confirmed`, `in_progress`.
 - Confirmação e expiração concorrentes: decide quem obtém o lock da reserva, comparando o instante atual com
   `hold_expires_at`; a varredura usa `SKIP LOCKED`.
+- A expiração tem três gatilhos (varredura, tentativa de confirmação e alocação que encontra o bloqueio
+  vencido ocupando o produto); todos gravam auditoria `reservation.expired` com o gatilho e publicam o evento
+  `reservation.expired` na mesma transação. Pagamento recebido com o bloqueio já vencido e ainda não
+  varrido é tratado como pagamento após a expiração (revisão e alerta).
 
 ## Ativo (`Domain::Catalog::ASSET_TRANSITIONS`)
 

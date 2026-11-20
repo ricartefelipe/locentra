@@ -112,6 +112,16 @@ class ApplicationBaseTest < UnitTest
     assert_equal a, b
     refute_equal a, A::Idempotency.fingerprint("POST", "/x", { "a" => [], "b" => 1 })
     refute_equal a, A::Idempotency.fingerprint("POST", "/y", { "b" => 1, "a" => [{ "d" => 2, "c" => 3 }] })
+    refute_equal A::Idempotency.fingerprint("POST", "/x", { "f" => false }), A::Idempotency.fingerprint("POST", "/x", { "f" => nil }),
+                 "false e null são conteúdos diferentes"
+    assert_equal A::Idempotency.fingerprint("POST", "/x", { "f" => false }), A::Idempotency.fingerprint("POST", "/x", { f: false })
+  end
+
+  def test_pagination_offset_has_an_upper_bound
+    assert_equal [25, A::MAX_PAGE_OFFSET], A::Page.params(offset: A::MAX_PAGE_OFFSET.to_s)
+    error = assert_raises(Locentra::Domain::ValidationError) { A::Page.params(offset: "99999999999999999999") }
+
+    assert_equal ["deslocamento"], error.errors.keys
   end
 
   def test_audit_trail_records_actor_and_request

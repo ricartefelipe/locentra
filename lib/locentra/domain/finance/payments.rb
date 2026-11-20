@@ -192,13 +192,25 @@ module Locentra
       REFUND_STATUSES = { "pending" => "Pendente no provedor", "confirmed" => "Confirmado", "failed" => "Falhou" }.freeze
       REFUND_TRANSITIONS = { "pending" => %w[confirmed failed], "confirmed" => [], "failed" => [] }.freeze
 
-      Refund = Data.define(:id, :organization_id, :payment_id, :amount, :reason, :status, :provider_reference, :failure_reason, :confirmed_at) do
+      Refund = Data.define(:id, :organization_id, :payment_id, :amount, :reason, :status, :provider_reference, :failure_reason, :confirmed_at,
+                           :submission_attempts, :submission_started_at) do
+        def initialize(submission_attempts: 0, submission_started_at: nil, **)
+          super
+        end
+
         def self.build(id:, organization_id:, payment:, amount:, reason:, now:)
           refund = new(id: id, organization_id: organization_id, payment_id: payment.id, amount: amount,
                        reason: Organizations::Text.required(reason, "motivo", min: 3, max: 500), status: "pending", provider_reference: nil,
                        failure_reason: nil, confirmed_at: nil)
           payment.manual? ? refund.confirm(now, nil) : refund
         end
+
+        # Tentativa de estorno no provedor, gravada antes da chamada de rede.
+        def begin_submission(at) = with(submission_attempts: submission_attempts + 1, submission_started_at: at)
+        # Requisição que comprovadamente não saiu (conexão recusada): nada a esperar.
+        def abandon_submission = with(submission_started_at: nil)
+        def submission_in_flight?(at) = !submission_started_at.nil? && at < settles_at
+        def settles_at = submission_started_at && (submission_started_at + SUBMISSION_WINDOW_SECONDS)
 
         def status_label = REFUND_STATUSES.fetch(status)
         def pending? = status == "pending"

@@ -95,8 +95,8 @@ module Locentra
           # Criação idempotente: exige Idempotency-Key.
           def create_reservation(ctx)
             data = ctx.json
+            lines = api_lines(data["items"])
             idempotent(ctx, "reservations.write", "POST /api/v1/reservations", data) do |tx, actor|
-              lines = Array(data["items"]).map { |i| Domain::Reservations::Line.build(product_id: i.to_h["product_id"], quantity: i.to_h["quantity"]) }
               reservation = uc(:create_reservation).call(actor, {
                 customer_id: data["customer_id"], branch_id: data["branch_id"], period: api_period(data),
                 lines: lines, mode: (data["mode"] || "hold").to_s, hold_minutes: data["hold_minutes"],
@@ -106,10 +106,14 @@ module Locentra
             end
           end
 
+          # Bloqueio vencido: a transação composta com a idempotência é desfeita junto com a expiração
+          # gravada nela; a confirmação isolada grava a expiração (com evento e auditoria) e responde 409.
           def confirm_reservation(ctx)
             idempotent(ctx, "reservations.write", "POST /api/v1/reservations/#{ctx.param(:id)}/confirm", {}) do |tx, actor|
               [200, S.reservation(uc(:confirm_reservation).call(actor, ctx.param(:id), tx: tx))]
             end
+          rescue Domain::HoldExpired
+            uc(:confirm_reservation).call(ctx.actor, ctx.param(:id))
           end
 
           def cancel_reservation(ctx)
@@ -125,6 +129,14 @@ module Locentra
           end
 
           private
+
+          # `items` precisa ser uma lista de objetos; outro formato é erro de validação (422).
+          def api_lines(items)
+            list = items.nil? ? [] : items
+            raise Domain::ValidationError.field("items", "deve ser uma lista de objetos com product_id e quantity") unless list.is_a?(Array) && list.all?(Hash)
+
+            list.map { |i| Domain::Reservations::Line.build(product_id: i["product_id"], quantity: i["quantity"]) }
+          end
 
           def idempotent(ctx, permission, scope, payload, &)
             fingerprint = Application::Idempotency.fingerprint(ctx.verb, ctx.path, payload)

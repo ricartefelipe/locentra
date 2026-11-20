@@ -3,12 +3,17 @@
 require "ipaddr"
 require "net/http"
 require "resolv"
+require "timeout"
 require "uri"
 
 module Locentra
   module Infrastructure
     module Integrations
-      class UnsafeDestination < StandardError; end
+      # Erro declarado pela aplicação (porta HTTP de destinos configurados por usuários).
+      UnsafeDestination = Application::Integrations::UnsafeDestination
+
+      # Resposta que não terminou dentro do prazo total da entrega.
+      class DeadlineExceeded < StandardError; end
 
       # Cliente HTTP para destinos configurados por usuários (webhooks), com proteção contra SSRF:
       #
@@ -18,7 +23,11 @@ module Locentra
       #   metadados de nuvem, multicast, reservados e IPv4 mapeado em IPv6);
       # - a conexão usa o IP validado (evita DNS rebinding entre validação e conexão);
       # - redirecionamentos não são seguidos;
-      # - tempos limite e leitura de resposta limitados.
+      # - tempos limite por operação de rede e prazo total da requisição (conexão, envio, cabeçalhos e
+      #   corpo): um destino que responde gotejando não prende a thread do worker além do prazo;
+      # - o corpo da resposta é lido em partes e a leitura é interrompida ao atingir
+      #   MAX_RESPONSE_BYTES (o restante nunca é carregado em memória);
+      # - sem nova tentativa automática do Net::HTTP (a fila decide as novas tentativas).
       class SafeHttp
         Response = Data.define(:status, :body)
 
@@ -29,13 +38,15 @@ module Locentra
         ].map { |cidr| IPAddr.new(cidr) }.freeze
         BLOCKED_PORTS = [22, 23, 25, 110, 143, 3306, 5432, 6379, 9200, 11_211, 27_017].freeze
         MAX_RESPONSE_BYTES = 4096
+        TOTAL_TIMEOUT = 15
 
-        def initialize(allow_http: false, allow_private: false, resolver: Resolv, open_timeout: 5, read_timeout: 10)
+        def initialize(allow_http: false, allow_private: false, resolver: Resolv, open_timeout: 5, read_timeout: 10, total_timeout: TOTAL_TIMEOUT)
           @allow_http = allow_http
           @allow_private = allow_private
           @resolver = resolver
           @open_timeout = open_timeout
           @read_timeout = read_timeout
+          @total_timeout = total_timeout
         end
 
         # Valida a URL e devolve [uri, ip] seguros; lança UnsafeDestination caso contrário.
@@ -57,16 +68,11 @@ module Locentra
 
         def post(url, body, headers = {})
           uri, ip = resolve!(url)
-          http = Net::HTTP.new(uri.host, uri.port)
-          http.ipaddr = ip
-          http.use_ssl = uri.scheme == "https"
-          http.open_timeout = @open_timeout
-          http.read_timeout = @read_timeout
-          http.write_timeout = @read_timeout
           request = Net::HTTP::Post.new(uri.request_uri, headers.merge("content-type" => "application/json", "user-agent" => "Locentra-Webhooks/1"))
           request.body = body
-          response = http.request(request)
-          Response.new(status: response.code.to_i, body: response.body.to_s.byteslice(0, MAX_RESPONSE_BYTES))
+          Timeout.timeout(@total_timeout, DeadlineExceeded, "resposta não concluída em #{@total_timeout}s") do
+            connection(uri, ip).start { |http| perform(http, request) }
+          end
         end
 
         def blocked?(ip)
@@ -79,6 +85,33 @@ module Locentra
         end
 
         private
+
+        def connection(uri, ip)
+          http = Net::HTTP.new(uri.host, uri.port)
+          http.ipaddr = ip
+          http.use_ssl = uri.scheme == "https"
+          http.open_timeout = @open_timeout
+          http.read_timeout = @read_timeout
+          http.write_timeout = @read_timeout
+          http.max_retries = 0
+          http
+        end
+
+        # Lê o corpo em partes e encerra a conexão ao atingir o limite, sem carregar o restante.
+        def perform(http, request)
+          status = nil
+          buffer = +""
+          catch(:limit) do
+            http.request(request) do |response|
+              status = response.code.to_i
+              response.read_body do |chunk|
+                buffer << chunk.byteslice(0, MAX_RESPONSE_BYTES - buffer.bytesize)
+                throw :limit if buffer.bytesize >= MAX_RESPONSE_BYTES
+              end
+            end
+          end
+          Response.new(status: status, body: buffer)
+        end
 
         def addresses_for(host)
           literal = host.delete_prefix("[").delete_suffix("]")

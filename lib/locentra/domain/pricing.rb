@@ -217,7 +217,7 @@ module Locentra
 
         def compose(lines:, fees: [], coupon: nil, manual_discount_bps: 0, discount_limit_bps: 0, now: nil, deposit: Money.zero)
           if manual_discount_bps.positive? && manual_discount_bps > discount_limit_bps
-            raise AccessDenied, "desconto manual acima do limite autorizado para o papel (#{discount_limit_bps / 100.0}%)"
+            raise AccessDenied, "desconto manual acima do limite autorizado para o papel (#{Percent.label(discount_limit_bps)})"
           end
           raise ValidationError.field("desconto", "entre 0 e 100%") unless manual_discount_bps.between?(0, 10_000)
 

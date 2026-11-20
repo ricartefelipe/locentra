@@ -3,8 +3,9 @@
 Plataforma SaaS B2B multitenant para gestão de locações e ativos: da consulta de disponibilidade ao
 encerramento financeiro, sem conflitos de alocação e com rastreabilidade de cada ativo.
 
-Os identificadores (`RF-xx`, `RNF-xx`) são usados em `docs/STATUS.md` para acompanhar implementação
-e evidências de teste.
+Os identificadores (`RF-xx`, `RNF-xx`) são usados nos documentos de módulo (`docs/modulos/`), que
+relacionam cada requisito à implementação e aos testes de evidência; `docs/STATUS.md` resume a situação
+geral e as limitações (por exemplo, o RF-29 atendido parcialmente).
 
 ## 1. Produto
 

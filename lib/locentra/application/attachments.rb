@@ -3,6 +3,11 @@
 module Locentra
   module Application
     module Attachments
+      # Erros da porta de armazenamento (`put/get/delete/exist?`), levantados pelos adaptadores: a
+      # aplicação não depende das classes de infraestrutura.
+      class InvalidStorageKey < StandardError; end
+      class ContentMissing < StandardError; end
+
       # Tipos aceitos, identificados pelos bytes iniciais do conteúdo (o tipo declarado pelo cliente
       # não é usado para decidir).
       SIGNATURES = {
@@ -82,6 +87,9 @@ module Locentra
                   "created_by" => actor.audit_actor_id, "created_at" => now, "retain_until" => retain_days ? now + (retain_days * 86_400) : nil }
           guard!(tx, owner_type, row["owner_id"])
           stats = @storage.put(key, bytes)
+          # Composto com outra operação (ex.: PDF do contrato), uma falha posterior, no COMMIT ou uma
+          # nova tentativa da transação também removem o arquivo.
+          tx.after_rollback { @storage.delete(key) }
           begin
             row = row.merge("byte_size" => stats[:byte_size], "sha256" => stats[:sha256])
             @attachments.insert(tx, row)
@@ -112,7 +120,7 @@ module Locentra
             found
           end
           [row, @storage.get(row["storage_key"])]
-        rescue Infrastructure::Storage::InvalidKey, Errno::ENOENT
+        rescue InvalidStorageKey, ContentMissing
           raise Domain::NotFound, "anexo"
         end
 

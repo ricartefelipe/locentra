@@ -2,14 +2,19 @@
 # frozen_string_literal: true
 
 # Worker de tarefas: usa WORKER_DATABASE_URL (papel locentra_worker) e encerra graciosamente em TERM/INT.
+# `bin/worker --check` é o healthcheck do contêiner: sai com 0 se o arquivo de vida (WORKER_HEALTH_FILE)
+# foi atualizado pela thread de heartbeat nos últimos 90 segundos.
 require "bundler/setup"
 require_relative "../lib/locentra/system"
 require_relative "../lib/locentra/interfaces/worker/runner"
 
 config = Locentra::Config.from_env(ENV)
+exit(Locentra::Interfaces::Worker::Runner.alive?(config.worker_health_file) ? 0 : 1) if ARGV.include?("--check")
 abort "WORKER_DATABASE_URL não definido" if config.worker_database_url.to_s.empty?
 
-system = Locentra::System.new(config, database_url: config.worker_database_url, pool_name: "worker", pool_size: config.worker_concurrency + 2)
+pool_size = config.worker_concurrency + config.webhook_concurrency + 2
+system = Locentra::System.new(config, database_url: config.worker_database_url, pool_name: "worker", pool_size: pool_size)
 handlers = Locentra::Interfaces::Worker::Handlers.new(system, mailer: system.services[:mailer], templates: system.services[:mail_templates])
 Locentra::Interfaces::Worker::Runner.new(system: system, handlers: handlers, concurrency: config.worker_concurrency,
+                                         webhook_concurrency: config.webhook_concurrency, health_file: config.worker_health_file,
                                          logger: system.logger.with("process" => "worker")).run

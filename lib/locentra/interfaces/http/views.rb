@@ -3,7 +3,9 @@
 require "erb"
 require "cgi"
 require "json"
+require "securerandom"
 require "uri"
+require_relative "labels"
 
 module Locentra
   module Interfaces
@@ -23,12 +25,6 @@ module Locentra
         end
 
         def safe(text) = SafeHtml.new(text.to_s)
-
-        # JSON seguro para embutir em <script type="application/json">: caracteres que poderiam
-        # encerrar o elemento ou abrir comentários HTML são escapados.
-        def json_for_script(data)
-          JSON.generate(data).gsub("<", "\\u003c").gsub(">", "\\u003e").gsub("&", "\\u0026").gsub("\u2028", "\\u2028").gsub("\u2029", "\\u2029")
-        end
       end
 
       # ERB com escape automático: `<%= %>` escapa sempre; HTML confiável precisa passar por
@@ -150,6 +146,15 @@ module Locentra
           "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted"
         }.freeze
 
+        # Rótulo em português de um código interno (ver Labels::GROUPS).
+        def label(group, value) = Labels.label(group, value)
+
+        # Percentual a partir de pontos-base, com aritmética inteira (Domain::Percent).
+        def percent(bps) = Domain::Percent.label(bps)
+        def percent_value(bps) = Domain::Percent.value(bps)
+
+        def asset_status(status) = Domain::Catalog::ASSET_STATUSES.fetch(status.to_s) { Labels.label(:field, status) }
+
         def status_badge(status, label)
           badge(label, STATUS_TONES.fetch(status, "neutral"))
         end
@@ -173,11 +178,6 @@ module Locentra
 
         def u(text) = URI.encode_www_form_component(text.to_s)
 
-        def link_to(text, href, **attrs)
-          extra = attrs.map { |k, v| %( #{k.to_s.tr("_", "-")}="#{h(v)}") }.join
-          raw(%(<a href="#{h(href)}"#{extra}>#{h(text)}</a>))
-        end
-
         def field_errors(errors, field)
           messages = Array(errors && errors[field.to_s])
           return raw("") if messages.empty?
@@ -185,10 +185,15 @@ module Locentra
           raw(%(<p class="field-error" id="erro-#{h(field)}" role="alert">#{h(messages.join("; "))}</p>))
         end
 
-        def invalid(errors, field)
-          return raw("") unless errors&.key?(field.to_s)
-
-          raw(%( aria-invalid="true" aria-describedby="erro-#{h(field)}"))
+        # Atributos de acessibilidade do campo: um único aria-describedby com a ajuda do campo
+        # (`describedby`) e, havendo erro, a mensagem de erro.
+        def invalid(errors, field, describedby: nil)
+          error = errors&.key?(field.to_s)
+          ids = [describedby, error ? "erro-#{field}" : nil].compact
+          attributes = +""
+          attributes << ' aria-invalid="true"' if error
+          attributes << %( aria-describedby="#{h(ids.join(" "))}") unless ids.empty?
+          raw(attributes)
         end
 
         # Valor reenviado de um campo indexado (nome[chave]); ignora formatos inesperados.
@@ -200,12 +205,20 @@ module Locentra
         # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.
         def open_if(errors, *fields) = raw(fields.any? { |field| errors&.key?(field.to_s) } ? " open" : "")
 
+        # Formulário de outra tela de detalhe que falhou: a página volta com o <details> do formulário
+        # aberto e com os valores enviados (a requisição atual é o POST para o `path` do formulário).
+        def open_after_failure(path) = raw(failed_submission?(path) ? " open" : "")
+        def submitted(path, field) = failed_submission?(path) ? request.form[field].to_s : ""
+
+        def failed_submission?(path)
+          !request.get? && request.path == path && @errors.is_a?(Hash) && !@errors.empty?
+        end
+
+        # Chave de envio único de formulários que movimentam dinheiro (idempotência do envio).
+        def submission_field = raw(%(<input type="hidden" name="envio" value="#{SecureRandom.uuid}">))
+
         def selected(current, value) = raw(current.to_s == value.to_s ? " selected" : "")
         def checked(flag) = raw(flag ? " checked" : "")
-
-        def json_script(id, data)
-          raw(%(<script type="application/json" id="#{h(id)}">#{Html.json_for_script(data)}</script>))
-        end
 
         def can?(permission) = request.can?(permission)
 

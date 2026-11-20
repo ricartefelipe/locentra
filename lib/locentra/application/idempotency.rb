@@ -28,9 +28,10 @@ module Locentra
         Digest::SHA256.hexdigest("#{verb} #{path}\n#{JSON.generate(canonical(payload))}")
       end
 
+      # Chaves em ordem e como texto. O valor é lido pela chave original: `false` não vira `nil`.
       def self.canonical(value)
         case value
-        when Hash then value.keys.map(&:to_s).sort.to_h { |k| [k, canonical(value[k] || value[k.to_sym])] }
+        when Hash then value.sort_by { |k, _| k.to_s }.to_h { |k, v| [k.to_s, canonical(v)] }
         when Array then value.map { |v| canonical(v) }
         else value
         end

@@ -28,7 +28,7 @@
       </table>
     <% end %>
     <% if can?("maintenance.write") %>
-      <details>
+      <details<%= open_after_failure("/ativos/#{a.id}/bloqueios") %>>
         <summary>Bloquear período (preparação ou manutenção programada)</summary>
         <form method="post" action="/ativos/<%= a.id %>/bloqueios" class="stack">
           <%= csrf_field %>
@@ -64,8 +64,8 @@
     <% if @data[:events].empty? %><p class="empty">Sem eventos.</p><% else %>
       <ol class="timeline">
         <% @data[:events].each do |e| %>
-          <li><time><%= datetime(e["occurred_at"]) %></time> <strong><%= e["kind"] %></strong>
-            <% if e["to_status"] %><%= e["from_status"] || "—" %> → <%= e["to_status"] %><% end %> <span class="muted"><%= e["notes"] %></span></li>
+          <li><time><%= datetime(e["occurred_at"]) %></time> <strong><%= label(:asset_event, e["kind"]) %></strong>
+            <% if e["to_status"] %><%= e["from_status"] ? asset_status(e["from_status"]) : "—" %> → <%= asset_status(e["to_status"]) %><% end %> <span class="muted"><%= e["notes"] %></span></li>
         <% end %>
       </ol>
     <% end %>

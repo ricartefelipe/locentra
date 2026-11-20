@@ -30,6 +30,7 @@ class ApplicationObservabilityTest < UnitTest
     def observe(name, value, **labels) = @observations << [name, value, labels]
     def set_counter(name, value, **labels) = @totals[[name, labels]] = value
     def replace_gauges(name, series) = @gauges[name] = series
+    def gauge(name, value, **labels) = @gauges[name] = [[value, labels]]
   end
 
   class FakeTransactor
@@ -49,6 +50,17 @@ class ApplicationObservabilityTest < UnitTest
   def logger = @logger ||= FakeLogger.new
   def metrics = @metrics ||= FakeMetrics.new
   def actor = A::Actor.system(organization_id: "org-1", request_id: "req-origem-0001")
+
+  def test_call_duration_comes_from_the_injected_clock
+    ticks = [10.0, 10.25]
+    clock = Object.new
+    clock.define_singleton_method(:monotonic) { ticks.shift }
+    A::ExternalCalls.new(logger: logger, metrics: metrics, clock: clock)
+                    .track(service: "webhook", operation: "deliver", organization_id: "org-1", correlation_id: nil) { :ok }
+
+    assert_in_delta 250.0, logger.entries.last[1][:duration_ms]
+    assert_equal [["external_call_duration_seconds", 0.25, { provider: "webhook", kind: "deliver" }]], metrics.observations
+  end
 
   def test_successful_call_logs_correlation_and_low_cardinality_metrics
     result = calls.track(service: "simulator", operation: "create_charge", organization_id: "org-1", correlation_id: "req-origem-0001",
@@ -155,7 +167,10 @@ class ApplicationObservabilityTest < UnitTest
 
     assert collect.call
     assert_empty metrics.gauges["jobs_queue_stats_age_seconds"], "sem agregados gravados não há idade a informar"
+    assert_equal [[1, {}]], metrics.gauges["metrics_collect_success"]
     refute A::Reports::CollectMetrics.new(transactor: FakeTransactor.new(error: RuntimeError.new("sem banco")), reports: reports, metrics: metrics,
-                                          clock: clock).call
+                                          clock: clock, logger: logger).call
+    assert_equal [[0, {}]], metrics.gauges["metrics_collect_success"], "falha visível na própria série"
+    assert_equal "metrics.collect_failed", logger.entries.last[1][:event]
   end
 end

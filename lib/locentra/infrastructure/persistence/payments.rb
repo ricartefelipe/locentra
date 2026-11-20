@@ -12,7 +12,7 @@ module Locentra
                   "p.simulator_scenario, p.requires_review, p.review_reason, p.failure_reason, p.submission_attempts, " \
                   "p.submission_started_at, p.notes, p.paid_at, p.confirmed_at, p.created_at"
         REFUND_COLUMNS = "f.id, f.organization_id, f.payment_id, f.amount_cents, f.reason, f.status, f.provider_reference, f.failure_reason, " \
-                         "f.confirmed_at, f.created_at"
+                         "f.confirmed_at, f.submission_attempts, f.submission_started_at, f.created_at"
         LISTING_FROM = "FROM payments p JOIN customers c ON c.organization_id = p.organization_id AND c.id = p.customer_id " \
                        "JOIN reservations r ON r.organization_id = p.organization_id AND r.id = p.reservation_id"
 
@@ -110,8 +110,9 @@ module Locentra
         def lock_refund(tx, id) = refund_row(tx, id, "FOR UPDATE")
 
         def update_refund(tx, refund, from:, now:)
-          count = tx.execute(<<~SQL, [tx.tenant_id!, refund.id, refund.status, refund.provider_reference, refund.failure_reason, refund.confirmed_at, refund.status == "failed" ? now : nil, now, from])
-            UPDATE refunds SET status = $3, provider_reference = $4, failure_reason = $5, confirmed_at = $6, failed_at = $7, updated_at = $8
+          count = tx.execute(<<~SQL, [tx.tenant_id!, refund.id, refund.status, refund.provider_reference, refund.failure_reason, refund.confirmed_at, refund.status == "failed" ? now : nil, now, from, refund.submission_attempts, refund.submission_started_at])
+            UPDATE refunds SET status = $3, provider_reference = $4, failure_reason = $5, confirmed_at = $6, failed_at = $7, updated_at = $8,
+                               submission_attempts = $10, submission_started_at = $11
              WHERE organization_id = $1 AND id = $2 AND status = $9
           SQL
           raise Domain::Conflict.new("reembolso alterado por outra operação", code: "stale_refund") unless count == 1
@@ -134,7 +135,8 @@ module Locentra
         def self.map_refund(row)
           F::Refund.new(id: row["id"], organization_id: row["organization_id"], payment_id: row["payment_id"], amount: Domain::Money.new(row["amount_cents"]),
                         reason: row["reason"], status: row["status"], provider_reference: row["provider_reference"], failure_reason: row["failure_reason"],
-                        confirmed_at: row["confirmed_at"])
+                        confirmed_at: row["confirmed_at"], submission_attempts: row["submission_attempts"].to_i,
+                        submission_started_at: row["submission_started_at"])
         end
 
         private

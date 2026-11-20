@@ -9,8 +9,14 @@ module Locentra
     module HTTP
       class BadRequest < StandardError; end
       class PayloadTooLarge < StandardError; end
-      class Unauthenticated < StandardError; end
-      class CsrfFailure < StandardError; end
+
+      class Unauthenticated < StandardError
+        def initialize(message = "Autenticação necessária") = super
+      end
+
+      class CsrfFailure < StandardError
+        def initialize(message = "O formulário expirou ou a sessão mudou. Recarregue a página e tente novamente.") = super
+      end
 
       # Sessão válida usada na área de outro tipo de acesso (portal do cliente x equipe). `home` é o
       # início da área da sessão; páginas redirecionam para ele e as demais requisições recebem 403.
@@ -44,7 +50,8 @@ module Locentra
 
         def verb = rack.request_method
         def path = rack.path_info
-        def ip = rack.ip
+        # Definido pelo middleware ClientAddress; sem ele (aplicação montada sem a pilha), o par da conexão.
+        def ip = env["locentra.client_ip"] || env["REMOTE_ADDR"]
         def user_agent = env["HTTP_USER_AGENT"].to_s
         def get? = %w[GET HEAD].include?(verb)
 
@@ -118,6 +125,19 @@ module Locentra
           sent = env["HTTP_X_CSRF_TOKEN"] || form["_csrf"]
           expected = csrf_token
           raise CsrfFailure unless sent && expected && Rack::Utils.secure_compare(sent.to_s, expected.to_s)
+        end
+
+        # Formulários públicos (sem sessão, portanto sem token CSRF): recusa envios de outro site,
+        # identificados por Sec-Fetch-Site ou por Origin diferente da própria aplicação. Evita que uma
+        # página de terceiros conecte a vítima à conta de quem atacou (CSRF de login). Clientes que não
+        # enviam nenhum dos cabeçalhos (fora de navegadores) não são afetados.
+        def verify_origin!(allowed = [])
+          return if get?
+          raise CsrfFailure if env["HTTP_SEC_FETCH_SITE"] == "cross-site"
+
+          origin = env["HTTP_ORIGIN"].to_s
+          return if origin.empty?
+          raise CsrfFailure unless (allowed + [rack.base_url]).include?(origin)
         end
 
         def can?(permission)
