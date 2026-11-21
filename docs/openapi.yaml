@@ -634,6 +634,315 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /reservations/{id}/pickups:
+    post:
+      summary: Inicia a separação da retirada
+      description: >-
+        Escopo `fulfillment.write`. Cria uma linha por alocação ativa da reserva confirmada. Responde `201` quando cria a
+        separação e `200` quando já havia separação em andamento (a mesma), com `Location` da retirada. Reserva fora de
+        confirmada responde `409` `invalid_transition`; sem alocações ativas, `422` em `reserva`.
+      operationId: startPickup
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200":
+          description: Separação em andamento
+          headers:
+            Location: { description: Endereço da retirada, schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pickup" }
+        "201":
+          description: Separação criada
+          headers:
+            Location: { description: Endereço da retirada, schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pickup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /reservations/{id}/return-items:
+    get:
+      summary: Itens entregues e pendentes de devolução da reserva
+      description: Escopo `reservations.read`. Linhas da retirada entregue com a quantidade pendente e as devoluções já registradas.
+      operationId: getReturnItems
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Itens da devolução
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReturnItems" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /reservations/{id}/returns:
+    post:
+      summary: Registra devolução total ou parcial
+      description: >-
+        Escopo `fulfillment.write`. Cada item informa o resultado (`ok`, `damaged` ou `missing`), a quantidade (padrão 1;
+        ativo individual é devolvido por unidade), se exige inspeção e observações (obrigatórias em avaria e falta).
+        Avaria sempre exige inspeção; falta nunca passa por inspeção. A devolução que conclui todos os itens encerra a
+        reserva. Item já devolvido responde `409` `already_returned`; reserva fora de andamento, `409`
+        `invalid_transition`. Responde `201` com o detalhe e `Location` da devolução.
+      operationId: createReturn
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReturnInput" }
+      responses:
+        "201":
+          description: Devolução registrada
+          headers:
+            Location: { description: Endereço da devolução, schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Return" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /pickups/{id}:
+    get:
+      summary: Detalha a retirada com as linhas
+      description: >-
+        Escopo `reservations.read`. `authorized_pickers` (contatos autorizados a retirar) vem somente com `customers.read`;
+        sem o escopo, é nulo. O documento do retirante não é exposto.
+      operationId: getPickup
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Retirada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pickup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /pickups/{id}/check:
+    post:
+      summary: Confere os itens da separação
+      description: >-
+        Escopo `fulfillment.write`. Ativos são conferidos pelo patrimônio (`tag`; outra unidade livre do mesmo produto
+        substitui a alocada) e estoque pela quantidade (`quantity`, inteiro). Os erros de todos os itens são reunidos (por
+        exemplo, `patrimonio` e `quantidade`). Retirada já entregue responde `409` `already_picked_up`.
+      operationId: checkPickup
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PickupCheckInput" }
+      responses:
+        "200":
+          description: Conferência registrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pickup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /pickups/{id}/deliver:
+    post:
+      summary: Entrega os itens conferidos
+      description: >-
+        Escopo `fulfillment.write`. Somente itens conferidos são entregues; os demais têm a alocação liberada. A reserva
+        passa a em andamento. Sem item conferido, `422` em `itens`; retirante inválido, `422` em `retirante`; retirada já
+        entregue, `409` `already_picked_up`.
+      operationId: deliverPickup
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PickupDeliverInput" }
+      responses:
+        "200":
+          description: Retirada entregue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pickup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /pickups/{id}/cancel:
+    post:
+      summary: Cancela a separação em andamento
+      description: Escopo `fulfillment.write`. A reserva continua confirmada. Retirada já entregue responde `409` `already_picked_up`.
+      operationId: cancelPickup
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Separação cancelada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pickup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /returns/{id}:
+    get:
+      summary: Detalha a devolução
+      description: Escopo `reservations.read`. Itens com resultado, registro de avaria ou falta e multas por atraso.
+      operationId: getReturn
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Devolução
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Return" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /inspections:
+    get:
+      summary: Lista inspeções pendentes ou decididas
+      description: Escopo `reservations.read`. Pendentes da mais recente para a mais antiga; decididas pela decisão mais recente.
+      operationId: listInspections
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, decided], default: pending } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de inspeções
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InspectionPage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /inspections/{id}/approve:
+    post:
+      summary: Aprova a inspeção e libera o item
+      description: >-
+        Escopo `inspections.write`. O ativo volta a disponível; o bloqueio de estoque é encerrado. Inspeção já decidida
+        responde `409` `invalid_transition`.
+      operationId: approveInspection
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes: { type: [string, "null"], maxLength: 1000 }
+      responses:
+        "200":
+          description: Inspeção aprovada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Inspection" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /inspections/{id}/reject:
+    post:
+      summary: Reprova a inspeção e abre ordem de manutenção
+      description: >-
+        Escopo `inspections.write`. O item continua indisponível; reservas futuras do ativo são realocadas e as que
+        ficarem sem unidade recebem alerta. `notes` (motivo) é obrigatório. Inspeção já decidida responde `409`
+        `invalid_transition`.
+      operationId: rejectInspection
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notes]
+              properties:
+                notes: { type: string, maxLength: 1000, description: Motivo da reprovação }
+                description: { type: [string, "null"], description: "Descrição da ordem de manutenção; sem ela, vale o motivo" }
+      responses:
+        "200":
+          description: Inspeção reprovada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InspectionRejection" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /alerts:
+    get:
+      summary: Lista alertas operacionais
+      description: >-
+        Escopo `reservations.read`. Filtros por situação, tipo e reserva (a própria ou a relacionada, como a reserva em
+        atraso que afeta outra). Mais recentes primeiro.
+      operationId: listAlerts
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, resolved], default: open } }
+        - { name: kind, in: query, schema: { type: string, enum: [overdue, affected_by_overdue, asset_unavailable] } }
+        - { name: reservation_id, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de alertas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlertPage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /alerts/{id}/resolve:
+    post:
+      summary: Resolve o alerta registrando a decisão
+      description: >-
+        Escopo `fulfillment.write`. Nenhuma reserva é cancelada automaticamente: a decisão fica registrada em
+        `resolution` (de 3 a 1000 caracteres; erro em `decisao`). Alerta já resolvido responde `409`
+        `invalid_transition` ou `alert_resolved`.
+      operationId: resolveAlert
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        "200":
+          description: Alerta resolvido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Alert" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /payments:
     post:
       summary: Registra pagamento recebido fora do provedor (manual), confirmado na hora
@@ -1773,3 +2082,266 @@ components:
       properties:
         ends_at: { type: string, format: date-time, description: Novo fim da reserva }
         description: { type: [string, "null"], maxLength: 1000 }
+    ReservationLink:
+      type: object
+      additionalProperties: false
+      required: [id, code, status]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        status: { type: string, enum: [requested, held, confirmed, in_progress, completed, cancelled, expired] }
+    Pickup:
+      type: object
+      additionalProperties: false
+      required: [id, status, reservation, branch_id, picker, notes, started_at, delivered_at, cancelled_at, version, lines, authorized_pickers]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [picking, delivered, cancelled] }
+        reservation: { $ref: "#/components/schemas/ReservationLink" }
+        branch_id: { type: string, format: uuid }
+        picker:
+          description: Quem retirou (nulo antes da entrega)
+          oneOf: [{ $ref: "#/components/schemas/PickupPicker" }, { type: "null" }]
+        notes: { type: [string, "null"] }
+        started_at: { type: string, format: date-time }
+        delivered_at: { type: [string, "null"], format: date-time }
+        cancelled_at: { type: [string, "null"], format: date-time }
+        version: { type: integer }
+        lines: { type: array, items: { $ref: "#/components/schemas/PickupLine" } }
+        authorized_pickers:
+          type: [array, "null"]
+          description: Contatos do cliente autorizados a retirar; nulo sem o escopo `customers.read`
+          items:
+            type: object
+            additionalProperties: false
+            required: [contact_id, name]
+            properties:
+              contact_id: { type: string, format: uuid }
+              name: { type: string }
+    PickupLine:
+      type: object
+      additionalProperties: false
+      required: [id, status, product_id, sku, reservation_item_id, asset_id, tag, allocated_asset_id, allocated_tag, expected_quantity, checked_quantity,
+                 delivered_quantity, returned_quantity, missing_quantity, release_reason]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, checked, delivered, partial, not_delivered, cancelled] }
+        product_id: { type: string, format: uuid }
+        sku: { type: string }
+        reservation_item_id: { type: string, format: uuid }
+        asset_id: { type: [string, "null"], format: uuid, description: Ativo da linha (o conferido depois da conferência) }
+        tag: { type: [string, "null"], description: Patrimônio do ativo da linha }
+        allocated_asset_id: { type: [string, "null"], format: uuid, description: Ativo alocado à reserva }
+        allocated_tag: { type: [string, "null"] }
+        expected_quantity: { type: integer }
+        checked_quantity: { type: integer }
+        delivered_quantity: { type: integer }
+        returned_quantity: { type: integer }
+        missing_quantity: { type: integer }
+        release_reason: { type: [string, "null"], description: Motivo da liberação da quantidade não entregue }
+    PickupPicker:
+      type: object
+      additionalProperties: false
+      required: [kind, contact_id, name]
+      properties:
+        kind: { type: string, enum: [customer, contact] }
+        contact_id: { type: [string, "null"], format: uuid }
+        name: { type: string }
+    PickupCheckInput:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            oneOf:
+              - type: object
+                required: [line_id, tag]
+                properties:
+                  line_id: { type: string, format: uuid }
+                  tag: { type: string, description: Patrimônio conferido }
+              - type: object
+                required: [line_id, quantity]
+                properties:
+                  line_id: { type: string, format: uuid }
+                  quantity: { type: integer, minimum: 0, description: Quantidade conferida (0 volta a linha para pendente) }
+    PickupDeliverInput:
+      type: object
+      required: [picker]
+      properties:
+        picker:
+          oneOf:
+            - type: object
+              required: [kind]
+              properties:
+                kind: { type: string, const: customer, description: Cliente pessoa física }
+            - type: object
+              required: [kind, contact_id]
+              properties:
+                kind: { type: string, const: contact, description: Contato autorizado a retirar }
+                contact_id: { type: string, format: uuid }
+        notes: { type: [string, "null"], maxLength: 1000 }
+    ReturnItems:
+      type: object
+      additionalProperties: false
+      required: [reservation, pickup_id, lines, returns]
+      properties:
+        reservation: { $ref: "#/components/schemas/ReservationLink" }
+        pickup_id: { type: [string, "null"], format: uuid, description: Retirada entregue (nula antes da entrega) }
+        lines:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, status, product_id, sku, reservation_item_id, asset_id, tag, allocated_asset_id, allocated_tag, expected_quantity, checked_quantity,
+                 delivered_quantity, returned_quantity, missing_quantity, release_reason,
+                       pending_quantity]
+            properties:
+              id: { type: string, format: uuid }
+              status: { type: string, enum: [pending, checked, delivered, partial, not_delivered, cancelled] }
+              product_id: { type: string, format: uuid }
+              sku: { type: string }
+              reservation_item_id: { type: string, format: uuid }
+              asset_id: { type: [string, "null"], format: uuid, description: Ativo da linha (o conferido depois da conferência) }
+              tag: { type: [string, "null"], description: Patrimônio do ativo da linha }
+              allocated_asset_id: { type: [string, "null"], format: uuid, description: Ativo alocado à reserva }
+              allocated_tag: { type: [string, "null"] }
+              expected_quantity: { type: integer }
+              checked_quantity: { type: integer }
+              delivered_quantity: { type: integer }
+              returned_quantity: { type: integer }
+              missing_quantity: { type: integer }
+              release_reason: { type: [string, "null"], description: Motivo da liberação da quantidade não entregue }
+              pending_quantity: { type: integer, description: Entregue menos devolvido e faltante }
+        returns:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, returned_at, late_fee, completes_reservation, lines]
+            properties:
+              id: { type: string, format: uuid }
+              returned_at: { type: string, format: date-time }
+              late_fee: { $ref: "#/components/schemas/Money" }
+              completes_reservation: { type: boolean }
+              lines: { type: integer, description: Quantidade de itens da devolução }
+    Return:
+      type: object
+      additionalProperties: false
+      required: [id, reservation_id, reservation_code, pickup_id, returned_at, late_fee, completes_reservation, notes, lines, late_fees]
+      properties:
+        id: { type: string, format: uuid }
+        reservation_id: { type: string, format: uuid }
+        reservation_code: { type: string }
+        pickup_id: { type: string, format: uuid }
+        returned_at: { type: string, format: date-time }
+        late_fee: { $ref: "#/components/schemas/Money" }
+        completes_reservation: { type: boolean }
+        notes: { type: [string, "null"] }
+        lines: { type: array, items: { $ref: "#/components/schemas/ReturnLine" } }
+        late_fees: { type: array, items: { $ref: "#/components/schemas/ReturnLateFee" } }
+    ReturnLine:
+      type: object
+      additionalProperties: false
+      required: [id, pickup_line_id, outcome, quantity, requires_inspection, notes, asset_id, stock_pool_id, sku, tag, damage_report_id,
+                 damage_report_code]
+      properties:
+        id: { type: string, format: uuid }
+        pickup_line_id: { type: string, format: uuid }
+        outcome: { type: string, enum: [ok, damaged, missing] }
+        quantity: { type: integer, minimum: 1 }
+        requires_inspection: { type: boolean }
+        notes: { type: [string, "null"] }
+        asset_id: { type: [string, "null"], format: uuid }
+        stock_pool_id: { type: [string, "null"], format: uuid }
+        sku: { type: string }
+        tag: { type: [string, "null"] }
+        damage_report_id: { type: [string, "null"], format: uuid, description: Registro de avaria ou falta aberto pela devolução }
+        damage_report_code: { type: [string, "null"] }
+    ReturnLateFee:
+      type: object
+      additionalProperties: false
+      required: [reservation_item_id, amount, quantity]
+      properties:
+        reservation_item_id: { type: [string, "null"], format: uuid }
+        amount: { $ref: "#/components/schemas/Money" }
+        quantity: { type: [integer, "null"] }
+    ReturnInput:
+      type: object
+      required: [entries]
+      properties:
+        entries: { type: array, minItems: 1, items: { $ref: "#/components/schemas/ReturnEntry" } }
+        notes: { type: [string, "null"], maxLength: 1000 }
+    ReturnEntry:
+      type: object
+      required: [pickup_line_id, outcome]
+      properties:
+        pickup_line_id: { type: string, format: uuid }
+        outcome: { type: string, enum: [ok, damaged, missing] }
+        quantity: { type: integer, minimum: 1, default: 1 }
+        requires_inspection: { type: boolean, default: false, description: "Avaria sempre exige inspeção; falta nunca" }
+        notes: { type: [string, "null"], maxLength: 1000, description: Obrigatório em avaria e falta (ao menos 3 caracteres) }
+    Inspection:
+      type: object
+      additionalProperties: false
+      required: [id, status, reason, product_id, branch_id, asset_id, stock_pool_id, quantity, reservation_id, return_line_id, maintenance_order_id,
+                 created_at, decided_at, decision_notes]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, approved, rejected] }
+        reason: { type: string }
+        product_id: { type: string, format: uuid }
+        branch_id: { type: string, format: uuid }
+        asset_id: { type: [string, "null"], format: uuid }
+        stock_pool_id: { type: [string, "null"], format: uuid }
+        quantity: { type: integer, minimum: 1 }
+        reservation_id: { type: [string, "null"], format: uuid }
+        return_line_id: { type: [string, "null"], format: uuid }
+        maintenance_order_id: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+        decided_at: { type: [string, "null"], format: date-time }
+        decision_notes: { type: [string, "null"] }
+    InspectionPage:
+      type: object
+      additionalProperties: false
+      required: [data, pagination]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Inspection" } }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    InspectionRejection:
+      type: object
+      additionalProperties: false
+      required: [inspection, maintenance_order]
+      properties:
+        inspection: { $ref: "#/components/schemas/Inspection" }
+        maintenance_order:
+          type: object
+          additionalProperties: false
+          required: [id, code]
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string, example: OM-000001 }
+    Alert:
+      type: object
+      additionalProperties: false
+      required: [id, kind, status, reservation_id, related_reservation_id, asset_id, stock_pool_id, details, created_at, resolved_at, resolution]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [overdue, affected_by_overdue, asset_unavailable] }
+        status: { type: string, enum: [open, resolved] }
+        reservation_id: { type: string, format: uuid }
+        related_reservation_id: { type: [string, "null"], format: uuid, description: "Reserva de origem (por exemplo, a reserva em atraso)" }
+        asset_id: { type: [string, "null"], format: uuid }
+        stock_pool_id: { type: [string, "null"], format: uuid }
+        details: { type: object, description: "Dados do alerta conforme o tipo (código da reserva, fim previsto, patrimônio)" }
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: [string, "null"], format: date-time }
+        resolution: { type: [string, "null"] }
+    AlertPage:
+      type: object
+      additionalProperties: false
+      required: [data, pagination]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Alert" } }
+        pagination: { $ref: "#/components/schemas/Pagination" }

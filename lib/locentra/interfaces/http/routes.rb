@@ -15,6 +15,7 @@ require_relative "api/v1"
 require_relative "api/v1_finance"
 require_relative "api/v1_quotes"
 require_relative "api/v1_contracts"
+require_relative "api/v1_operations"
 require_relative "routes_commercial_terms"
 
 module Locentra
@@ -62,6 +63,7 @@ module Locentra
           CommercialTermsRoutes.draw_api(r, deps)
           draw_api_quotes(r, API::QuotesV1Controller.new(deps))
           draw_api_contracts(r, API::ContractsV1Controller.new(deps))
+          draw_api_operations(r, API::OperationsV1Controller.new(deps))
         end
 
         def draw_staff(router, deps, web)
@@ -332,6 +334,24 @@ module Locentra
           r.get "/api/v1/contracts/:id/documents/:version", api, :contract_document, auth: :api
           r.post "/api/v1/contracts/:id/amendments", api, :amend_contract, auth: :api
           r.post "/api/v1/contracts/:id/cancel", api, :cancel_contract, auth: :api
+        end
+
+        # Operação na API v1: retirada, devolução, inspeções e alertas.
+        def draw_api_operations(router, api)
+          r = router
+          r.post "/api/v1/reservations/:id/pickups", api, :start_pickup, auth: :api
+          r.get "/api/v1/reservations/:id/return-items", api, :return_items, auth: :api
+          r.post "/api/v1/reservations/:id/returns", api, :create_return, auth: :api
+          r.get "/api/v1/pickups/:id", api, :pickup, auth: :api
+          r.post "/api/v1/pickups/:id/check", api, :check_pickup, auth: :api
+          r.post "/api/v1/pickups/:id/deliver", api, :deliver_pickup, auth: :api
+          r.post "/api/v1/pickups/:id/cancel", api, :cancel_pickup, auth: :api
+          r.get "/api/v1/returns/:id", api, :return_detail, auth: :api
+          r.get "/api/v1/inspections", api, :inspections, auth: :api
+          r.post "/api/v1/inspections/:id/approve", api, :approve_inspection, auth: :api
+          r.post "/api/v1/inspections/:id/reject", api, :reject_inspection, auth: :api
+          r.get "/api/v1/alerts", api, :alerts, auth: :api
+          r.post "/api/v1/alerts/:id/resolve", api, :resolve_alert, auth: :api
         end
 
         def draw_api(router, api)
