@@ -11,9 +11,9 @@ reserva e na versão do orçamento, fuso de referência da reserva, gestão de f
 
 | Verificação | Resultado |
 |---|---|
-| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 924 testes, 0 falhas |
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 933 testes, 0 falhas |
 | Cobertura de domínio + aplicação | 99,28% de linhas, 93,37% de branches (metas 90% / 80%) |
-| `rake test:browser` (Ferrum, Chrome headless) | 13 testes, 0 falhas |
+| `rake test:browser` (Ferrum, Chrome headless) | 14 testes, 0 falhas |
 | `rubocop` (árvore da branch exportada com `git archive`) | sem ofensas |
 | Atualização de um banco da 0015 para a 0016 | coberta por `test/repository/migration_0016_test.rb` (dados no formato da 1.1.0 e aborto com diagnóstico); o procedimento de `RUNBOOKS.md` §14 ainda não foi exercitado num ambiente Compose |
 
