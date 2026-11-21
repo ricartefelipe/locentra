@@ -163,6 +163,7 @@ class Migration0017Test < Minitest::Test
     assert_equal ["0017"], migrator(MIGRATIONS).migrate
     assert_new_indexes
     runbook = File.read(File.expand_path("../../docs/RUNBOOKS.md", __dir__))
+
     PREBUILT_INDEXES.each { |sql| assert_includes runbook, "#{sql};" }
   end
 
