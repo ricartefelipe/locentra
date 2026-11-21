@@ -43,7 +43,7 @@ module Locentra
                ["LIMPEZA", "Higienização dos equipamentos", 8_000]],
         coupons: [{ code: "BEMVINDO10", kind: "percent", value: 1_000, description: "Boas-vindas: 10% de desconto",
                     max_redemptions: 100, valid_days: 365 },
-                  { code: "PRIMEIRALOCACAO", kind: "fixed", value: 5_000, description: "R$ 50,00 em locações acima de R$ 300,00 (uso único)",
+                  { code: "PRIMEIRALOCACAO", kind: "fixed", value: 5_000, description: "R$ 50,00 em locações a partir de R$ 300,00 (uso único)",
                     max_redemptions: 1, min_subtotal_cents: 30_000, valid_days: 365 }],
         agreements: [["11222333000181", nil, 800, "Contrato anual de produção"], ["52998224725", "LEN-2470", 1_000, "Cliente recorrente de lentes"]]
       },

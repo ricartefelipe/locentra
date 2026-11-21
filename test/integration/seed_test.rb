@@ -91,7 +91,10 @@ class SeedTest < DatabaseTest
     welcome = uc(:get_coupon).call(ana, "BEMVINDO10")[:coupon]
 
     assert_equal ["percent", 1_000, "0 de 100", @clock.now + (365 * 86_400)], [welcome.kind, welcome.value, welcome.usage_text, welcome.valid_until]
-    assert_equal([5_000, 30_000, 1], uc(:get_coupon).call(ana, "PRIMEIRALOCACAO")[:coupon].then { |c| [c.value, c.min_subtotal_cents, c.max_redemptions] })
+    first = uc(:get_coupon).call(ana, "PRIMEIRALOCACAO")[:coupon]
+
+    assert_equal [5_000, 30_000, 1], [first.value, first.min_subtotal_cents, first.max_redemptions]
+    assert_equal "R$ 50,00 em locações a partir de R$ 300,00 (uso único)", first.description, "o mínimo é inclusivo"
     assert_equal 15_000, uc(:get_fee).call(ana, "ENTREGA")[:fee].default_amount.cents
     audited = owner_query(<<~SQL, tenant: alfa).map(&:values)
       SELECT action, count(*)::text AS n FROM audit_events
