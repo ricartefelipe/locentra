@@ -261,7 +261,8 @@ class OperationsApiTest < ApiV1TestCase
     post!(422, "/inspections/#{ids[1]}/reject", {})
 
     assert_equal ["motivo"], fields.keys
-    rejected = post!(200, "/inspections/#{ids[1]}/reject", { "notes" => "Peça danificada", "description" => "Trocar a lente" })
+    rejected = assert_idempotent("/inspections/#{ids[1]}/reject", { "notes" => "Peça danificada", "description" => "Trocar a lente" }, 200,
+                                 changed_body: { "notes" => "Outro motivo" })
 
     assert_conforms rejected, "InspectionRejection"
     assert_equal ["rejected", rejected["maintenance_order"]["id"]], rejected["inspection"].values_at("status", "maintenance_order_id")
@@ -269,6 +270,7 @@ class OperationsApiTest < ApiV1TestCase
     post!(409, "/inspections/#{ids[1]}/approve", {})
 
     assert_error "invalid_transition"
+    assert_equal 1, count("SELECT count(*) FROM maintenance_orders")
     decided = get!(200, "/inspections", { "status" => "decided" })
 
     assert_equal [2, 1], [decided["pagination"]["total"], get!(200, "/inspections")["pagination"]["total"]]
