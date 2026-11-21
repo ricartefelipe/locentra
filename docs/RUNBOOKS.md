@@ -371,13 +371,13 @@ No exercício, o Compose da 1.1.0 foi executado a partir de outro diretório, o 
 PostgreSQL (o caminho montado de `docker/postgres/init` mudou) sem perda de dados, porque o volume `pgdata`
 é o mesmo. Numa atualização feita a partir do mesmo checkout isso não ocorre.
 
-## 14. Atualização para a migration 0016 (configurações da organização) — procedimento escrito
+## 14. Atualização para a migration 0016 (configurações da organização) — exercitado em 21/11/2026
 
 A migration `0016_configuracoes_organizacao.sql` é aplicada numa única transação. A atualização a partir do
 esquema da 0015, com dados no formato da 1.1.0 (política personalizada em `settings`, `settings` vazio, valores
 JSON `null`, filial inativa, reservas com e sem contrato e versão de orçamento enviada), é coberta por
-`test/repository/migration_0016_test.rb`, inclusive o aborto com diagnóstico. O procedimento abaixo ainda não
-foi exercitado num ambiente Compose.
+`test/repository/migration_0016_test.rb`, inclusive o aborto com diagnóstico. O procedimento abaixo foi
+exercitado num ambiente Compose com dados da 1.1.0; o registro está na seção 14.5.
 
 ### 14.1 Verificação prévia (antes do passo 2 da seção 12)
 
@@ -468,3 +468,22 @@ inserções de instâncias 1.1.0 durante a implantação gradual e o retorno. A 
 coluna (keyword obrigatória no repositório, coberta por teste). Quando não houver mais retorno possível à
 1.1.0, uma migration futura remove os dois gatilhos e a função `app_cancellation_policy_fill()`; os gatilhos de
 imutabilidade e as CHECKs permanecem.
+
+### 14.5 Registro do exercício (21/11/2026, PostgreSQL 18.7, imagem construída a partir da branch da 1.2.0)
+
+Ambiente Compose da 1.1.0 (o mesmo do registro da seção 13.5, já na 0015, com seed, dados legados e um
+anexo), com web e worker da 1.1.0 em execução. Para exercitar o aborto, `settings` de uma organização foi
+alterado manualmente para `{"hold_minutes": 2}`.
+
+| Passo | Resultado |
+|---|---|
+| 14.1, verificação prévia (`locentra_backup`) | a organização alterada listada com o `settings` inválido |
+| `db:migrate` antes da correção | abortou com `migração 0016: configurações (settings) fora do formato esperado nas organizações …`; o esquema continuou na 0015 |
+| Correção com o proprietário (`settings - 'hold_minutes'`, com contexto da organização) | a verificação prévia voltou vazia |
+| Backup da seção 3 | gravado, com 1 arquivo de anexo |
+| `db:migrate` com `PGOPTIONS='-c lock_timeout=5s'` e a 1.1.0 em execução | 0016 aplicada em cerca de 7 s (incluindo a partida do contêiner); a 1.1.0 continuou com `/health/ready` e a tela de entrada em 200 |
+| Troca de web e worker para a versão nova | os dois `healthy`; `/health/ready` 200 |
+| **Organização → Editar configurações** | validade do bloqueio alterada de 30 para 45 minutos; `organization.settings_updated` na auditoria |
+| Reenvio do formulário com a versão anterior (outra aba) | 409 com "as configurações da organização foram alteradas por outra operação; revise os valores atuais" |
+| 14.3, consulta de retorno | nenhuma reserva com política diferente da atual |
+| Retorno à 1.1.0 e volta à versão nova | os dois sentidos `healthy` e `/health/ready` 200; parada final de web e worker com código 0 |

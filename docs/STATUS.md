@@ -5,9 +5,8 @@
 
 ## Última verificação completa
 
-Executada na branch `feature/configuracoes-organizacao` (configurações da organização, política congelada na
-reserva e na versão do orçamento, fuso de referência da reserva, gestão de filiais e migration 0016), em
-21/11/2026:
+Executada para a versão 1.2.0 (configurações da organização, política congelada na reserva e na versão do
+orçamento, fuso de referência da reserva, gestão de filiais e migration 0016), em 21/11/2026:
 
 | Verificação | Resultado |
 |---|---|
@@ -15,7 +14,8 @@ reserva e na versão do orçamento, fuso de referência da reserva, gestão de f
 | Cobertura de domínio + aplicação | 99,28% de linhas, 93,37% de branches (metas 90% / 80%) |
 | `rake test:browser` (Ferrum, Chrome headless) | 14 testes, 0 falhas |
 | `rubocop` (árvore da branch exportada com `git archive`) | sem ofensas |
-| Atualização de um banco da 0015 para a 0016 | coberta por `test/repository/migration_0016_test.rb` (dados no formato da 1.1.0 e aborto com diagnóstico); o procedimento de `RUNBOOKS.md` §14 ainda não foi exercitado num ambiente Compose |
+| Atualização de um banco da 1.1.0 para a 0016 (verificação prévia, aborto por `settings` inválido, correção, backup, migration com `lock_timeout` e a 1.1.0 em execução, troca, edição pela tela, controle otimista, retorno à 1.1.0) | exercitada; registro em `RUNBOOKS.md` §14.5; também coberta por `test/repository/migration_0016_test.rb` |
+| CI do PR da feature (#16) | 7 checks e análise do SonarCloud aprovados |
 
 Verificação anterior, na branch `release/1.1.0` (cadastro de cupons, condições negociadas e tarifas
 adicionais, migration 0015), em 21/11/2026:
@@ -48,7 +48,8 @@ restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprova
 | #9 | Testes de navegador, métricas, correlação de logs, demonstração de ponta a ponta | Integrado e testado |
 | #10 | Documentação consolidada, backup e restauração, publicação de imagem por tag | Integrado; backup e restauração exercitados (ver `RUNBOOKS.md`) |
 | #11 | Estabilização da versão 1.0.0: correções de segurança, concorrência, operação, documentação e interface | Integrado e testado; versão 1.0.0 |
-| #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 (ver acima) |
+| #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 |
+| #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 (ver acima) |
 | — | Configurações da organização (nome, fuso, validade padrão do bloqueio, política de cancelamento), política congelada na reserva e na versão do orçamento, fuso de referência da reserva, gestão de filiais, `organization.read`, API, CLI e migration 0016 (branch `feature/configuracoes-organizacao`) | Testado na branch; não integrado |
 
 ## Casos obrigatórios cobertos por testes
