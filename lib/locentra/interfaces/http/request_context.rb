@@ -32,6 +32,7 @@ module Locentra
       # Contexto de uma requisição: parâmetros (via parsers do Rack), sessão, ator e CSRF.
       class RequestContext
         JSON_MAX_NESTING = 10
+        INVALID_TEXT = "texto com codificação inválida ou caractere nulo"
         MAX_JSON_BYTES = 1_048_576
         # Parser de formulários por requisição: profundidade, quantidade e tamanho limitados.
         QUERY_PARSER = Rack::QueryParser.new(Rack::QueryParser::Params, 4, bytesize_limit: 1_048_576, params_limit: 500)
@@ -66,7 +67,10 @@ module Locentra
         def form
           @form ||= begin
             merged = rack.GET.merge(rack.POST)
-            merged.each_value { |value| raise BadRequest, "parâmetro aninhado não suportado" if value.is_a?(Hash) && value.size > 200 }
+            merged.each do |key, value|
+              raise BadRequest, "parâmetro aninhado não suportado" if value.is_a?(Hash) && value.size > 200
+              raise BadRequest, "parâmetros com #{INVALID_TEXT}" unless clean_text?(key) && Array(value).all? { |item| clean_text?(item) }
+            end
             merged
           end
         rescue Rack::QueryParser::ParamsTooDeepError, Rack::QueryParser::QueryLimitError, Rack::Multipart::MultipartPartLimitError,
@@ -77,7 +81,12 @@ module Locentra
           raise BadRequest, "parâmetros inválidos"
         end
 
-        def query(name) = rack.GET[name.to_s]
+        def query(name)
+          value = rack.GET[name.to_s]
+          raise Domain::ValidationError.field(name.to_s, INVALID_TEXT) unless clean_text?(value)
+
+          value
+        end
 
         def json
           @json ||= parse_json
@@ -108,11 +117,29 @@ module Locentra
           parsed = text.empty? ? {} : JSON.parse(text, max_nesting: JSON_MAX_NESTING, create_additions: false)
           raise BadRequest, "o corpo deve ser um objeto JSON" unless parsed.is_a?(Hash)
 
+          check_json_text!(parsed, nil)
           parsed
         rescue JSON::NestingError
           raise BadRequest, "JSON com profundidade acima do limite"
         rescue JSON::ParserError
           raise BadRequest, "JSON inválido"
+        end
+
+        # Textos recebidos precisam ser UTF-8 válido e sem caractere nulo, que o banco não armazena: o
+        # erro sai como erro do cliente (no campo, quando há um) e não como falha interna.
+        def clean_text?(value) = !value.is_a?(String) || (value.valid_encoding? && !value.include?("\u0000"))
+
+        # No JSON, o erro aponta a chave de primeiro nível que contém o texto.
+        def check_json_text!(node, field)
+          case node
+          when String then raise Domain::ValidationError.field(field || "corpo", INVALID_TEXT) unless clean_text?(node)
+          when Array then node.each { |item| check_json_text!(item, field) }
+          when Hash
+            node.each do |key, value|
+              check_json_text!(key, field)
+              check_json_text!(value, field || key)
+            end
+          end
         end
 
         public

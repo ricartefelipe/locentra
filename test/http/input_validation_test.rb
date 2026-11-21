@@ -91,6 +91,33 @@ class InputValidationTest < HttpTest
     assert_equal 422, last_response.status
   end
 
+  # O banco não armazena U+0000 e o Ruby recusa operar texto com UTF-8 inválido: os dois casos são erro
+  # do cliente, no campo, e não falha interna.
+  def test_null_characters_and_invalid_encoding_are_client_errors
+    token = uc(:create_credential).call(@org[:actor], name: "ERP", scopes: %w[coupons.read coupons.write customers.read], expires_in_days: 1)["token"]
+    headers = { "HTTP_AUTHORIZATION" => "Bearer #{token}", "CONTENT_TYPE" => "application/json", "HTTP_IDEMPOTENCY_KEY" => "texto-nulo-01" }
+    post "/api/v1/coupons", JSON.generate("code" => "NULO10", "kind" => "percent", "discount_bps" => 1000, "description" => "a\u0000b"), headers
+
+    assert_equal [422, { "description" => ["texto com codificação inválida ou caractere nulo"] }],
+                 [last_response.status, json_body.dig("error", "details", "fields")]
+    post "/api/v1/coupons", JSON.generate("code" => "NULO10", "kind" => "percent", "discount_bps" => 1000, "a\u0000" => 1),
+         headers.merge("HTTP_IDEMPOTENCY_KEY" => "texto-nulo-02")
+
+    assert_equal [422, ["corpo"]], [last_response.status, json_body.dig("error", "details", "fields").keys]
+    %w[/api/v1/coupons?q=%FF /api/v1/customers?q=%00].each do |path|
+      get path, {}, headers
+
+      assert_equal [422, ["q"]], [last_response.status, json_body.dig("error", "details", "fields").keys], path
+    end
+    login("dona@alfa.test")
+    get "/clientes?busca=%FF"
+
+    assert_equal 422, last_response.status
+    post_form "/clientes", { "tipo" => "individual", "nome" => "Cliente\u0000Nulo", "documento" => "52998224725" }
+
+    assert_equal 400, last_response.status
+  end
+
   def test_body_size_limits
     big = "a" * (1_048_576 + 1)
     post "/entrar", { "email" => big }
