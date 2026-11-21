@@ -159,7 +159,10 @@ conflitos `stale_organization`, `stale_branch`, `last_active_branch` e `branch_i
   campos e a versão enviados.
 - Em todos os reenvios (prévia, restauração e 422), os campos e a versão vêm do envio; o 409
   (`stale_organization`) mostra os valores atuais. As faixas usam o módulo de linhas
-  (`public/js/modules/line-items.js`), sem script inline.
+  (`public/js/modules/line-items.js`), sem script inline. As linhas vindas do servidor são anunciadas como
+  "Faixa N" e a linha vazia, como "Nova faixa"; esta é a linha modelo (`data-line-template`), de modo que as
+  faixas adicionadas pelo botão nascem como "Nova faixa", sem o `aria-invalid` nem a mensagem de erro de
+  outra linha. A mensagem de erro de uma faixa fica dentro da própria linha e sai com ela.
 
 ## API v1
 

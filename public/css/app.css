@@ -83,6 +83,7 @@ legend { font-weight: 700; padding: 0 .25rem; }
 .line select { min-width: 260px; width: auto; }
 .line input { width: 110px; }
 .line input.wide { width: 18rem; }
+.line > .field-error { flex-basis: 100%; }
 .checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .25rem; }
 form.inline { display: inline-flex; gap: .25rem; align-items: center; }
 form.inline select { width: auto; }

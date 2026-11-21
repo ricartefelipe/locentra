@@ -63,14 +63,14 @@
           <% new_line = i == rows.size -%>
           <% line_errors = new_line ? [] : policy.line_messages(policy_errors, number) -%>
           <% error_attrs = line_errors.empty? ? "" : %( aria-invalid="true" aria-describedby="erro-faixa-#{number}") -%>
-          <div class="line" data-line>
+          <div class="line" data-line<%= raw(new_line ? " data-line-template" : "") %>>
             <label for="antecedencia-<%= i %>"><span class="sr-only"><%= new_line ? "Nova faixa: " : "Faixa #{number}: " %></span>Antecedência mínima (horas)</label>
             <input id="antecedencia-<%= i %>" name="antecedencia_horas[]" type="number" min="0" max="8760" step="1" inputmode="numeric" value="<%= hours %>"<%= raw(error_attrs) %>>
             <label for="multa-<%= i %>"><span class="sr-only"><%= new_line ? "Nova faixa: " : "Faixa #{number}: " %></span>Multa (%)</label>
             <input id="multa-<%= i %>" name="multa_percentual[]" inputmode="decimal" value="<%= fee %>"<%= raw(error_attrs) %>>
             <button type="button" class="link-button" data-remove-line aria-label="<%= new_line ? "Remover nova faixa" : "Remover faixa #{number}" %>">Remover</button>
+            <% unless line_errors.empty? %><p class="field-error" id="erro-faixa-<%= number %>" role="alert"><%= line_errors.join("; ") %></p><% end %>
           </div>
-          <% unless line_errors.empty? %><p class="field-error" id="erro-faixa-<%= number %>" role="alert"><%= line_errors.join("; ") %></p><% end %>
         <% end -%>
       </div>
       <button type="button" data-add-line>Adicionar faixa</button>

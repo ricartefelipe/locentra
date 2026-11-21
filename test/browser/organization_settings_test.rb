@@ -85,4 +85,41 @@ class OrganizationSettingsBrowserTest < BrowserTest
     assert_equal ["Unidade Norte II", "Av. Norte, 200", false], [branch.name, branch.address, branch.active]
     assert_clean_console
   end
+
+  # Nome acessível e estado de erro de uma linha da política: texto sr-only dos rótulos, rótulo do botão de
+  # remover e atributos de erro dos campos.
+  def line_state(line)
+    { labels: line.css("label").map { |label| label.text.strip }, remove: line.at_css("[data-remove-line]").attribute("aria-label"),
+      invalid: line.css("input").map { |input| input.attribute("aria-invalid") },
+      described: line.css("input").map { |input| input.attribute("aria-describedby") } }
+  end
+
+  NEW_LINE = { labels: ["Nova faixa: Antecedência mínima (horas)", "Nova faixa: Multa (%)"], remove: "Remover nova faixa",
+               invalid: [nil, nil], described: [nil, nil] }.freeze
+
+  def test_added_policy_lines_are_new_lines_without_the_error_state_of_another_line
+    login_as("dona@alfa.test", organization: "Locadora Alfa")
+    visit SETTINGS
+    count = policy_lines.size
+    click("#{FAIXAS} [data-add-line]")
+    wait_until("nova faixa") { policy_lines.size == count + 1 }
+
+    assert_equal NEW_LINE, line_state(policy_lines.last)
+    assert_equal "Faixa 1: Antecedência mínima (horas)", line_state(policy_lines.first)[:labels].first
+    fill("#multa-0", "150")
+    press_action("salvar")
+
+    assert_equal %w[true true], line_state(policy_lines.first)[:invalid]
+    assert_includes policy_lines.first.text, "faixa 1: multa entre 0% e 100%"
+    count = policy_lines.size
+    click("#{FAIXAS} [data-add-line]")
+    wait_until("nova faixa depois do erro") { policy_lines.size == count + 1 }
+
+    assert_equal NEW_LINE, line_state(policy_lines.last)
+    press(policy_lines.first.at_css("[data-remove-line]"))
+    wait_until("faixa com erro removida") { policy_lines.size == count }
+
+    assert_nil @page.at_css("#erro-faixa-1"), "a mensagem de erro sai com a linha"
+    assert_clean_console(expected: [%r{status of 422 .*/organizacao/configuracoes\z}])
+  end
 end
