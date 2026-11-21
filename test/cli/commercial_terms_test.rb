@@ -300,5 +300,7 @@ class CliCommercialTermsTest < CliTest
     ["--codigo CÓDIGO", "--tipo TIPO", "--valor VALOR", "--inicio-vigencia INSTANTE", "--fim-vigencia INSTANTE", "--maximo-usos N",
      "--subtotal-minimo VALOR"].each { |option| assert_includes help, option }
     assert_includes cli("agreements", "end", "--help", token: nil).out, "--encerrar-em INSTANTE"
+    assert_match(/--busca TEXTO\s+Início do código ou trecho da descrição$/, cli("coupons", "list", "--help", token: nil).out)
+    assert_match(/--busca TEXTO\s+Trecho do código ou do nome$/, cli("fees", "list", "--help", token: nil).out)
   end
 end

@@ -54,7 +54,7 @@ module Locentra
         # Cupons ------------------------------------------------------------------------------------
 
         def coupons_list(options)
-          page = uc(:list_coupons).call(@actor, status: options[:coupon_status], search: options[:term_search],
+          page = uc(:list_coupons).call(@actor, status: options[:coupon_status], search: options[:coupon_search],
                                                 sort: options[:coupon_sort] || "code", limit: options[:limit], offset: options[:offset])
           data = { "data" => page.items.map { |row| CS.coupon(row[:coupon], row[:status]) }, "pagination" => pagination(page) }
           return Result.ok(data, ["Nenhum cupom encontrado."]) if page.items.empty?
@@ -164,7 +164,7 @@ module Locentra
         # Tarifas adicionais ------------------------------------------------------------------------
 
         def fees_list(options)
-          page = uc(:list_fees).call(@actor, status: options[:fee_status], search: options[:term_search], limit: options[:limit],
+          page = uc(:list_fees).call(@actor, status: options[:fee_status], search: options[:fee_search], limit: options[:limit],
                                              offset: options[:offset])
           data = { "data" => page.items.map { |fee| CS.fee(fee) }, "pagination" => pagination(page) }
           return Result.ok(data, ["Nenhuma tarifa encontrada."]) if page.items.empty?
