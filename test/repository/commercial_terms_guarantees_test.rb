@@ -36,6 +36,7 @@ class CommercialTermsGuaranteesTest < DatabaseTest
   def insert(record) = tenant_tx { |tx| @agreements.insert(tx, record) }.then { record }
   def overlapping?(record) = tenant_tx { |tx| @agreements.overlapping?(tx, record) }
   def end_at(record, at) = tenant_tx { |tx| @agreements.end_agreement(tx, record.with(ended_at: at, ended_by: @org[:user_id], end_reason: "Troca")) }
+
   def effective(at, product: @chairs, customer_id: @customer.id)
     tenant_tx { |tx| @system.repos[:pricing].effective_agreements(tx, customer_id, product.id, at) }
   end
