@@ -195,6 +195,58 @@ class OrganizationSettingsDomainTest < UnitTest
     assert_equal ["deve ter entre 2 e 120 caracteres"], errors["nome"]
   end
 
+  # Política em pontos-base (API) ------------------------------------------------------------------------
+
+  def test_from_tiers_refuses_what_is_not_a_list_of_objects
+    expected = ["informe as faixas como uma lista de objetos com min_hours_before e fee_bps"]
+
+    [nil, "72:0", { "min_hours_before" => 0, "fee_bps" => 0 }, [tier(0, 0), "texto"], [[0, 0]]].each do |value|
+      assert_equal expected, messages { P.from_tiers(value) }, value.inspect
+    end
+  end
+
+  def test_from_tiers_applies_the_rules_and_messages_of_build
+    assert_equal P::DEFAULT, P.from_tiers(P::DEFAULT["tiers"].reverse)
+    assert_equal(["informe ao menos uma faixa"], messages { P.from_tiers([]) })
+    assert_equal(["faixa 1: antecedência deve ser um número inteiro de horas entre 0 e 8760", "faixa 2: multa entre 0% e 100%"],
+                 messages { P.from_tiers([tier("48", 0), tier(0, 12.5)]) }, "textos e números com casas decimais não são convertidos")
+    assert_equal(["no máximo 6 faixas"], messages { P.from_tiers((0..6).map { |i| tier(i * 10, 10_000) }) })
+    assert_equal(["inclua uma faixa de 0 h (cancelamento com menos antecedência que as demais faixas ou após o início)"],
+                 messages { P.from_tiers([tier(24, 0)]) })
+    assert_equal(["a multa não pode diminuir à medida que o início se aproxima (24 h: 30%; 0 h: 10%)"],
+                 messages { P.from_tiers([tier(24, 3000), tier(0, 1000)]) })
+  end
+
+  def test_from_tiers_is_equivalent_to_the_form_rows
+    assert_equal P.from_form([%w[48 10], ["0", "12,5"]]), P.from_tiers([tier(0, 1250), tier(48, 1000)])
+    assert_equal P.from_form(DEFAULT_ROWS), P.from_tiers(P::DEFAULT["tiers"])
+  end
+
+  def test_revise_accepts_tiers_and_the_form_rows_take_precedence
+    org = organization
+    by_tiers = org.revise(name: "Locadora Alfa", timezone: org.timezone, hold_minutes: 30, cancellation_tiers: [tier(48, 1000), tier(0, 5000)])
+
+    assert_equal [policy([48, 1000], [0, 5000]), 2], [by_tiers.cancellation_policy, by_tiers.lock_version]
+    assert_same org, org.revise(**org.revision_attrs), "os valores atuais no formato da revisão não mudam nada"
+    both = revise(org, cancellation_tiers: [tier(0, 9000)])
+
+    assert_same org, both, "com as linhas do formulário, as faixas em pontos-base são ignoradas"
+    assert_equal(["informe as faixas como uma lista de objetos com min_hours_before e fee_bps"],
+                 messages { org.revise(name: "Locadora Alfa", timezone: org.timezone, hold_minutes: 30) })
+  end
+
+  def test_revision_attrs_describe_the_current_values_with_sorted_tiers
+    org = organization(settings: { "hold_minutes" => 45, "cancellation_policy" => { "tiers" => [tier(0, 5000), tier(48, 1000)] } },
+                       timezone: "America/Manaus")
+
+    assert_equal({ name: "Locadora Alfa", timezone: "America/Manaus", hold_minutes: 45, cancellation_tiers: [tier(48, 1000), tier(0, 5000)] },
+                 org.revision_attrs)
+    assert_equal P::DEFAULT["tiers"], organization.revision_attrs[:cancellation_tiers]
+    partial = org.revise(**org.revision_attrs, hold_minutes: 60)
+
+    assert_equal [60, "America/Manaus", policy([48, 1000], [0, 5000])], [partial.hold_minutes, partial.timezone, partial.cancellation_policy]
+  end
+
   # Filiais -------------------------------------------------------------------------------------------
 
   def test_branch_revision_and_changes

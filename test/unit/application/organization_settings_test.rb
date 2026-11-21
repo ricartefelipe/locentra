@@ -173,6 +173,32 @@ class OrganizationSettingsApplicationTest < UnitTest
     assert_empty @audit.records
   end
 
+  def test_partial_attributes_keep_the_other_values_and_via_goes_to_the_audit
+    @repo.org = organization(settings: { "cancellation_policy" => { "tiers" => [{ "min_hours_before" => 0, "fee_bps" => 5000 }] } })
+    result = update.call(owner, { hold_minutes: 90 }, lock_version: 1, via: "api")
+
+    assert_equal [true, 90, "Locadora Alfa", "America/Sao_Paulo"], [result.changed, result.record.hold_minutes, result.record.name, result.record.timezone]
+    assert_equal({ "tiers" => [{ "min_hours_before" => 0, "fee_bps" => 5000 }] }, result.record.cancellation_policy, "a política não muda")
+    assert_equal({ "changes" => { "hold_minutes" => [30, 90] }, "lock_version" => 2, "via" => "api" }, @audit.records.first.last)
+    tiers = update.call(owner, { cancellation_tiers: [{ "min_hours_before" => 24, "fee_bps" => 0 }, { "min_hours_before" => 0, "fee_bps" => 8000 }] },
+                        lock_version: 2)
+
+    assert_equal [90, 3], [tiers.record.hold_minutes, tiers.record.lock_version]
+    refute @audit.records.last.last.key?("via"), "sem canal informado (web), os detalhes não mudam"
+    assert_equal [false, 3], [update.call(owner, {}, lock_version: 3).changed, @repo.org.lock_version]
+  end
+
+  def test_credentials_are_refused_also_in_the_composed_mode
+    error = assert_raises(Domain::AccessDenied) { update.call(credential, { hold_minutes: 90 }, tx: Tx.new) }
+
+    assert_equal "as configurações da organização são alteradas somente por usuários", error.message
+    assert_equal "permissão necessária: organization.manage",
+                 assert_raises(Domain::AccessDenied) { update.call(credential(%w[organization.read]), {}, tx: Tx.new) }.message
+    assert_raises(Domain::AccessDenied) { update.call(manager, { hold_minutes: 90 }, tx: Tx.new) }
+    assert_equal [true, 90], [update.call(owner, { hold_minutes: 90 }, tx: Tx.new).changed, @repo.org.hold_minutes]
+    assert_empty(@audit.records.reject { |record| record.last["changes"] == { "hold_minutes" => [30, 90] } })
+  end
+
   def test_unchanged_settings_are_not_written
     result = update.call(owner, attrs, lock_version: 1)
 

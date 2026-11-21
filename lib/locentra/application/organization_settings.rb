@@ -104,7 +104,8 @@ module Locentra
 
             org = @organizations.lock(t, t.tenant_id!) || raise(Domain::NotFound.new("organização", feminine: true))
             stale!(org, lock_version, "stale_organization", STALE_ORGANIZATION)
-            revised = org.revise(**attrs)
+            # Campos ausentes mantêm o valor atual (a API envia só os alterados; a web envia todos).
+            revised = org.revise(**org.revision_attrs, **attrs)
             next Result.new(record: org, changed: false) if revised.equal?(org)
 
             if @organizations.update_settings(t, revised, org.lock_version, @clock.now).zero?
