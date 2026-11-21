@@ -65,7 +65,7 @@ module Locentra
                      "gross_cents" => 0, "total_cents" => 0, "negotiated_agreement_id" => nil }
           end
 
-          agreement = @pricing.applicable_agreement(tx, customer_id, product.id, now)
+          agreement = P::Agreement.best(@pricing.effective_agreements(tx, customer_id, product.id, now))
           agreements << agreement if agreement
           P::Line.price(table: table, period: period, zone: zone, quantity: line.quantity, negotiated_bps: agreement ? agreement.discount_bps : 0)
                  .merge("negotiated_agreement_id" => agreement&.id)

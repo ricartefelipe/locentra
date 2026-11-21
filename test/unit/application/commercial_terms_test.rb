@@ -50,9 +50,9 @@ class CommercialTermsApplicationTest < UnitTest
       @coupon
     end
 
-    def applicable_agreement(_tx, customer_id, product_id, now)
-      @calls << [:applicable_agreement, customer_id, product_id, now]
-      @agreements[product_id] || @agreements[:general]
+    def effective_agreements(_tx, customer_id, product_id, now)
+      @calls << [:effective_agreements, customer_id, product_id, now]
+      [@agreements[:general], @agreements[product_id]].compact
     end
 
     def fees_by_ids(_tx, ids)
@@ -186,7 +186,11 @@ class CommercialTermsApplicationTest < UnitTest
     assert_equal general.to_snapshot, priced.summary["agreements"].first
     refute_includes JSON.generate(priced.summary), "Observação interna"
     assert_equal([18_400, 18_000, 18_400], priced.items.map { |item| item["total_cents"] })
-    assert_equal(3, pricing.calls.count { |call| call.first == :applicable_agreement && call.last == now })
+    assert_equal(3, pricing.calls.count { |call| call.first == :effective_agreements && call.last == now })
+    pricing.agreements = { general: agreement("a-geral-maior", 1200), "p2" => agreement("a-produto", 1000, product_id: "p2") }
+
+    assert_equal(%w[a-geral-maior] * 3, price(pricing, ids: %w[p1 p2 p3]).items.map { |item| item["negotiated_agreement_id"] },
+                 "vale o maior desconto entre a geral e a do produto (Agreement.best)")
     without = price(Pricing.new)
 
     assert_nil without.items.first["negotiated_agreement_id"]

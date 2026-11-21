@@ -36,7 +36,12 @@ class CommercialTermsGuaranteesTest < DatabaseTest
   def insert(record) = tenant_tx { |tx| @agreements.insert(tx, record) }.then { record }
   def overlapping?(record) = tenant_tx { |tx| @agreements.overlapping?(tx, record) }
   def end_at(record, at) = tenant_tx { |tx| @agreements.end_agreement(tx, record.with(ended_at: at, ended_by: @org[:user_id], end_reason: "Troca")) }
-  def applicable(at, product: @chairs) = tenant_tx { |tx| @system.repos[:pricing].applicable_agreement(tx, @customer.id, product.id, at) }
+  def effective(at, product: @chairs, customer_id: @customer.id)
+    tenant_tx { |tx| @system.repos[:pricing].effective_agreements(tx, customer_id, product.id, at) }
+  end
+
+  # Condição aplicada na precificação: a melhor entre as vigentes, como no Pricer.
+  def applicable(at, product: @chairs) = Locentra::Domain::Pricing::Agreement.best(effective(at, product: product))
 
   def test_application_role_writes_only_the_editable_columns
     coupon = create_coupon("IMUTAVEL")
@@ -156,7 +161,7 @@ class CommercialTermsGuaranteesTest < DatabaseTest
     assert_equal [third.id, nil], [applicable(now + 100_000)&.id, applicable(now + 172_800)&.id]
   end
 
-  def test_applicable_agreement_prefers_the_greatest_discount_then_the_product
+  def test_best_effective_agreement_prefers_the_greatest_discount_then_the_product
     lens = create_product(@actor, sku: "LEN-GAR", tracking: "bulk")
     general = insert(agreement(from: now, bps: 800))
     specific = insert(agreement(from: now, product: @chairs, bps: 800))
@@ -166,7 +171,8 @@ class CommercialTermsGuaranteesTest < DatabaseTest
     assert_equal general.id, applicable(now, product: lens).id, "a geral maior vence a do produto"
     assert_equal smaller.id, tenant_tx { |tx| @agreements.find(tx, smaller.id) }.id
     assert_nil applicable(now - 1), "antes do início"
-    assert_nil(tenant_tx { |tx| @system.repos[:pricing].applicable_agreement(tx, SecureRandom.uuid, @chairs.id, now) })
+    assert_equal [general.id, specific.id].sort, effective(now).map(&:id).sort, "vigentes: a geral e a do produto"
+    assert_empty effective(now, customer_id: SecureRandom.uuid)
   end
 
   def test_composite_keys_keep_uses_inside_the_organization_and_protect_used_coupons

@@ -66,18 +66,16 @@ module Locentra
           SQL
         end
 
-        # Condição vigente de maior desconto para o produto: específica do produto ou geral do cliente;
-        # em empate, a do produto.
-        def applicable_agreement(tx, customer_id, product_id, now)
-          row = tx.query_one(<<~SQL, [tx.tenant_id!, customer_id, product_id, now])
+        # Condições do cliente vigentes no instante para o produto: a geral e a do produto (a exclusion
+        # constraint deixa no máximo uma de cada escopo). A escolha é de Domain::Pricing::Agreement.best.
+        def effective_agreements(tx, customer_id, product_id, now)
+          tx.query(<<~SQL, [tx.tenant_id!, customer_id, product_id, now]).map { |row| PriceAgreementRepository.map(row) }
             SELECT #{AGREEMENT_COLUMNS}
               FROM customer_price_agreements
              WHERE organization_id = $1 AND customer_id = $2 AND (product_id IS NULL OR product_id = $3)
                AND valid_from <= $4 AND (valid_until IS NULL OR valid_until > $4) AND (ended_at IS NULL OR ended_at > $4)
-             ORDER BY discount_bps DESC, (product_id IS NOT NULL) DESC, id
-             LIMIT 1
+             ORDER BY id
           SQL
-          row && PriceAgreementRepository.map(row)
         end
 
         def fees_by_ids(tx, ids)
