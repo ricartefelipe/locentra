@@ -174,6 +174,28 @@ class OrganizationSettingsPagesTest < CommercialTermsHttpTest
     assert_includes get_ok("/organizacao"), "Manaus (leste do AM)"
   end
 
+  def registered_policy(path) = get_ok(path)[%r{<details class="cancellation-policy">.*?</details>}m] || flunk("#{path}: política não exibida")
+
+  # Cada versão do orçamento e a reserva exibem a política registrada, não a atual da organização.
+  def test_quote_versions_and_reservation_show_the_registered_cancellation_policy
+    previous = "de 24 h a menos de 72 h antes do início: multa de 30% do valor contratado"
+    current = "48 h ou mais antes do início: multa de 10% do valor contratado"
+    input = { customer_id: @customer.id, branch_id: @branch.id, period: rental, lines: [line(@camera, 1)], valid_until: t("2026-03-05T12:00:00Z") }
+    quote = uc(:create_quote).call(@actor, input)
+    reservation = reserve(@actor, @customer, @branch, rental(20), [line(@camera, 1)], mode: "confirm")
+    change_settings(cancellation_rows: [%w[48 10], %w[0 50]])
+    uc(:revise_quote).call(@actor, quote.id, input)
+
+    { "/orcamentos/#{quote.id}?versao=1" => [previous, current], "/orcamentos/#{quote.id}?versao=2" => [current, previous],
+      "/reservas/#{reservation.id}" => [previous, current] }.each do |path, (shown, hidden)|
+      policy = registered_policy(path)
+
+      assert_includes policy, path.start_with?("/reservas") ? "Política de cancelamento desta reserva" : "Política de cancelamento desta versão", path
+      assert_includes policy, shown, path
+      refute_includes policy, hidden, path
+    end
+  end
+
   def test_history_lists_the_changed_fields
     change_settings(cancellation_rows: [%w[48 0], %w[0 50]])
     body = get_ok(PATH)

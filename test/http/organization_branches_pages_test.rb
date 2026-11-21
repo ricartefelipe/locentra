@@ -92,6 +92,29 @@ class OrganizationBranchesPagesTest < CommercialTermsHttpTest
     assert_equal "t", owner_query("SELECT active FROM branches WHERE id = $1", [beta[:branch].id], tenant: beta[:organization_id]).first["active"]
   end
 
+  # Limite de filiais do plano Profissional (3): a criação acima dele volta ao formulário com o erro geral
+  # e os valores, e a reativação acima dele responde 409 na página da filial, sem alterar nada.
+  def test_plan_limit_refuses_the_creation_and_the_reactivation_on_the_pages
+    uc(:set_branch_active).call(@actor, @north.id, active: false)
+    uc(:create_branch).call(@actor, name: "Unidade Sul", code: "SUL")
+    uc(:create_branch).call(@actor, name: "Unidade Leste", code: "LESTE")
+    limit = "Limite de filiais do plano Profissional atingido (3)"
+    get_ok("/organizacao")
+    post_form "/organizacao/filiais", { "nome" => "Unidade Oeste", "codigo" => "OESTE", "endereco" => "Rua Oeste, 9" }
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body[%r{<div class="form-errors".*?</div>}m], limit
+    refute_includes last_response.body, %(id="erro-codigo")
+    assert_includes last_response.body, %(value="Unidade Oeste")
+    post_form "#{branch_path}/reativar", {}
+
+    assert_equal 409, last_response.status
+    assert_includes last_response.body, "<h1>Filial NORTE"
+    assert_includes last_response.body, limit
+    assert_includes last_response.body, "Reativar filial"
+    assert_equal "f", branch_row["active"]
+  end
+
   def test_failed_creation_keeps_the_values_and_marks_the_code
     get_ok("/organizacao")
     post_form "/organizacao/filiais", { "nome" => "Unidade Sul", "codigo" => "NORTE", "endereco" => "Rua Sul, 5" }
@@ -144,6 +167,18 @@ class OrganizationBranchesPagesTest < CommercialTermsHttpTest
     assert_includes last_response.body, "filial inativa: escolha uma filial ativa"
     assert_match(/id="filial_id"[^>]*aria-invalid="true"/, last_response.body)
     assert_equal 1, owner_query("SELECT count(*) AS n FROM quote_versions WHERE quote_id = $1", [quote.id]).first["n"].to_i
+  end
+
+  # A primeira filial pelo nome está inativa: o calendário abre na primeira ativa e continua aceitando a
+  # inativa quando escolhida.
+  def test_calendar_defaults_to_the_first_active_branch
+    depot = uc(:create_branch).call(@actor, name: "Almoxarifado", code: "ALMOX")
+    uc(:set_branch_active).call(@actor, depot.id, active: false)
+    calendar = get_ok("/disponibilidade")[%r{<select id="filial".*?</select>}m]
+
+    assert_includes calendar, %(<option value="#{@branch.id}" selected>Matriz</option>)
+    assert_includes calendar, %(<option value="#{depot.id}">Almoxarifado (inativa)</option>)
+    assert_includes get_ok("/disponibilidade?filial=#{depot.id}"), %(<option value="#{depot.id}" selected>Almoxarifado (inativa)</option>)
   end
 
   def test_reader_sees_the_organization_without_forms_or_subscription

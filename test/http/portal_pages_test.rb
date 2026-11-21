@@ -64,6 +64,26 @@ class PortalPagesTest < PortalHttpTest
     assert_equal "2026-03-10 09:00:00+00", owner_query("SELECT starts_at FROM reservations").first["starts_at"]
   end
 
+  # O cliente vê a política registrada na versão e na reserva, não a política atual da organização.
+  def test_quote_and_reservation_pages_show_the_registered_cancellation_policy
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    confirmed = reserve(@actor, @customer, @branch, period("2026-03-12T08:00:00Z", "2026-03-13T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
+    quote = sent_quote(@actor, @customer, @branch, @camera, 20)
+    change_settings(cancellation_rows: [%w[48 10], %w[0 50]])
+    portal_login
+    registered = "de 24 h a menos de 72 h antes do início: multa de 30% do valor contratado"
+    current = "48 h ou mais antes do início: multa de 10% do valor contratado"
+
+    [["/portal/orcamentos/#{quote.id}", "Política de cancelamento desta versão"],
+     ["/portal/reservas/#{confirmed.id}", "Política de cancelamento desta reserva"]].each do |path, title|
+      policy = get_ok(path)[%r{<details class="cancellation-policy">.*?</details>}m] || flunk("#{path}: política não exibida")
+
+      assert_includes policy, title, path
+      assert_includes policy, registered, path
+      refute_includes policy, current, path
+    end
+  end
+
   def test_reservation_requests_are_limited_per_portal_user
     portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
     portal_login
