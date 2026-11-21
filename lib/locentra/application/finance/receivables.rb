@@ -41,7 +41,8 @@ module Locentra
           end
           return [] unless rental || adjustments.any?
 
-          zone = @organizations.find(tx, tx.tenant_id!).time_zone
+          # Vencimentos no fuso de referência da reserva (o da precificação), mesmo depois de uma troca de fuso.
+          zone = Domain::TimeZone.snapshot_or(@reservations.reference_timezone(tx, reservation.id), @organizations.find(tx, tx.tenant_id!).time_zone)
           created = []
           if rental && reservation.total.positive?
             created << issue(tx, actor, reservation, kind: "rental", source_type: "reservation", source_id: reservation.id,

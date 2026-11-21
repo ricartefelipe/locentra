@@ -136,6 +136,19 @@ class PublicSecurityTest < HttpTest
     refute_includes last_response.body, "Locentra::"
   end
 
+  def test_organization_pages_require_a_session_and_the_csrf_token
+    get "/organizacao/configuracoes"
+
+    assert_equal 303, last_response.status
+    assert_includes last_response.location, "/entrar"
+    login("dona@alfa.test")
+    post "/organizacao/filiais/#{@org[:branch].id}/desativar", {}
+
+    assert_equal 403, last_response.status
+    assert_includes last_response.body, "Recarregue a página"
+    assert_equal "t", owner_query("SELECT active FROM branches WHERE id = $1", [@org[:branch].id]).first["active"]
+  end
+
   def test_unauthenticated_api_message_is_readable
     get "/api/v1/customers"
 

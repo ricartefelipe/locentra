@@ -1,0 +1,91 @@
+<% org = @data[:organization] -%>
+<% impact = @data[:impact] -%>
+<% settings = Locentra::Domain::Organizations::Settings -%>
+<% policy = Locentra::Domain::Organizations::CancellationPolicy -%>
+<% policy_errors = Array(@errors[policy::FIELD]) -%>
+<% rows = value_rows(@values, "antecedencia_horas", "multa_percentual") -%>
+<% general_errors = policy_errors.reject { |message| (1..rows.size).any? { |n| message.start_with?(policy.line_prefix(n)) } } -%>
+<% chosen_zone = @values["fuso_horario"].to_s -%>
+<header class="page-header">
+  <h1>Configurações da organização</h1>
+  <p class="muted"><a href="/organizacao">Voltar para a organização</a></p>
+</header>
+<%= partial("shared/errors") %>
+<section class="panel">
+  <form method="post" action="/organizacao/configuracoes" class="form-grid" data-line-items>
+    <%= csrf_field %>
+    <input type="hidden" name="versao" value="<%= @values["versao"] %>">
+    <fieldset class="full">
+      <legend>Identificação</legend>
+      <label for="nome">Nome</label>
+      <input id="nome" name="nome" required maxlength="120" value="<%= @values["nome"] %>"<%= invalid(@errors, "nome", describedby: "ajuda-nome") %>>
+      <p class="muted" id="ajuda-nome">O identificador (slug) não muda. Contratos já emitidos mantêm o nome registrado na emissão.</p>
+      <%= field_errors(@errors, "nome") %>
+    </fieldset>
+    <fieldset class="full">
+      <legend>Fuso horário</legend>
+      <label for="fuso_horario">Fuso horário</label>
+      <select id="fuso_horario" name="fuso_horario" required<%= invalid(@errors, "fuso_horario", describedby: "ajuda-fuso") %>>
+        <% unless settings::TIME_ZONES.key?(org.timezone) -%>
+          <option value="<%= org.timezone %>"<%= selected(chosen_zone, org.timezone) %>><%= org.timezone %> — <%= utc_offset_label(org.time_zone, @data[:now]) %> (atual)</option>
+        <% end -%>
+        <% settings::TIME_ZONES.each do |identifier, zone_label| -%>
+          <option value="<%= identifier %>"<%= selected(chosen_zone, identifier) %>><%= zone_label %> — <%= utc_offset_label(Locentra::Domain::TimeZone.new(identifier), @data[:now]) %><%= identifier == org.timezone ? " (atual)" : "" %></option>
+        <% end -%>
+      </select>
+      <p class="muted" id="ajuda-fuso">Usado nos preços por dia de calendário de reservas e orçamentos novos, na exibição e na digitação de horários e vigências, no painel do dia e nos vencimentos do financeiro.</p>
+      <%= field_errors(@errors, "fuso_horario") %>
+      <div class="notice" id="consequencias-fuso">
+        <p>Há <%= count_text(impact[:open_reservations], "reserva em aberto", "reservas em aberto") %>, <%= count_text(impact[:open_contracts], "contrato em aberto", "contratos em aberto") %> e <%= count_text(impact[:scheduled_terms], "cupom ou condição negociada com vigência futura", "cupons e condições negociadas com vigência futura") %>.
+          Preços, períodos e documentos já registrados não mudam: os instantes são os mesmos e passam a ser exibidos no novo fuso (uma retirada às 08:00 em Brasília aparece às 07:00 em Manaus).
+          Extensões, multas por atraso, cobranças e documentos de reservas e contratos existentes continuam no fuso em que a reserva foi precificada.
+          Vigências de cupons e condições são instantes: revise-as se a intenção era o fim do dia local (23:59 em Brasília aparece como 22:59 em Manaus).
+          Formulários abertos antes da troca precisarão ser conferidos e enviados novamente.</p>
+      </div>
+      <label class="radio" for="confirmar_fuso"><input type="checkbox" id="confirmar_fuso" name="confirmar_fuso" value="1"<%= checked(@values["confirmar_fuso"] == "1") %><%= invalid(@errors, "confirmar_fuso", describedby: "consequencias-fuso") %>>
+        Confirmo a troca do fuso horário e as consequências descritas acima.</label>
+      <%= field_errors(@errors, "confirmar_fuso") %>
+    </fieldset>
+    <fieldset class="full">
+      <legend>Bloqueio temporário</legend>
+      <label for="validade_bloqueio">Validade padrão do bloqueio temporário (minutos)</label>
+      <input id="validade_bloqueio" name="validade_bloqueio" type="number" min="5" max="1440" step="1" inputmode="numeric" required value="<%= @values["validade_bloqueio"] %>"<%= invalid(@errors, "validade_bloqueio", describedby: "ajuda-bloqueio") %>>
+      <p class="muted" id="ajuda-bloqueio">Valor sugerido nos formulários de reserva e orçamento e usado pela API quando a validade não é informada. Entre 5 e 1440 minutos (24 horas). Bloqueios e orçamentos já registrados mantêm a validade com que foram criados.</p>
+      <%= field_errors(@errors, "validade_bloqueio") %>
+    </fieldset>
+    <fieldset class="full" data-line-group="faixas" aria-describedby="ajuda-faixas<%= general_errors.empty? ? "" : " erro-faixas_cancelamento" %>">
+      <legend>Política de cancelamento</legend>
+      <p class="muted" id="ajuda-faixas">Cada faixa vale da antecedência informada até a faixa seguinte. Inclua uma faixa de 0 h, para cancelamentos com menos antecedência ou após o início. Multa entre 0% e 100%, com até duas casas decimais, e no máximo 6 faixas. A multa não pode diminuir à medida que o início se aproxima.</p>
+      <% unless general_errors.empty? %><p class="field-error" id="erro-faixas_cancelamento" role="alert"><%= general_errors.join("; ") %></p><% end %>
+      <div data-lines>
+        <% (rows + [[nil, nil]]).each_with_index do |(hours, fee), i| -%>
+          <% number = i + 1 -%>
+          <% new_line = i == rows.size -%>
+          <% line_errors = new_line ? [] : policy.line_messages(policy_errors, number) -%>
+          <% error_attrs = line_errors.empty? ? "" : %( aria-invalid="true" aria-describedby="erro-faixa-#{number}") -%>
+          <div class="line" data-line<%= raw(new_line ? " data-line-template" : "") %>>
+            <label for="antecedencia-<%= i %>"><span class="sr-only"><%= new_line ? "Nova faixa: " : "Faixa #{number}: " %></span>Antecedência mínima (horas)</label>
+            <input id="antecedencia-<%= i %>" name="antecedencia_horas[]" type="number" min="0" max="8760" step="1" inputmode="numeric" value="<%= hours %>"<%= raw(error_attrs) %>>
+            <label for="multa-<%= i %>"><span class="sr-only"><%= new_line ? "Nova faixa: " : "Faixa #{number}: " %></span>Multa (%)</label>
+            <input id="multa-<%= i %>" name="multa_percentual[]" inputmode="decimal" value="<%= fee %>"<%= raw(error_attrs) %>>
+            <button type="button" class="link-button" data-remove-line aria-label="<%= new_line ? "Remover nova faixa" : "Remover faixa #{number}" %>">Remover</button>
+            <% unless line_errors.empty? %><p class="field-error" id="erro-faixa-<%= number %>" role="alert"><%= line_errors.join("; ") %></p><% end %>
+          </div>
+        <% end -%>
+      </div>
+      <button type="button" data-add-line>Adicionar faixa</button>
+      <p class="notice">A política vale para reservas e versões de orçamento registradas a partir do salvamento. Reservas, orçamentos e contratos já registrados mantêm a política do registro.</p>
+    </fieldset>
+    <div class="full"><%= partial("organization/policy_preview") %></div>
+    <div class="full actions">
+      <button type="submit" name="acao" value="previsualizar">Pré-visualizar</button>
+      <button type="submit" name="acao" value="restaurar_padrao">Restaurar valores padrão</button>
+      <button type="submit" name="acao" value="salvar" class="primary">Salvar configurações</button>
+      <a href="/organizacao">Cancelar</a>
+    </div>
+  </form>
+</section>
+<section class="panel" aria-labelledby="historico-configuracoes">
+  <h2 id="historico-configuracoes">Histórico de alterações</h2>
+  <%= partial("shared/history", history: @data[:history]) %>
+</section>

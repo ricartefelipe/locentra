@@ -35,5 +35,6 @@
       <dt>Caução prevista</dt><dd><%= money(r.deposit) %></dd>
     </dl>
     <p class="muted">Valores calculados pela tabela de preços e pelas condições vigentes no registro da reserva.</p>
+    <%= partial("shared/cancellation_policy", policy: @cancellation_policy, title: "Política de cancelamento desta reserva") %>
   </section>
 </div>

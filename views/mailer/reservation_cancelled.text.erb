@@ -2,3 +2,6 @@ Assunto: Reserva <%= v["code"] %> cancelada
 Olá, <%= v["customer_name"] %>.
 
 A reserva <%= v["code"] %> (retirada prevista em <%= v["starts_at_local"] %>) foi cancelada.
+<% if v["time_zone"] -%>
+Horários no fuso horário <%= v["time_zone"] %>.
+<% end -%>

@@ -36,7 +36,7 @@
                 <details<%= open_after_failure(end_path) %>>
                   <summary>Encerrar</summary>
                   <form method="post" action="<%= end_path %>" class="stack" data-confirm="Encerrar esta condição negociada? Reservas e orçamentos já registrados não mudam.">
-                    <%= csrf_field %>
+                    <%= csrf_field %><%= time_zone_field %>
                     <label for="motivo-<%= a.id %>">Motivo do encerramento</label>
                     <input id="motivo-<%= a.id %>" name="motivo" required maxlength="500" value="<%= submitted(end_path, "motivo") %>"<%= invalid(row_errors, "motivo") %>>
                     <%= field_errors(row_errors, "motivo") %>
@@ -59,7 +59,7 @@
     <details<%= open_after_failure(create_path) %>>
       <summary>Nova condição negociada</summary>
       <form method="post" action="<%= create_path %>" class="form-grid">
-        <%= csrf_field %>
+        <%= csrf_field %><%= time_zone_field %>
         <div><label for="condicao-produto">Produto (SKU)</label>
           <input id="condicao-produto" name="produto" list="condicao-produtos" autocomplete="off" autocapitalize="characters" value="<%= submitted(create_path, "produto") %>"<%= invalid(form_errors, "produto", describedby: "ajuda-condicao-produto") %>>
           <datalist id="condicao-produtos">

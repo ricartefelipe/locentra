@@ -107,7 +107,7 @@
     <details<%= open_if(@errors, "fim") %>>
       <summary>Aditivo de extensão de prazo</summary>
       <form method="post" action="/contratos/<%= c.id %>/aditivos" class="stack">
-        <%= csrf_field %>
+        <%= csrf_field %><%= time_zone_field %>
         <label for="aditivo-fim">Nova devolução (horário local <%= time_zone.identifier %>)</label>
         <input id="aditivo-fim" name="fim" type="datetime-local" required value="<%= local_input(r.period.ends_at) %>"<%= invalid(@errors, "fim") %>>
         <%= field_errors(@errors, "fim") %>

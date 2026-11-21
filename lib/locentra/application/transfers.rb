@@ -22,8 +22,8 @@ module Locentra
         # Ativo por identificador ou pelo patrimônio lido; estoque por produto, filial de origem e quantidade.
         def call(actor, to_branch_id:, asset_id: nil, asset_tag: nil, product_id: nil, from_branch_id: nil, quantity: nil, notes: nil)
           @uow.run(actor, "assets.write") do |tx, current|
-            destination = Domain::Identifier.parse(to_branch_id, "destino")
-            raise Domain::NotFound, "filial" unless @organizations.branch_active?(tx, destination)
+            # A filial de destino precisa estar ativa (trava compartilhada contra a desativação); a origem, não.
+            destination = Organizations::BranchGuard.active!(@organizations, tx, to_branch_id, field: "destino").id
 
             asset = target_asset(tx, asset_id, asset_tag)
             source = asset ? for_asset(asset) : for_stock(tx, product_id, from_branch_id, quantity)

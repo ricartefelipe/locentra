@@ -51,6 +51,7 @@
       <dt>Caução prevista</dt><dd><%= money(v.deposit) %></dd>
     </dl>
     <p class="muted">Preços calculados em <%= v.pricing["priced_at"] ? datetime(Time.iso8601(v.pricing["priced_at"])) : "—" %> e congelados nesta versão; a conversão em reserva usa estes valores.</p>
+    <%= partial("shared/cancellation_policy", policy: v.cancellation_policy, title: "Política de cancelamento desta versão") %>
   </section>
   <section class="panel" aria-labelledby="acoes-titulo">
     <h2 id="acoes-titulo">Situação e ações</h2>

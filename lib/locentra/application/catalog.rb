@@ -79,9 +79,10 @@ module Locentra
       end
 
       class RegisterAsset
-        def initialize(uow:, catalog:, limits:, audit:, clock:, ids:)
+        def initialize(uow:, catalog:, organizations:, limits:, audit:, clock:, ids:)
           @uow = uow
           @catalog = catalog
+          @organizations = organizations
           @limits = limits
           @audit = audit
           @clock = clock
@@ -94,9 +95,8 @@ module Locentra
                                             Domain::Identifier.parse(attrs[:product_id], "produto")) || raise(Domain::NotFound, "produto")
             raise Domain::ValidationError.field("produto", "produto não é rastreado individualmente") unless product.serialized?
 
-            branch_id = Domain::Identifier.parse(attrs[:branch_id], "filial")
-            raise Domain::NotFound, "filial" unless @catalog.branch_exists?(tx, branch_id)
-
+            # Filial ativa, travada antes da assinatura (ordem filial → assinatura).
+            branch_id = Organizations::BranchGuard.active!(@organizations, tx, attrs[:branch_id], field: "filial").id
             @limits.ensure!(tx, :assets)
             asset = Domain::Catalog::Asset.build(
               id: @ids.uuid, organization_id: tx.tenant_id!, product_id: product.id, branch_id: branch_id, tag: attrs[:tag],
@@ -116,13 +116,15 @@ module Locentra
       end
 
       # Entrada, baixa, perda ou ajuste de estoque quantitativo. Reduções não podem deixar
-      # reservas futuras sem cobertura.
+      # reservas futuras sem cobertura. Entradas (e ajustes positivos) exigem filial ativa; baixa, perda e
+      # ajuste negativo valem também em filial inativa (o estoque continua vinculado a ela).
       class AdjustStock
         KINDS = { "acquisition" => 1, "adjustment" => 0, "write_off" => -1, "loss" => -1 }.freeze
 
-        def initialize(uow:, catalog:, availability:, limits:, audit:, clock:, ids:)
+        def initialize(uow:, catalog:, organizations:, availability:, limits:, audit:, clock:, ids:)
           @uow = uow
           @catalog = catalog
+          @organizations = organizations
           @availability = availability
           @limits = limits
           @audit = audit
@@ -142,9 +144,7 @@ module Locentra
             product = @catalog.find_product(tx, Domain::Identifier.parse(product_id, "produto")) || raise(Domain::NotFound, "produto")
             raise Domain::ValidationError.field("produto", "produto não é de estoque quantitativo") unless product.bulk?
 
-            branch = Domain::Identifier.parse(branch_id, "filial")
-            raise Domain::NotFound, "filial" unless @catalog.branch_exists?(tx, branch)
-
+            branch = stock_branch!(tx, branch_id, delta)
             @limits.ensure!(tx, :assets, adding: delta) if delta.positive?
             now = @clock.now
             pool = @catalog.lock_or_create_pool(tx, @ids.uuid, product.id, branch, now)
@@ -163,6 +163,15 @@ module Locentra
         end
 
         private
+
+        def stock_branch!(tx, branch_id, delta)
+          return Organizations::BranchGuard.active!(@organizations, tx, branch_id, field: "filial").id if delta.positive?
+
+          branch = Domain::Identifier.parse(branch_id, "filial")
+          raise Domain::NotFound.new("filial", feminine: true) unless @catalog.branch_exists?(tx, branch)
+
+          branch
+        end
 
         def ensure_coverage!(tx, pool, now)
           horizon = Domain::Period.new(now, now + (366 * 86_400))

@@ -291,3 +291,85 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   aleatórios: a situação e os usos ativos calculados na SQL com o domínio, e a decisão do gatilho de limite
   com `Redemptions.counts_toward_limit?` somado ao contador legado. A contagem de usos ativos custa uma
   consulta ao livro por cupom; o índice `(organization_id, coupon_id, redeemed_at)` atende a esse acesso.
+
+## ADR-028 — Configurações da organização, política congelada e gestão de filiais
+
+- **Contexto:** até a 1.1.0, `organizations.settings` (validade padrão do bloqueio temporário e política de
+  cancelamento) era lida com valores padrão, mas nada a alterava, e só o contrato congelava a política, no
+  momento da emissão: uma troca de política mudaria a multa de reservas e orçamentos já combinados. Também não
+  havia edição, desativação nem reativação de filiais, e o fuso da organização era lido no momento de cada
+  operação, mesmo em extensões, multas e cobranças de reservas antigas.
+- **Configurações em `settings` com controle otimista (D1):** sem tabela nova. A coluna
+  `organizations.lock_version` faz o controle otimista (`stale_organization`). Só se gravam chaves com valor
+  diferente do padrão; a chave é removida quando o valor volta ao padrão e chaves desconhecidas são
+  preservadas. "Padrão" é a igualdade de valor, não a ausência da chave.
+- **Política congelada em dois registros imutáveis (D2, D3):** a versão do orçamento grava a política com os
+  preços, e a reserva grava a política na criação. A reserva criada a partir de orçamento recebe a da versão
+  (somente por composição interna; a web e a API não repassam o campo); as demais recebem a vigente na
+  organização. O contrato copia a da reserva. A impressão digital da versão inclui a política: depois de uma
+  troca, uma revisão sem outras mudanças gera uma versão nova com a política nova, que é o caminho para levar a
+  política nova a um orçamento em aberto. Gatilhos impedem a alteração das duas colunas, inclusive pelo
+  proprietário.
+- **Validade do bloqueio (D4):** o mesmo intervalo do motor (5 a 1440 minutos). Bloqueios e orçamentos já
+  registrados guardam a própria validade.
+- **Política válida (D5):** de 1 a 6 faixas, horas inteiras de 0 a 8760 sem repetição, uma faixa de 0 h e multa
+  em pontos-base que não diminui à medida que o início se aproxima; forma canônica ordenada pela antecedência
+  decrescente.
+- **Troca de fuso com confirmação (D6, D7):** permitida a quem tem `organization.manage`, com a caixa de
+  confirmação e as contagens de registros afetados. Cada reserva tem um **fuso de referência**, o da
+  precificação (`pricing.timezone`): extensões, multas por atraso, vencimentos das cobranças, emissão do
+  contrato, novas versões do documento e aditivos usam esse fuso, e cada contrato tem um único fuso, igual ao
+  do preço. Instantes gravados não mudam e passam a ser exibidos no fuso novo; o restante (reservas novas,
+  painel, financeiro, atrasos, calendário, telas, CLI e e-mails) usa o fuso novo, e os e-mails informam o fuso.
+  Formulários abertos antes da troca levam o campo oculto `fuso` e são recusados com 422: interpretar os
+  horários digitados no fuso novo mudaria o instante sem aviso. Foi escolhido 422 com `ValidationError` (e não
+  409) porque todos os controladores já reexibem os valores enviados nesse caso. No portal, a solicitação
+  recusada volta à consulta de disponibilidade refeita no fuso atual (a consulta não grava nada), com as
+  quantidades e as observações enviadas.
+- **Nome e filiais (D8, D9):** o nome é editável e o `slug` não muda; contratos emitidos mantêm o nome dos
+  termos. Filiais têm nome e endereço editáveis com `lock_version`; o código não muda, porque é usado em
+  `--filial` e nos snapshots.
+- **Leitura e alteração (D10, D11):** `organization.read` (todos os papéis) governa a página, o detalhe de
+  filial, a API e a CLI; quem só lê não vê formulários nem o painel de assinatura. As configurações são
+  alteradas somente por usuário: a troca de fuso exige leitura e confirmação humanas e a auditoria liga a
+  alteração a uma pessoa. Por isso não há alteração pela API nem pela CLI nesta versão. As mutações de filial
+  exigem apenas a permissão, como a criação.
+- **Auditoria e métricas (D12):** valores anterior e novo, sem webhook novo; os conflitos novos entram em
+  `domain_conflicts_total`.
+- **Plano (D13):** só a reativação de filial conta em `max_branches`.
+- **Mensagens (D14):** filial inexistente responde "filial não encontrada"; existente e inativa, erro no campo
+  do formulário ("filial inativa: escolha uma filial ativa").
+- **Regras de desativação:** impedem reservas em aberto (bloqueio só enquanto vigente), orçamentos enviados com
+  a versão atual vigente, orçamentos aprovados que ainda podem ser convertidos (retirada da versão aprovada
+  dentro da tolerância da conversão) e transferências pendentes com destino à filial; ativos, estoque,
+  rascunhos, aprovados com retirada já passada e transferências de saída não impedem. A última filial ativa não é desativada. Operações
+  sobre o que já está na filial (baixa, perda, ajuste negativo, manutenção, transferência de saída) continuam
+  aceitas; criações de vínculo exigem filial ativa.
+- **Concorrência:** criações de vínculo travam a filial com `FOR SHARE`; a desativação, com `FOR NO KEY UPDATE`,
+  e depois a organização, que sempre existe (inclusive sem assinatura), para contar as filiais ativas. A
+  reativação usa a trava da assinatura. A ordem global (filial → organização; filial → assinatura; só
+  assinatura; só organização) não tem ciclo.
+- **Migration 0016:** default não volátil (`app_default_cancellation_policy()`), que evita a reescrita das
+  tabelas, e preenchimento direcionado somente onde a política difere do padrão, com prioridade para a política
+  dos termos do contrato. `quote_versions_protect` recusa qualquer `UPDATE` de versão enviada, então é desligado
+  somente durante o preenchimento, na mesma transação. Gatilhos de preenchimento atendem inserções da 1.1.0
+  durante a implantação gradual e o retorno; a 1.2 sempre informa a coluna (keyword obrigatória no
+  repositório, coberta por teste), e a remoção dos gatilhos fica para uma migration futura.
+- **Alternativas rejeitadas:**
+  - dividir a entrega em três incrementos (fuso, nome e filiais): o objetivo exigia os três, e as lacunas
+    apontadas foram resolvidas aqui;
+  - CNPJ editável: desde julho de 2026 existe o CNPJ alfanumérico e `Customers::Document.valid_cnpj?` só aceita
+    dígitos; o campo exigiria nova regra de validação. Fica como limitação, sem `UPDATE` na coluna;
+  - `CHECK NOT VALID` seguido de `VALIDATE` na mesma transação: não reduz o tempo de trava, porque o `ALTER`
+    já mantém ACCESS EXCLUSIVE até o commit;
+  - extrair o `stale!` das condições comerciais para uso comum: a mensagem depende do gênero do código; os
+    casos novos usam um auxiliar próprio com a mesma semântica;
+  - remover já o gatilho de preenchimento: ele é necessário durante a implantação gradual e no retorno;
+  - índice novo para reservas em aberto por filial: `reservations_org_status_idx` atende, e o índice novo
+    aumentaria o tempo da migration;
+  - restringir a troca de fuso ao proprietário ou bloqueá-la com locações em andamento: as consequências estão
+    tratadas e a confirmação é explícita.
+- **Consequências:** uma política alterada não muda reservas, versões nem contratos existentes; a reserva, o
+  orçamento e o portal mostram a política registrada. Uma troca de fuso preserva o cálculo de tudo o que já foi
+  precificado. A organização ganhou uma tela própria de configurações e as filiais, um ciclo ativa ⇄ inativa
+  documentado em `MAQUINAS-DE-ESTADO.md`.

@@ -12,7 +12,9 @@ produto. O cadastro das condições comerciais (telas, API, CLI, permissões, au
   `{"amount_cents": 12345, "currency": "BRL", "formatted": "R$ 123,45"}`.
 - Percentuais em pontos-base (1% = 100 bps). Arredondamento **meio para cima** somente quando surge fração de
   centavo; rateios pelo método do maior resto preservam o total.
-- Instantes em UTC; regras de calendário no fuso IANA da organização.
+- Instantes em UTC; regras de calendário no fuso IANA da organização na precificação de reservas e versões
+  novas. O resumo de preços grava o fuso usado (`timezone`), que é o **fuso de referência da reserva** (ver
+  "Fuso de referência" abaixo).
 
 ## Tabela de preços do produto
 
@@ -153,9 +155,27 @@ R$ 895,20.
   `negotiated_agreement_id`; telas, PDF, termos de contrato e API tratam essas chaves como opcionais. O
   contrato copia cupom, condições e tarifas para os termos, e o PDF os descreve na seção "Valores".
 - **Extensão:** o valor original é preservado; a diferença entre o preço do novo período (calculado com a
-  tabela do snapshot) e o valor original é gravada como ajuste (`reservation_adjustments`, tipo `extension`)
-  e, em contratos, como aditivo.
-- **Atraso:** multa = preço do tempo excedente (após a tolerância) pela tabela do snapshot × multiplicador.
-- **Cancelamento:** percentual da política congelada no contrato conforme a antecedência (padrão: ≥ 72 h 0%,
-  ≥ 24 h 30%, < 24 h 100%), gravado como ajuste `cancellation_fee`.
+  tabela do snapshot, no fuso de referência da reserva) e o valor original é gravada como ajuste
+  (`reservation_adjustments`, tipo `extension`) e, em contratos, como aditivo.
+- **Atraso:** multa = preço do tempo excedente (após a tolerância) pela tabela do snapshot × multiplicador, no
+  fuso de referência da reserva.
+- **Cancelamento:** percentual da política de cancelamento congelada conforme a antecedência (padrão: ≥ 72 h
+  0%, ≥ 24 h 30%, < 24 h 100%), gravado como ajuste `cancellation_fee`. A política é gravada na versão do
+  orçamento e na reserva (`cancellation_policy`) no momento da criação; a reserva criada a partir de orçamento
+  recebe a da versão, e o contrato copia a da reserva. Uma alteração da política da organização vale somente
+  para reservas e versões registradas depois dela.
 - Ajustes viram cobranças pela sincronização idempotente do módulo financeiro.
+
+## Fuso de referência
+
+O fuso de referência da reserva é o fuso gravado no resumo de preços (`pricing.timezone`), ou o fuso atual da
+organização quando o resumo não tem o campo (`Domain::TimeZone.snapshot_or`). Depois de uma troca do fuso da
+organização:
+
+- a reserva existente mantém preço e período, e a extensão, a multa por atraso e o vencimento (`due_on`) das
+  cobranças da reserva usam o fuso de referência: um produto por dia de calendário precificado em São Paulo
+  continua contando as datas de São Paulo;
+- o contrato é emitido no fuso de referência da reserva; novas versões do documento e aditivos usam o fuso dos
+  termos do contrato, de modo que cada contrato tem um único fuso, igual ao do preço;
+- reservas e versões de orçamento novas são precificadas no fuso novo; um período que cruza a meia-noite em
+  só um dos fusos pode ter número de dias de calendário diferente.

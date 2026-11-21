@@ -23,7 +23,8 @@ class PagesTest < HttpTest
     pages = ["/", "/clientes", "/clientes/novo", "/clientes/#{@customer.id}", "/produtos", "/produtos/novo", "/produtos/#{@camera.id}",
              "/produtos/#{@chairs.id}", "/produtos/#{@kit.id}", "/ativos", "/ativos/#{@asset.id}", "/disponibilidade",
              "/disponibilidade?dias=14", "/disponibilidade/consulta", "/reservas", "/reservas/nova", "/reservas/#{@reservation.id}",
-             "/usuarios", "/organizacao", "/auditoria", "/organizacoes", "/integracoes"]
+             "/usuarios", "/organizacao", "/organizacao/configuracoes", "/organizacao/filiais/#{@org[:branch].id}", "/auditoria", "/organizacoes",
+             "/integracoes"]
     pages.each do |path|
       begin
         get path

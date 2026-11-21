@@ -2,11 +2,13 @@
 
 require_relative "portal_http_helper"
 require_relative "../support/commercial_terms_support"
+require_relative "../support/organization_settings_support"
 
 # Funcionalidades do portal pela interface (Rack::Lint): disponibilidade e solicitação de reserva,
 # reservas, orçamentos, contratos com aceite e PDF, cobranças e isolamento entre clientes e organizações.
 class PortalPagesTest < PortalHttpTest
   include CommercialTermsSupport
+  include OrganizationSettingsSupport
 
   def test_availability_check_and_reservation_request_through_the_screens
     portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
@@ -35,6 +37,51 @@ class PortalPagesTest < PortalHttpTest
     assert_includes page, "Entrega &lt;script&gt;x&lt;/script&gt;"
     assert_includes get_ok("/portal/reservas"), "Solicitada"
     assert_equal %w[requested portal], owner_query("SELECT status, source FROM reservations").first.values_at("status", "source")
+  end
+
+  # Solicitação enviada de uma tela aberta antes da troca de fuso: recusada sem gravar, com a tabela, as
+  # quantidades e as observações reexibidas e o fuso atual no formulário, para conferir e enviar de novo.
+  def test_reservation_request_from_a_page_opened_before_the_time_zone_change_keeps_the_form
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    portal_login
+
+    assert_includes get_ok("/portal/disponibilidade?filial=#{@branch.id}&inicio=2026-03-10T05:00&fim=2026-03-11T05:00"),
+                    'name="fuso" value="America/Sao_Paulo"'
+    change_settings(timezone: "America/Manaus", confirm_timezone_change: true)
+    portal_post "/portal/reservas", request_form("2", "observacoes" => "Entregar na portaria B", "fuso" => "America/Sao_Paulo")
+    body = last_response.body
+
+    assert_equal 422, last_response.status
+    assert_includes body, "o fuso horário da organização mudou de America/Sao_Paulo para America/Manaus enquanto o formulário estava aberto"
+    assert_includes body, %(action="/portal/reservas")
+    assert_includes body, 'name="fuso" value="America/Manaus"'
+    assert_includes body, "Entregar na portaria B"
+    assert_match(/name="quantidade\[\]"[^>]*value="2"/, body)
+    assert_equal 0, owner_query("SELECT count(*) AS n FROM reservations").first["n"].to_i
+    portal_post "/portal/reservas", request_form("2", "observacoes" => "Entregar na portaria B", "fuso" => "America/Manaus")
+
+    assert_equal 303, last_response.status
+    assert_equal "2026-03-10 09:00:00+00", owner_query("SELECT starts_at FROM reservations").first["starts_at"]
+  end
+
+  # O cliente vê a política registrada na versão e na reserva, não a política atual da organização.
+  def test_quote_and_reservation_pages_show_the_registered_cancellation_policy
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    confirmed = reserve(@actor, @customer, @branch, period("2026-03-12T08:00:00Z", "2026-03-13T08:00:00Z"), [line(@camera, 1)], mode: "confirm")
+    quote = sent_quote(@actor, @customer, @branch, @camera, 20)
+    change_settings(cancellation_rows: [%w[48 10], %w[0 50]])
+    portal_login
+    registered = "de 24 h a menos de 72 h antes do início: multa de 30% do valor contratado"
+    current = "48 h ou mais antes do início: multa de 10% do valor contratado"
+
+    [["/portal/orcamentos/#{quote.id}", "Política de cancelamento desta versão"],
+     ["/portal/reservas/#{confirmed.id}", "Política de cancelamento desta reserva"]].each do |path, title|
+      policy = get_ok(path)[%r{<details class="cancellation-policy">.*?</details>}m] || flunk("#{path}: política não exibida")
+
+      assert_includes policy, title, path
+      assert_includes policy, registered, path
+      refute_includes policy, current, path
+    end
   end
 
   def test_reservation_requests_are_limited_per_portal_user
@@ -287,7 +334,7 @@ class PortalPagesTest < PortalHttpTest
                                       "produto" => [@camera.id], "quantidade" => ["1"] }
 
     assert_equal 422, last_response.status
-    assert_includes last_response.body, "filial não encontrado"
+    assert_includes last_response.body, "filial não encontrada"
     refute_includes get_ok("/portal/reservas"), other_reservation.code
     refute_includes get_ok("/portal/orcamentos"), other_quote.code
     refute_includes get_ok("/portal/contratos"), other_contract.code

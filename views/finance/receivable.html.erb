@@ -44,7 +44,7 @@
       <p class="empty">Não há saldo em aberto para receber.</p>
     <% else %>
       <form method="post" action="/financeiro/cobrancas/<%= receivable.id %>/pagamentos" class="stack">
-        <%= csrf_field %>
+        <%= csrf_field %><%= time_zone_field %>
         <%= submission_field %>
         <h3>Registrar pagamento recebido</h3>
         <label for="metodo-manual">Método</label>

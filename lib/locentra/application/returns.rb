@@ -80,7 +80,8 @@ module Locentra
 
         def late_fees(tx, reservation, entries, before, after, now)
           items = @reservations.items(tx, reservation.id).to_h { |item| [item["id"], item] }
-          zone = @organizations.find(tx, tx.tenant_id!).time_zone
+          # Fuso de referência da reserva: o da precificação, mesmo depois de uma troca de fuso da organização.
+          zone = Domain::TimeZone.snapshot_or(@reservations.reference_timezone(tx, reservation.id), @organizations.find(tx, tx.tenant_id!).time_zone)
           F::LateFeePolicy.charges(items: items, entries: entries, before: before, after: after, scheduled_end: reservation.period.ends_at,
                                    returned_at: now, zone: zone)
         end

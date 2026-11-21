@@ -1,7 +1,11 @@
+<%= time_zone_field %>
+<% inactive = inactive_branch(@branches, @values["filial_id"]) %>
 <div><label for="filial_id">Filial</label>
-  <select id="filial_id" name="filial_id" required>
-    <% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["filial_id"], b.id) %>><%= b.name %> (<%= b.code %>)</option><% end %>
-  </select></div>
+  <select id="filial_id" name="filial_id" required<%= invalid(@errors, "filial", describedby: inactive ? "ajuda-filial" : nil) %>>
+    <%= branch_options(@branches, @values["filial_id"], active_only: true, code: true) %>
+  </select>
+  <% if inactive %><p class="muted" id="ajuda-filial"><%= @data ? "A filial deste orçamento está inativa: escolha uma filial ativa para a nova versão." : "A filial selecionada está inativa: escolha uma filial ativa." %></p><% end %>
+  <%= field_errors(@errors, "filial") %></div>
 <div><label for="inicio">Retirada (horário local <%= time_zone.identifier %>)</label>
   <input id="inicio" name="inicio" type="datetime-local" required value="<%= @values["inicio"] %>"<%= invalid(@errors, "inicio") %>><%= field_errors(@errors, "inicio") %></div>
 <div><label for="fim">Devolução</label>

@@ -3,6 +3,54 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versões seguem
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Adicionado
+
+- **Configurações da organização:** tela em **Organização → Editar configurações** para o nome, o fuso horário
+  (fusos do Brasil, com confirmação e as consequências da troca), a validade padrão do bloqueio temporário
+  (5 a 1440 minutos) e a política de cancelamento (de 1 a 6 faixas), com pré-visualização, restauração dos
+  valores padrão, controle otimista entre abas e histórico. Somente usuários com `organization.manage`
+  alteram; credenciais não alteram.
+- **Filiais:** detalhe com vínculos (ativos, estoque, reservas, orçamentos e transferências), edição de nome e
+  endereço com controle otimista, desativação (recusada para a última filial ativa e com compromissos em
+  aberto, com os códigos) e reativação dentro do limite do plano.
+- **Permissão `organization.read`** (todos os papéis): página da organização, detalhe de filial, API e CLI. A
+  página não mostra formulários nem a assinatura a quem não gerencia a organização.
+- **API v1:** `GET /organization` (configurações efetivas e filiais) e `cancellation_policy` no detalhe da
+  reserva.
+- **CLI:** `organization show`, com `--json` igual ao objeto da API.
+- **Política de cancelamento nas versões de orçamento:** cada versão guarda a política vigente com os preços;
+  orçamento e portal exibem a política da versão, e a reserva exibe a política registrada.
+- Passo 16 do roteiro de demonstração.
+
+### Alterado
+
+- O contrato copia a política de cancelamento registrada na reserva (antes, usava a política vigente na
+  emissão). A reserva criada a partir de orçamento recebe a política da versão.
+- Extensões, multas por atraso, vencimentos das cobranças, emissão de contrato, novas versões do documento e
+  aditivos usam o fuso com que a reserva foi precificada.
+- Os formulários de criação (reserva, orçamento, disponibilidade, cadastro de ativo e destino de transferência)
+  listam somente filiais ativas; os de estoque, manutenção e origem de transferência mostram as inativas com
+  " (inativa)". Criações ligadas a filial inativa são recusadas com "filial inativa: escolha uma filial ativa".
+- Endereço de filial acima de 300 caracteres passa a ser recusado (antes era truncado).
+- A mensagem de filial inexistente passa a ser "filial não encontrada".
+- Os e-mails com horários informam o fuso horário.
+- Formulários com data e hora abertos antes de uma troca de fuso são recusados com orientação para conferir os
+  horários, sem gravar nada.
+- A navegação "Organização" aparece para todos os papéis (`organization.read`).
+
+### Atualização
+
+- **Migration 0016** (`0016_configuracoes_organizacao.sql`). Antes de migrar, execute a verificação prévia de
+  `docs/RUNBOOKS.md`, seção 14: `settings` fora do formato esperado aborta a migration com a lista das
+  organizações. As requisições esperam durante a migration (travas exclusivas até o commit); use
+  `lock_timeout` e uma janela curta. Não altere configurações nem filiais até todas as instâncias estarem na
+  versão nova.
+- Credenciais existentes não recebem `organization.read`; crie credenciais novas para usá-lo.
+- **Retorno à versão 1.1.0:** a 1.1.0 ignora as colunas novas, emite contratos com a política atual de
+  `settings` e não oferece a gestão de filiais (`docs/RUNBOOKS.md`, seção 14).
+
 ## [1.1.0] — 2026-11-21
 
 ### Adicionado

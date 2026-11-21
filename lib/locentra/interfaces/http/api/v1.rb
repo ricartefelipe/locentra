@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../../organization_serializers"
+
 module Locentra
   module Interfaces
     module HTTP
@@ -28,7 +30,8 @@ module Locentra
               "deposit" => money(reservation.deposit), "version" => reservation.version }
           end
 
-          # Detalhe da reserva: itens com snapshot de preço, alocações ativas e ajustes.
+          # Detalhe da reserva: itens com snapshot de preço, alocações ativas, ajustes e a política de
+          # cancelamento congelada na criação.
           def reservation_details(data)
             items = data[:items].map do |i|
               { "product_id" => i["product_id"], "sku" => i["sku"], "quantity" => i["quantity"], "pricing" => i["pricing"] }
@@ -36,7 +39,8 @@ module Locentra
             assets = data[:allocations][:assets].select { |a| a["active"] }.map { |a| { "asset_id" => a["asset_id"], "tag" => a["tag"] } }
             stock = data[:allocations][:stock].select { |s| s["active"] }.map { |s| { "product_id" => s["product_id"], "quantity" => s["quantity"] } }
             reservation(data[:reservation]).merge("items" => items, "allocations" => { "assets" => assets, "stock" => stock },
-                                                  "pricing" => data[:pricing][:summary], "adjustments" => data[:pricing][:adjustments])
+                                                  "pricing" => data[:pricing][:summary], "adjustments" => data[:pricing][:adjustments],
+                                                  "cancellation_policy" => data[:cancellation_policy])
           end
 
           def page(page, &)
@@ -57,6 +61,13 @@ module Locentra
               { "product_id" => row["product"].id, "sku" => row["product"].sku, "tracking" => row["product"].tracking,
                 "available" => row["available"], "total" => row["total"] }
             end })
+          end
+
+          # Organização do token (escopo `organization.read`): configurações e filiais. Não há alteração pela
+          # API: a troca de fuso exige confirmação humana na interface web.
+          def organization(ctx)
+            data = uc(:read_organization).call(ctx.actor)
+            json(200, OrganizationSerializers.organization(data[:organization], data[:branches]))
           end
 
           def customers(ctx)

@@ -13,11 +13,13 @@ module Locentra
         }.freeze
         STATUS_COLUMNS = %w[confirmed_at cancelled_at cancellation_reason expired_at].freeze
 
-        def insert(tx, reservation, pricing, created_by, now)
-          tx.execute(<<~SQL, [reservation.id, reservation.organization_id, reservation.branch_id, reservation.customer_id, reservation.code, reservation.status, reservation.source, reservation.period.starts_at, reservation.period.ends_at, reservation.hold_expires_at, reservation.quote_id, reservation.notes, pricing, reservation.total.cents, reservation.deposit.cents, created_by, now, reservation.status == "confirmed" ? now : nil])
+        # `cancellation_policy` é obrigatória: a política congelada na reserva nunca fica a cargo do gatilho de
+        # preenchimento do banco, que existe só para inserções de instâncias 1.1.0 durante a atualização.
+        def insert(tx, reservation, pricing, created_by, now, cancellation_policy:)
+          tx.execute(<<~SQL, [reservation.id, reservation.organization_id, reservation.branch_id, reservation.customer_id, reservation.code, reservation.status, reservation.source, reservation.period.starts_at, reservation.period.ends_at, reservation.hold_expires_at, reservation.quote_id, reservation.notes, pricing, reservation.total.cents, reservation.deposit.cents, created_by, now, reservation.status == "confirmed" ? now : nil, cancellation_policy])
             INSERT INTO reservations (id, organization_id, branch_id, customer_id, code, status, source, starts_at, ends_at, hold_expires_at, quote_id,
-                                      notes, pricing, total_cents, deposit_cents, created_by, created_at, updated_at, confirmed_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17, $18)
+                                      notes, pricing, total_cents, deposit_cents, created_by, created_at, updated_at, confirmed_at, cancellation_policy)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17, $18, $19)
           SQL
         end
 
@@ -193,6 +195,16 @@ module Locentra
               FROM stock_allocations s WHERE s.organization_id = $1 AND s.reservation_id = $2 ORDER BY s.active DESC, s.id
           SQL
           { assets: assets, stock: stock }
+        end
+
+        # Política de cancelamento congelada na criação da reserva.
+        def cancellation_policy(tx, reservation_id)
+          tx.query_value("SELECT cancellation_policy FROM reservations WHERE organization_id = $1 AND id = $2", [tx.tenant_id!, reservation_id])
+        end
+
+        # Fuso com que a reserva foi precificada (nil em resumos sem o campo).
+        def reference_timezone(tx, reservation_id)
+          tx.query_value("SELECT pricing ->> 'timezone' FROM reservations WHERE organization_id = $1 AND id = $2", [tx.tenant_id!, reservation_id])
         end
 
         def pricing(tx, reservation_id)

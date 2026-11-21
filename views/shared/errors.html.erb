@@ -3,7 +3,7 @@
     <p><strong>Não foi possível concluir a operação.</strong></p>
     <ul>
       <% @errors.each do |field, messages| %>
-        <li><%= field == "base" ? "" : "#{label(:field, field)}: " %><%= Array(messages).join("; ") %></li>
+        <li><%= field == "base" ? "" : "#{label(:field, field)}: " %><%= Array(messages).uniq.join("; ") %></li>
       <% end %>
     </ul>
   </div>

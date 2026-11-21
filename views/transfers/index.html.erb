@@ -16,7 +16,7 @@
         <label for="patrimonio">Patrimônio</label>
         <input id="patrimonio" name="patrimonio" required autocomplete="off" value="<%= @values["patrimonio"] || @values["ativo"] %>">
         <label for="destino-ativo">Filial de destino</label>
-        <select id="destino-ativo" name="destino_id"><% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["destino_id"], b.id) %>><%= b.name %></option><% end %></select>
+        <select id="destino-ativo" name="destino_id"><%= branch_options(@branches, @values["destino_id"], active_only: true) %></select>
         <label for="obs-ativo">Observações</label><input id="obs-ativo" name="observacoes" maxlength="500">
         <p class="muted">A saída exige que o ativo não tenha reservas ou bloqueios futuros na origem.</p>
         <button type="submit" class="primary">Solicitar transferência</button>
@@ -32,9 +32,9 @@
           <label for="produto_id">Produto</label>
           <select id="produto_id" name="produto_id"><% @products.each do |p| %><option value="<%= p.id %>"<%= selected(@values["produto_id"], p.id) %>><%= p.name %> (<%= p.sku %>)</option><% end %></select>
           <label for="origem_id">Filial de origem</label>
-          <select id="origem_id" name="origem_id"><% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["origem_id"], b.id) %>><%= b.name %></option><% end %></select>
+          <select id="origem_id" name="origem_id"><%= branch_options(@branches, @values["origem_id"], active_only: false) %></select>
           <label for="destino-estoque">Filial de destino</label>
-          <select id="destino-estoque" name="destino_id"><% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["destino_id"], b.id) %>><%= b.name %></option><% end %></select>
+          <select id="destino-estoque" name="destino_id"><%= branch_options(@branches, @values["destino_id"], active_only: true) %></select>
           <label for="quantidade">Quantidade</label><input id="quantidade" name="quantidade" type="number" min="1" required value="<%= @values["quantidade"] %>">
           <p class="muted">A quantidade sai da origem na saída, respeitando as reservas futuras, e entra no destino no recebimento.</p>
           <button type="submit">Solicitar transferência</button>

@@ -160,4 +160,25 @@ class OverdueAlertsTest < DatabaseTest
     assert_includes late.first[:subject], reservation.code
     assert_includes late.first[:text], "04/03/2026 06:00"
   end
+
+  # E-mails de reserva com horários (confirmação, extensão, cancelamento e atraso) informam o fuso em que os
+  # horários são exibidos, o fuso atual da organização.
+  def test_reservation_emails_state_the_time_zone_of_their_times
+    reservation = confirmed([line(@chairs, 2)])
+    cancelled = confirmed([line(@chairs, 1)], after_rental)
+    pick_up(reservation)
+    uc(:extend_reservation).call(@actor, reservation.id, ends_at: t("2026-03-05T09:00:00Z"))
+    uc(:cancel_reservation).call(@actor, cancelled.id, reason: "Desistência")
+    @clock.travel_to(t("2026-03-06T12:00:00Z"))
+    uc(:detect_overdue).call(system_actor)
+    worker_system
+    drain
+    subjects = ["Reserva #{reservation.code} confirmada", "Reserva #{reservation.code} estendida", "Reserva #{cancelled.code} cancelada",
+                "Devolução em atraso — reserva #{reservation.code}"]
+    stated = subjects.to_h do |subject|
+      [subject, @mailer.deliveries.find { |d| d[:subject] == subject }&.dig(:text).to_s.include?("Horários no fuso horário America/Sao_Paulo.")]
+    end
+
+    assert_equal(subjects.to_h { |subject| [subject, true] }, stated)
+  end
 end

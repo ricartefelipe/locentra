@@ -1,5 +1,6 @@
 <%# Campos editáveis do cupom. Locais: prefix (prefixo dos ids, para duas cópias na mesma página não colidirem). %>
 <% pre = @prefix.to_s %>
+<%= time_zone_field %>
 <div class="full"><label for="<%= pre %>descricao">Descrição</label>
   <textarea id="<%= pre %>descricao" name="descricao" rows="2" maxlength="200"<%= invalid(@errors, "descricao") %>><%= @values["descricao"] %></textarea>
   <%= field_errors(@errors, "descricao") %></div>

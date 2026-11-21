@@ -40,7 +40,7 @@
       <input type="hidden" name="reserva_id" value="<%= r.id %>">
       <label for="contrato-condicoes">Condições específicas (opcional)</label>
       <textarea id="contrato-condicoes" name="condicoes" rows="2" maxlength="5000"></textarea>
-      <p class="muted">O contrato congela itens, preços, caução, período e a política de cancelamento atual e gera o PDF para aceite eletrônico simples.</p>
+      <p class="muted">O contrato congela itens, preços, caução, período e a política de cancelamento registrada na reserva e gera o PDF para aceite eletrônico simples.</p>
       <button type="submit" class="primary">Gerar contrato</button>
     </form>
   <% elsif can?("contracts.read") %>
@@ -66,7 +66,7 @@
       <details<%= open_after_failure("/reservas/#{r.id}/reagendar") %>>
         <summary>Reagendar</summary>
         <form method="post" action="/reservas/<%= r.id %>/reagendar" class="stack">
-          <%= csrf_field %>
+          <%= csrf_field %><%= time_zone_field %>
           <label for="re-inicio">Nova retirada</label><input id="re-inicio" name="inicio" type="datetime-local" required value="<%= local_input(r.period.starts_at) %>">
           <label for="re-fim">Nova devolução</label><input id="re-fim" name="fim" type="datetime-local" required value="<%= local_input(r.period.ends_at) %>">
           <button type="submit">Reagendar</button>
@@ -78,7 +78,7 @@
       <details<%= open_after_failure("/reservas/#{r.id}/estender") %>>
         <summary>Estender devolução</summary>
         <form method="post" action="/reservas/<%= r.id %>/estender" class="stack">
-          <%= csrf_field %>
+          <%= csrf_field %><%= time_zone_field %>
           <label for="ex-fim">Nova devolução</label><input id="ex-fim" name="fim" type="datetime-local" required value="<%= local_input(r.period.ends_at) %>">
           <p class="muted">A cobrança original é mantida; a diferença é registrada como ajuste.</p>
           <button type="submit">Estender</button>
@@ -106,6 +106,7 @@
       <% end %>
     </dl>
     <p class="muted">Preços congelados em <%= pricing["priced_at"] ? datetime(Time.iso8601(pricing["priced_at"])) : "—" %>; alterações de catálogo não afetam esta reserva.</p>
+    <%= partial("shared/cancellation_policy", policy: @data[:cancellation_policy], title: "Política de cancelamento desta reserva") %>
   </section>
 </div>
 <% if @finance %><%= partial("finance/reservation_panel", reservation: r) %><% end %>

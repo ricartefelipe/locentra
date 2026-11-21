@@ -100,6 +100,40 @@ reservas canceladas ou expiradas são finais, um uso liberado não volta a ativo
 bloqueio vencido ainda conta durante a carência de 5 minutos (`Redemptions.counts_toward_limit?`), porque
 uma confirmação iniciada antes do vencimento pode estar em andamento.
 
+## Filial (`Domain::Organizations::Branch`)
+
+| Situação | Condição |
+|---|---|
+| `active` (ativa) | `active = true`, `deactivated_at` nulo |
+| `inactive` (inativa) | `active = false`, `deactivated_at` com o instante da desativação |
+
+```
+active ──(desativar)──► inactive
+   ▲                        │
+   └──────(reativar)────────┘
+```
+
+Transições comandadas por quem tem `organization.manage` (`branch.deactivated`, `branch.reactivated`), com
+controle otimista (`lock_version`). Pedir o estado atual é operação nula, sem gravação nem auditoria.
+
+- **Guardas da desativação** (verificadas sob a trava da filial e da organização): não é a última filial
+  ativa (`last_active_branch`) e não tem compromissos em aberto (`branch_in_use`):
+  - reservas `requested`, `confirmed` ou `in_progress`, e `held` com o bloqueio ainda vigente
+    (`Branch::BLOCKING_RESERVATIONS`);
+  - orçamentos `sent` cuja versão atual ainda está na validade, e orçamentos `approved` que ainda podem ser
+    convertidos (início da versão aprovada não anterior a agora menos a tolerância de 15 minutos de
+    `Reservations::Rules.validate_start!`, `Branch.convertible_start_since`);
+  - transferências `requested` ou `in_transit` com destino à filial (`Branch::BLOCKING_TRANSFERS`).
+
+  Ativos, estoque, ordens de manutenção, inspeções, rascunhos, bloqueios e orçamentos vencidos e
+  transferências de saída não impedem. A mensagem cita até cinco códigos por tipo e a orientação de cada um.
+- **Guarda da reativação:** o limite de filiais ativas do plano (`max_branches`), verificado sob a trava da
+  assinatura.
+- **Efeito da situação:** a filial inativa recusa novos vínculos (reserva, orçamento e envio de orçamento,
+  transferência com destino a ela, cadastro de ativo e entrada de estoque) e continua aceitando operações
+  sobre o que já está nela (baixa, perda e ajuste negativo de estoque, manutenção, inspeção e transferência
+  de saída). Registros existentes não mudam.
+
 ## Operação (retirada, devolução, inspeção, manutenção, transferência, alertas)
 
 Ver [`modulos/retirada-devolucao-manutencao.md`](modulos/retirada-devolucao-manutencao.md#máquinas-de-estado).

@@ -161,11 +161,15 @@ module Locentra
         end
 
         # input: customer_id, branch_id, period (Period), lines ([Line]), mode, hold_minutes, notes,
-        # coupon_code, manual_discount_bps, fees, source, quote_id, pricing_snapshot.
+        # coupon_code, manual_discount_bps, fees, source, quote_id, pricing_snapshot, cancellation_policy.
         #
         # `pricing_snapshot` ({ items:, summary: }) é um snapshot de preços pré-calculado (por exemplo,
         # o da versão aprovada de um orçamento): substitui a precificação pelo catálogo atual e precisa
         # corresponder exatamente aos itens e ao período informados.
+        #
+        # `cancellation_policy` só vem por composição interna (envio e conversão de orçamento, com a política
+        # congelada na versão); a web e a API não a repassam. Sem ela, a reserva congela a política vigente
+        # da organização no momento da criação (inclusive a solicitação do portal, antes da confirmação).
         def call(actor, input, tx: nil)
           mode = input.fetch(:mode, "hold").to_s
           raise Domain::ValidationError.field("modo", "use request, hold ou confirm") unless MODES.include?(mode)
@@ -186,7 +190,7 @@ module Locentra
           R::Rules.validate_start!(period, now)
           lines = R::Rules.normalize_lines(input.fetch(:lines))
           customer = active_customer!(tx, input.fetch(:customer_id))
-          branch_id = active_branch!(tx, input.fetch(:branch_id))
+          branch_id = Organizations::BranchGuard.active!(@organizations, tx, input.fetch(:branch_id), field: "filial").id
           org = @organizations.find(tx, tx.tenant_id!)
           products = active_products!(tx, lines)
           priced = if input[:pricing_snapshot]
@@ -196,7 +200,8 @@ module Locentra
                    end
           reservation = build(tx, input, mode, org: org, customer: customer, branch_id: branch_id, period: period, summary: priced.summary,
                                                now: now)
-          @reservations.insert(tx, reservation, priced.summary, current.audit_actor_id, now)
+          @reservations.insert(tx, reservation, priced.summary, current.audit_actor_id, now,
+                               cancellation_policy: input[:cancellation_policy] || org.cancellation_policy)
           @pricer.record_redemption(tx, priced, reservation: reservation, actor_id: current.audit_actor_id, now: now)
           items = insert_items(tx, reservation, priced.items, now)
           if reservation.occupying?
@@ -211,13 +216,6 @@ module Locentra
           raise Domain::ValidationError.field("cliente", "cliente bloqueado ou inativo") unless customer.status == "active"
 
           customer
-        end
-
-        def active_branch!(tx, branch_id)
-          id = Domain::Identifier.parse(branch_id, "filial")
-          raise Domain::NotFound, "filial" unless @organizations.branch_active?(tx, id)
-
-          id
         end
 
         def active_products!(tx, lines)
@@ -464,9 +462,10 @@ module Locentra
           { reservation: extended, adjustment: Domain::Money.new(adjustment) }
         end
 
-        # Diferença por item calculada com o snapshot da tabela contratada; o preço original é mantido.
+        # Diferença por item calculada com o snapshot da tabela contratada, no fuso de referência da reserva
+        # (o da precificação, mesmo depois de uma troca de fuso da organização); o preço original é mantido.
         def record_adjustments(tx, current, reservation, extended, ends_at, now)
-          zone = @organizations.find(tx, tx.tenant_id!).time_zone
+          zone = Domain::TimeZone.snapshot_or(@reservations.reference_timezone(tx, reservation.id), @organizations.find(tx, tx.tenant_id!).time_zone)
           @reservations.items(tx, reservation.id).sum do |item|
             next 0 if item["pricing"].fetch("table", {}).empty?
 
@@ -609,7 +608,7 @@ module Locentra
             raise Domain::NotFound, "reserva" if current.customer? && reservation.customer_id != current.customer_id
 
             { reservation: reservation, items: @reservations.items(tx, reservation.id), allocations: @reservations.allocation_details(tx, reservation.id),
-              pricing: @reservations.pricing(tx, reservation.id) }
+              pricing: @reservations.pricing(tx, reservation.id), cancellation_policy: @reservations.cancellation_policy(tx, reservation.id) }
           end
         end
       end

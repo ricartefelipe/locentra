@@ -1,0 +1,9 @@
+<%# Política de cancelamento registrada (reserva ou versão de orçamento). Locais: policy, title. %>
+<% if @policy -%>
+  <details class="cancellation-policy">
+    <summary><%= @title %></summary>
+    <ul>
+      <% Locentra::Domain::Organizations::CancellationPolicy.describe(@policy).each do |line| %><li><%= line %></li><% end %>
+    </ul>
+  </details>
+<% end -%>

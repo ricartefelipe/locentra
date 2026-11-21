@@ -6,10 +6,10 @@ demonstração do fluxo completo (RF-06 a RF-32 e RNF-02). Migration: `db/migrat
 
 | Parte | Arquivos |
 |---|---|
-| Testes de navegador | `test/browser/browser_helper.rb`, `navigation_test.rb`, `customers_test.rb`, `reservations_test.rb`, `commercial_terms_test.rb`; job "Testes de navegador" em `.github/workflows/ci.yml` |
+| Testes de navegador | `test/browser/browser_helper.rb`, `navigation_test.rb`, `customers_test.rb`, `reservations_test.rb`, `commercial_terms_test.rb`, `organization_settings_test.rb`; job "Testes de navegador" em `.github/workflows/ci.yml` |
 | Métricas | `infrastructure/observability/logger.rb` (`Metrics`), `interfaces/http/middleware.rb` (`RequestLogger`), `application/base.rb` (`UnitOfWork`), `application/reports.rb` (`CollectMetrics`), `infrastructure/jobs/queue.rb`, `infrastructure/persistence/reports.rb` |
 | Chamadas externas e correlação | `application/external_calls.rb`, `application/finance/support.rb` (`Providers`, `TrackedProvider`), `application/webhooks.rb` (`Deliver`, `Redeliver`), `application/finance/{provider_flow,reconciliation,webhooks}.rb`, `infrastructure/notifications.rb`, `application/overdue.rb`, `interfaces/worker/handlers.rb` |
-| Demonstração | `test/integration/demo_flow_test.rb`, `test/integration/demo_commercial_terms_test.rb`, `docs/DEMONSTRACAO.md`, `lib/locentra/seed.rb`, `test/integration/seed_test.rb` |
+| Demonstração | `test/integration/demo_flow_test.rb`, `test/integration/demo_commercial_terms_test.rb`, `test/integration/demo_organization_settings_test.rb`, `docs/DEMONSTRACAO.md`, `lib/locentra/seed.rb`, `test/integration/seed_test.rb` |
 | Interface | `public/img/favicon.svg` e `<link rel="icon">` nos layouts |
 | Composição | `System#build_services` (`external_calls`, `deliver_webhook`), `System#build_finance_use_cases` (`Providers` com registro), `UnitOfWork` com `metrics` |
 
@@ -50,6 +50,9 @@ demonstração do fluxo completo (RF-06 a RF-32 e RNF-02). Migration: `db/migrat
 | `test_data_confirm_dialog_cancels_or_submits_the_form` | Diálogo com o texto de `data-confirm`; cancelar mantém a página e não envia nada ao servidor (o log do servidor tem um único POST); aceitar cancela a reserva |
 | `test_coupon_fee_and_negotiated_condition_reach_the_reservation` | Cadastro de cupom e de tarifa, condição negociada na página do cliente (aviso visível depois do redirecionamento), reserva com tarifa e cupom pelo módulo de linhas (foco na linha nova, rótulos únicos, remoção) e conferência dos valores e dos usos do cupom |
 | `test_attendant_keeps_or_removes_the_fees_of_the_previous_quote_version` | Nova versão de orçamento por atendente: tarifas autorizadas na versão anterior mantidas ou removidas, sem campo editável de valor |
+| `test_owner_edits_the_policy_previews_saves_and_changes_the_time_zone` | Configurações da organização: faixa nova da política pelo módulo de linhas, pré-visualização sem gravação, salvamento com aviso, troca de fuso recusada sem a confirmação (foco no resumo de erros) e aceita com ela, histórico |
+| `test_owner_edits_and_deactivates_a_branch_after_the_confirmation_dialog` | Edição de filial e desativação depois do diálogo de `data-confirm` (texto conferido), com aviso e opção de reativar |
+| `test_added_policy_lines_are_new_lines_without_the_error_state_of_another_line` | Faixa adicionada nasce como "Nova faixa" (rótulos e botão de remover), sem `aria-invalid` nem referência ao erro de outra faixa, inclusive depois de um 422; a mensagem de erro sai com a linha removida |
 
 O teste de navegador encontrou uma falha real: sem ícone declarado, o navegador pedia `/favicon.ico`
 em toda página e registrava um 404 no console. O ícone SVG foi adicionado aos layouts.
@@ -178,7 +181,7 @@ de webhooks recebidos é local e não gera `external.call`.
 
 ## Demonstração
 
-O roteiro de `docs/DEMONSTRACAO.md` tem 15 passos. `test/integration/demo_flow_test.rb` executa, num único
+O roteiro de `docs/DEMONSTRACAO.md` tem 16 passos. `test/integration/demo_flow_test.rb` executa, num único
 teste, os passos 1 a 14:
 entrada e escolha da organização pela interface web; cliente, catálogo, ativos e estoque;
 disponibilidade; orçamento enviado, aprovado e convertido (conversão repetida devolve a mesma
@@ -193,7 +196,11 @@ Beta), `NotFound` nos casos de uso e nenhuma linha da organização A pela RLS. 
 tem os mesmos escopos do roteiro manual (`finance.read`, `finance.write` e `customers.read`), de modo
 que um passo do documento que dependa de outro escopo falha no teste. O passo 15 (condições comerciais:
 cupom, condição negociada e tarifa) é executado por `test/integration/demo_commercial_terms_test.rb`, com
-dados equivalentes aos do seed e os valores do roteiro.
+dados equivalentes aos do seed e os valores do roteiro. O passo 16 (configurações da organização e
+filiais) é executado por `test/integration/demo_organization_settings_test.rb`: cria a filial NORTE no
+próprio passo, altera a política e a validade padrão depois da pré-visualização, confere que o contrato
+emitido antes mantém a política registrada e que uma reserva nova traz a nova, confere o histórico e a
+auditoria, desativa e reativa a NORTE e recusa a desativação da Matriz.
 
 O seed ganhou o preparo da demonstração manual, idempotente também em bancos semeados antes:
 `ana@alfa.demo` passa a ser gerente da Beta Eventos e a Alfa recebe a conta ativa do simulador. O
@@ -216,6 +223,7 @@ não reativa nem altera o que foi mudado depois.
 | `test/repository/observability_tables_test.rb` | Colunas e privilégios de `queue_stats` e `job_outcome_totals`; `retry_later` e `kill` com lease perdido não somam; `retry_later` na última tentativa soma uma linha `dead` e nenhuma `retry` |
 | `test/integration/demo_flow_test.rb` | Passos 1 a 14 do roteiro |
 | `test/integration/demo_commercial_terms_test.rb` | Passo 15 do roteiro (condições comerciais) |
+| `test/integration/demo_organization_settings_test.rb` | Passo 16 do roteiro (configurações da organização e filiais) |
 | `test/integration/seed_test.rb` | Seed idempotente, preparo completado em banco semeado antes e, ao repetir o seed, conta Asaas, conta desativada e vínculo revogado mantidos; condições comerciais criadas uma vez só, sem reativar o que foi desativado |
 | `test/browser/*` | Tabela da seção de testes de navegador |
 

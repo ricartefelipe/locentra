@@ -4,6 +4,7 @@ require_relative "config"
 require_relative "infrastructure"
 require_relative "infrastructure/observability/logger"
 require_relative "wiring/commercial_terms"
+require_relative "wiring/organizations"
 
 module Locentra
   # Composition root: monta adaptadores e casos de uso a partir da configuração.
@@ -116,6 +117,7 @@ module Locentra
       build_cli_use_cases(uc)
       build_portal_use_cases(uc)
       uc.merge!(Wiring::CommercialTerms.build(uow: uow, repos: repos, services: services, clock: clock, ids: ids))
+      uc.merge!(Wiring::Organizations.build(uow: uow, repos: repos, services: services, clock: clock, ids: ids))
       @use_cases = UseCases.new(uc)
     end
 
@@ -135,8 +137,6 @@ module Locentra
       uc[:reset_password] = A::Identity::ResetPassword.new(uow: uow, users: r[:users], tokens: s[:tokens], hasher: s[:hasher],
                                                            sessions_repository: r[:sessions], clock: clock)
       uc[:list_memberships] = A::Identity::ListMemberships.new(uow: uow, organizations: r[:organizations])
-      uc[:create_branch] =
-        A::Organizations::CreateBranch.new(**common, organizations: r[:organizations], limits: s[:limits], audit: audit, ids: ids)
       uc[:invite_member] = A::Organizations::InviteMember.new(**common, organizations: r[:organizations], limits: s[:limits],
                                                                         notifier: s[:notifier], audit: audit, ids: ids)
       uc[:accept_invitation] = A::Organizations::AcceptInvitation.new(**common, organizations: r[:organizations], users: r[:users],
@@ -146,7 +146,6 @@ module Locentra
                                                                                 sessions_repository: r[:sessions], credentials: r[:credentials],
                                                                                 audit: audit)
       uc[:list_members] = A::Organizations::ListMembers.new(uow: uow, organizations: r[:organizations])
-      uc[:get_organization] = A::Organizations::GetOrganization.new(uow: uow, organizations: r[:organizations])
       uc[:create_credential] = A::Integrations::CreateCredential.new(**common, credentials: r[:credentials], limits: s[:limits], audit: audit, ids: ids)
       uc[:revoke_credential] = A::Integrations::RevokeCredential.new(**common, credentials: r[:credentials], audit: audit)
       uc[:list_credentials] = A::Integrations::ListCredentials.new(uow: uow, credentials: r[:credentials])
@@ -175,9 +174,10 @@ module Locentra
       uc[:update_product_pricing] =
         A::Catalog::UpdateProductPricing.new(**common, catalog: r[:catalog], pricing_rules: s[:pricing_rules], audit: audit)
       uc[:set_kit_components] = A::Catalog::SetKitComponents.new(uow: uow, catalog: r[:catalog], audit: audit)
-      uc[:register_asset] = A::Catalog::RegisterAsset.new(**common, catalog: r[:catalog], limits: s[:limits], audit: audit, ids: ids)
-      uc[:adjust_stock] = A::Catalog::AdjustStock.new(**common, catalog: r[:catalog], availability: r[:availability], limits: s[:limits],
-                                                                audit: audit, ids: ids)
+      uc[:register_asset] = A::Catalog::RegisterAsset.new(**common, catalog: r[:catalog], organizations: r[:organizations], limits: s[:limits],
+                                                                    audit: audit, ids: ids)
+      uc[:adjust_stock] = A::Catalog::AdjustStock.new(**common, catalog: r[:catalog], organizations: r[:organizations], availability: r[:availability],
+                                                                limits: s[:limits], audit: audit, ids: ids)
       uc[:change_asset_status] = A::Catalog::ChangeAssetStatus.new(**common, catalog: r[:catalog], availability: r[:availability],
                                                                              allocator: s[:allocator], audit: audit, ids: ids)
       uc[:block_availability] =
@@ -331,7 +331,8 @@ module Locentra
                                                      **quote_deps)
       uc[:revise_quote] = A::Quotes::ReviseQuote.new(uow: uow, customers: r[:customers], organizations: r[:organizations], builder: builder,
                                                      hold_release: hold_release, **quote_deps)
-      uc[:send_quote] = A::Quotes::SendQuote.new(uow: uow, create_reservation: uc[:create_reservation], events: s[:events], **quote_deps)
+      uc[:send_quote] = A::Quotes::SendQuote.new(uow: uow, organizations: r[:organizations], create_reservation: uc[:create_reservation],
+                                                 events: s[:events], **quote_deps)
       uc[:approve_quote] = A::Quotes::ApproveQuote.new(uow: uow, expirer: expirer, events: s[:events], **quote_deps)
       uc[:reject_quote] = A::Quotes::RejectQuote.new(uow: uow, hold_release: hold_release, events: s[:events], **quote_deps)
       uc[:expire_quotes] = A::Quotes::ExpireQuotes.new(uow: uow, quotes: r[:quotes], expirer: expirer, clock: clock)
