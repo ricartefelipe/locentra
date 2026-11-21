@@ -117,6 +117,7 @@ class CommercialTermsBrowserTest < BrowserTest
     submit(action)
 
     assert_includes text_of("[data-flash]"), "Condição negociada cadastrada."
+    assert_operator @page.evaluate("document.querySelector('[data-flash]').getBoundingClientRect().top"), :>=, 0, "aviso visível na janela"
     assert_includes text_of("#condicoes table"), "Todos os produtos"
     assert_includes text_of("#condicoes table"), "5%"
   end

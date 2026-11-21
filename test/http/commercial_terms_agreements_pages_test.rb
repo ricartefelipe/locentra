@@ -76,7 +76,7 @@ class CommercialTermsAgreementsPagesTest < CommercialTermsHttpTest
     get customer_path
     post_form agreements_path, agreement_form
 
-    assert_equal "#{customer_path}#condicoes", last_response.location
+    assert_equal customer_path, last_response.location, "sem âncora, para que o aviso no topo fique visível"
     follow_redirect!
 
     assert_includes last_response.body, "Condição negociada cadastrada."
@@ -113,6 +113,8 @@ class CommercialTermsAgreementsPagesTest < CommercialTermsHttpTest
     assert_includes form, %(value="2026-04-01T00:00")
     refute_match(/<details open>\s*<summary>Nova condição negociada/, last_response.body)
     post_form end_path, { "motivo" => "Renegociação anual", "encerrar_em" => "2026-04-01T00:00" }
+
+    assert_equal customer_path, last_response.location
     follow_redirect!
 
     assert_includes last_response.body, "Encerramento agendado para 01/04/2026 00:00."

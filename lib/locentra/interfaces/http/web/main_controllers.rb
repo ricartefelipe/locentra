@@ -132,7 +132,8 @@ module Locentra
             end
           end
 
-          def agreements_path(ctx) = "/clientes/#{Domain::Identifier.parse(ctx.param(:id), "cliente")}#condicoes"
+          # Sem âncora: o aviso fica no topo da página e precisa estar visível depois do redirecionamento.
+          def agreements_path(ctx) = "/clientes/#{Domain::Identifier.parse(ctx.param(:id), "cliente")}"
         end
 
         class AuditController < Controller
