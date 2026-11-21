@@ -290,6 +290,21 @@ class CommercialTermsPagesTest < CommercialTermsHttpTest
     refute_includes get_ok("/cupons?situacao=scheduled"), "TEMPORADA"
   end
 
+  # A descrição aceita quebras de linha (também pela API e pela CLI). O campo é um textarea, que as
+  # preserva: salvar outro campo pela web não reescreve a descrição nem gera alteração falsa.
+  def test_description_line_breaks_survive_an_edit_from_the_web
+    coupon = create_coupon("LINHAS10", description: "Linha 1\r\nLinha 2", max_redemptions: 10)
+    page = get_ok("/cupons/#{coupon.id}")
+
+    assert_includes page, %(<textarea id="e-descricao" name="descricao" rows="2" maxlength="200">Linha 1\nLinha 2</textarea>)
+    post_form "/cupons/#{coupon.id}", edit_form(coupon_data(coupon.id)[:coupon], descricao: "Linha 1\r\nLinha 2", maximo_usos: "20")
+    follow_redirect!
+
+    assert_includes last_response.body, "Cupom atualizado."
+    assert_equal [{ "max_redemptions" => [10, 20] }], audit_events("coupon.updated").map { |event| event["details"]["changes"] }
+    assert_equal "Linha 1\nLinha 2", coupon_data(coupon.id)[:coupon].description
+  end
+
   def test_edit_with_optimistic_lock_null_operation_and_field_errors
     coupon = create_coupon("EDITAVEL", description: "Original", max_redemptions: 5, valid_until: t("2026-06-01T03:00:30Z"))
     page = get_ok("/cupons/#{coupon.id}")
@@ -307,7 +322,7 @@ class CommercialTermsPagesTest < CommercialTermsHttpTest
     form = block_with(last_response.body, %r{<details open>\s*<summary>Editar cupom</summary>.*?</details>}m)
 
     assert_includes form, %(id="erro-maximo_usos" role="alert">entre 1 e 1.000.000)
-    assert_includes form, %(value="Tentativa")
+    assert_includes form, %(>Tentativa</textarea>)
     assert_match(/id="e-maximo_usos"[^>]*value="0"[^>]*aria-invalid="true"/, form)
     post_form "/cupons/#{coupon.id}", edit_form(coupon, valido_ate: "2026-06-01T00:00", descricao: "Nova descrição", maximo_usos: "")
     follow_redirect!
@@ -322,7 +337,7 @@ class CommercialTermsPagesTest < CommercialTermsHttpTest
     stale = block_with(last_response.body, %r{<details open>\s*<summary>Editar cupom</summary>.*?</details>}m)
 
     assert_includes last_response.body, "o cupom foi alterado por outra operação; revise os valores atuais"
-    assert_includes stale, %(value="Nova descrição")
+    assert_includes stale, %(>Nova descrição</textarea>)
     assert_includes stale, %(<input type="hidden" name="versao" value="2">)
     refute_includes stale, "Edição concorrente"
     assert_equal "Nova descrição", coupon_data(coupon.id)[:coupon].description

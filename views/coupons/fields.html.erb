@@ -1,7 +1,7 @@
 <%# Campos editáveis do cupom. Locais: prefix (prefixo dos ids, para duas cópias na mesma página não colidirem). %>
 <% pre = @prefix.to_s %>
 <div class="full"><label for="<%= pre %>descricao">Descrição</label>
-  <input id="<%= pre %>descricao" name="descricao" maxlength="200" value="<%= @values["descricao"] %>"<%= invalid(@errors, "descricao") %>>
+  <textarea id="<%= pre %>descricao" name="descricao" rows="2" maxlength="200"<%= invalid(@errors, "descricao") %>><%= @values["descricao"] %></textarea>
   <%= field_errors(@errors, "descricao") %></div>
 <div><label for="<%= pre %>valido_de">Início da vigência</label>
   <input id="<%= pre %>valido_de" name="valido_de" type="datetime-local" value="<%= @values["valido_de"] %>"<%= invalid(@errors, "valido_de", describedby: "#{pre}ajuda-valido_de") %>>
