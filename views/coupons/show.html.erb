@@ -19,7 +19,7 @@
       <dt>Vigência</dt><dd><%= validity(coupon.valid_from, coupon.valid_until) %></dd>
       <dt>Usos ativos</dt>
       <dd><%= coupon.usage_text %><% if coupon.max_redemptions %>; restantes: <%= Locentra::Domain::Pricing.count_label(coupon.remaining) %><% end %>
-        <% if coupon.legacy_redemptions.to_i.positive? %><br><span class="muted">inclui <%= Locentra::Domain::Pricing.count_label(coupon.legacy_redemptions) %> usos registrados antes da versão 1.1.0</span><% end %></dd>
+        <% if coupon.legacy_redemptions.to_i.positive? %><br><span class="muted">inclui <%= Locentra::Domain::Pricing.count_label(coupon.legacy_redemptions) %> <%= coupon.legacy_redemptions == 1 ? "uso registrado" : "usos registrados" %> antes da versão 1.1.0</span><% end %></dd>
       <dt>Total de usos</dt><dd><%= Locentra::Domain::Pricing.count_label(coupon.total_redemptions.to_i) %> <span class="muted">(inclui os liberados por cancelamento ou expiração)</span></dd>
       <dt>Subtotal mínimo</dt><dd><%= coupon.min_subtotal_cents.to_i.positive? ? money(coupon.min_subtotal_cents) : "—" %></dd>
       <dt>Cadastrado por</dt><dd><%= @data[:created_by_name] || "—" %><% if coupon.created_at %> em <%= datetime(coupon.created_at) %><% end %></dd>

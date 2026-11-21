@@ -161,6 +161,22 @@ class CommercialTermsPagesTest < CommercialTermsHttpTest
     assert_includes released, "Liberado: reserva cancelada"
   end
 
+  # Cupom com usos registrados na 1.0.0 (contador legado): a nota acompanha o número e o cupom não pode
+  # ser excluído.
+  def test_legacy_uses_note_agrees_with_the_count_and_blocks_deletion
+    coupon = create_coupon("PRIMEIRA", max_redemptions: 1)
+    owner_query("UPDATE coupons SET redemptions = 1 WHERE id = $1", [coupon.id])
+    body = get_ok("/cupons/#{coupon.id}")
+
+    assert_includes body, "1 de 1; restantes: 0"
+    assert_includes body, "inclui 1 uso registrado antes da versão 1.1.0"
+    assert_includes body, ">Esgotado</span>"
+    refute_includes body, "Excluir cupom"
+    owner_query("UPDATE coupons SET redemptions = 3, max_redemptions = 5 WHERE id = $1", [coupon.id])
+
+    assert_includes get_ok("/cupons/#{coupon.id}"), "inclui 3 usos registrados antes da versão 1.1.0"
+  end
+
   def test_uses_are_paginated_with_their_own_offset
     coupon = create_coupon("MUITOS")
     26.times { reserve(@actor, @customer, @branch, rental, [line(@camera, 1)], mode: "request", coupon_code: "MUITOS") }
