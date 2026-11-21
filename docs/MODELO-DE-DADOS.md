@@ -98,6 +98,7 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 | `organizations` | sim/sim | id:uuid!, name:text!, slug:text!, legal_document:text, timezone:text!, status:text!, settings:jsonb!, created_at:timestamptz!, updated_at:timestamptz!, lock_version:integer! |
 | `queue_stats` | não | queue:text!, status:text!, size:integer!, oldest_age_seconds:numeric!, updated_at:timestamptz! |
 | `job_outcome_totals` | não | queue:text!, kind:text!, outcome:text!, total:bigint!, updated_at:timestamptz! |
+| `worker_outcome_totals` | não | family:text!, outcome:text!, total:bigint!, updated_at:timestamptz! |
 | `schema_migrations` | não | version:text!, name:text!, checksum:text!, applied_at:timestamptz! |
 
 ### Organização, acesso e assinatura
@@ -227,11 +228,26 @@ Configurações da organização e filiais (migration 0016; regras em
 | `outbox_events` | sim/sim | id:uuid!, organization_id:uuid!, event_type:text!, aggregate_type:text!, aggregate_id:uuid!, payload:jsonb!, correlation_id:text, occurred_at:timestamptz!, dispatched_at:timestamptz |
 | `jobs` | sim/sim | id:uuid!, organization_id:uuid, queue:text!, kind:text!, payload:jsonb!, priority:smallint!, run_at:timestamptz!, status:text!, attempts:integer!, max_attempts:integer!, lease_token:uuid, lease_expires_at:timestamptz, locked_by:text, last_error:text, unique_key:text, correlation_id:text, created_at:timestamptz!, updated_at:timestamptz!, finished_at:timestamptz |
 | `job_attempts` | sim/sim | id:uuid!, job_id:uuid!, organization_id:uuid, attempt:integer!, worker:text!, started_at:timestamptz!, finished_at:timestamptz, outcome:text, error:text |
-| `webhook_endpoints` | sim/sim | id:uuid!, organization_id:uuid!, url:text!, description:text, events:array!, secret_ciphertext:text!, active:boolean!, created_by:uuid, created_at:timestamptz!, disabled_at:timestamptz |
-| `webhook_deliveries` | sim/sim | id:uuid!, organization_id:uuid!, endpoint_id:uuid!, event_id:uuid!, event_type:text!, status:text!, attempts:integer!, last_status_code:integer, last_error:text, created_at:timestamptz!, last_attempt_at:timestamptz, delivered_at:timestamptz |
+| `webhook_endpoints` | sim/sim | id:uuid!, organization_id:uuid!, url:text!, description:text, events:array!, secret_ciphertext:text!, active:boolean!, created_by:uuid, created_at:timestamptz!, disabled_at:timestamptz, consecutive_failures:integer!, failing_since:timestamptz, paused_at:timestamptz |
+| `webhook_deliveries` | sim/sim | id:uuid!, organization_id:uuid!, endpoint_id:uuid!, event_id:uuid!, event_type:text!, status:text!, attempts:integer!, last_status_code:integer, last_error:text, created_at:timestamptz!, last_attempt_at:timestamptz, delivered_at:timestamptz, held_at:timestamptz |
 | `inbound_webhooks` | sim/sim | id:uuid!, organization_id:uuid!, provider:text!, event_id:text!, event_type:text!, payload:jsonb!, status:text!, received_at:timestamptz!, processed_at:timestamptz, error:text, provider_account_id:uuid |
 | `attachments` | sim/sim | id:uuid!, organization_id:uuid!, owner_type:text!, owner_id:uuid!, filename:text!, content_type:text!, byte_size:bigint!, sha256:text!, storage_key:text!, created_by:uuid, created_at:timestamptz!, retain_until:timestamptz, deleted_at:timestamptz |
 
+Circuito por endpoint (migration 0017): `consecutive_failures` e `failing_since` andam juntos
+(`webhook_endpoints_failure_streak_check`: há início da sequência se e somente se há falhas), `paused_at`
+marca a pausa automática e `webhook_deliveries.held_at` marca a entrega retida enquanto o endpoint está
+pausado (`webhook_deliveries_held_check`: nunca numa entrega `delivered`). `worker_outcome_totals` aceita
+somente a lista fechada de pares família/desfecho do CHECK.
+
 Retenção: tarefas `succeeded`/`cancelled` e suas tentativas são removidas 14 dias após a conclusão pelo
-housekeeping do worker (índice parcial `jobs_finished_idx`, migration 0014); tarefas `dead`, eventos da
-outbox, entregas de webhook e webhooks recebidos são mantidos (ver `RUNBOOKS.md`, seção 9).
+housekeeping do worker (índice parcial `jobs_finished_idx`, migration 0014); tarefas `dead` ficam. O
+histórico de integrações é removido por organização, no contexto do tenant, em lotes (migration 0017):
+primeiro as entregas `delivered`/`failed` não retidas sem tentativa desde o corte (`webhook_deliveries_finished_idx`)
+e todas as entregas antigas de endpoints desativados antes do corte; depois os eventos da outbox despachados
+antes do corte e sem nenhuma entrega restante (`outbox_events_dispatched_idx` e `webhook_deliveries_event_idx`,
+porque `webhook_deliveries.event_id` não tem FK e a entrega lê o evento); por fim os webhooks recebidos
+`processed`/`ignored` antes do corte (`inbound_webhooks_processed_idx`). Entregas retidas
+(`webhook_deliveries_held_idx`) e pendentes, eventos não despachados e recebidos `received`/`failed` ficam
+sempre. As janelas são `WEBHOOK_DELIVERY_RETENTION_DAYS` e `OUTBOX_RETENTION_DAYS` (padrão 30, mínimo 7) e
+`INBOUND_WEBHOOK_RETENTION_DAYS` (padrão 90, mínimo 45) (ver `RUNBOOKS.md`, seção 9, e
+[`modulos/worker-webhooks-retencao.md`](modulos/worker-webhooks-retencao.md)).

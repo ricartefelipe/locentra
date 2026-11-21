@@ -77,6 +77,7 @@ dados de outra organização.
 | `users`, `sessions`, `user_tokens`, `rate_limits` | A autenticação ocorre antes de existir contexto de organização. |
 | `plans` | Catálogo de planos da plataforma (somente leitura para a aplicação). |
 | `queue_stats`, `job_outcome_totals` | Agregados da fila e desfechos de tarefas por fila e tipo, sem dados de tenant nem identificadores. |
+| `worker_outcome_totals` | Totais por desfecho de webhooks, pausas de endpoints e retenção (família, desfecho e total), sem organização nem identificadores; a aplicação só lê e o worker grava. |
 | `organizations` | RLS própria: o tenant ativo, organizações das quais o usuário é membro ou cliente de portal, e leitura pelo worker. |
 | `jobs` sem organização | A aplicação pode **inserir** tarefas de e-mail de identidade sem organização, mas não lê-las. |
 
@@ -90,6 +91,11 @@ dados de outra organização.
 | `worker_read` | `organizations` | todas, somente para `locentra_worker` | Agendamento por organização (`platform.fanout`) e rotação de segredos. |
 | `worker_all` | `jobs`, `job_attempts`, `outbox_events` | todas as linhas, somente para `locentra_worker` | Reivindicação e despacho da fila; cada tarefa executa depois no contexto do próprio tenant. |
 | `webhook_account_lookup` | `payment_provider_accounts` | somente a conta indicada em `app.payment_account_id` | Webhook público do provedor: localizar a conta pelo identificador da rota antes de existir tenant; o token é conferido em seguida. |
+
+A retenção do histórico de integrações (entregas de webhook, eventos da outbox e webhooks recebidos) roda
+por organização, no contexto do tenant (`organization.retention`), e nenhuma política nova foi criada para
+ela: sem o contexto, a RLS esconderia as entregas e a verificação "evento sem entrega restante" valeria para
+todos os eventos.
 
 Não há cache compartilhado entre requisições nem exportação de dados nesta versão; se forem criados, devem
 ter chave ou escopo por organização como as demais tabelas.

@@ -174,22 +174,50 @@ tentativa permitida termina `dead`.
   webhook (novo endpoint) e as chaves de API no provedor, porque os valores antigos podem ter sido lidos.
 - Senhas dos papéis do banco: `ALTER ROLE ... PASSWORD` e atualização das URLs; reiniciar processos.
 
-## 9. Retenção de dados operacionais
+## 9. Retenção de dados operacionais — exercitado (testes de integração e de concorrência da retenção)
 
-- Tarefas concluídas (`succeeded`, `cancelled`) e suas tentativas (`job_attempts`) são removidas pelo
-  `platform.housekeeping` do worker 14 dias depois de concluídas, em lotes de 5.000 por minuto (índice
-  `jobs_finished_idx`). Tarefas `dead` ficam até serem reprocessadas.
+**Plataforma (sem tenant), `platform.housekeeping` a cada minuto:**
+
+- Tarefas concluídas (`succeeded`, `cancelled`) e suas tentativas (`job_attempts`) são removidas 14 dias
+  depois de concluídas, em lotes de 5.000 por minuto (índice `jobs_finished_idx`). Tarefas `dead` ficam até
+  serem reprocessadas. O total removido soma em `locentra_retention_purged_total{kind="jobs"}`.
 - Sessões e tokens de uso único vencidos há 30 dias e janelas de limite de taxa com mais de um dia também
   são removidos.
-- Eventos da outbox, entregas de webhook e webhooks recebidos são histórico do negócio (reenvio manual,
-  conciliação, auditoria) e não são removidos automaticamente; acompanhe o tamanho dessas tabelas no
-  backup e defina, se necessário, um arquivamento conforme a política de retenção da operação.
+
+**Histórico de integrações, por organização, `organization.retention` uma vez por hora** (agendada por
+`organization.tick` com chave única por organização e hora, prioridade 95, fila `default`):
+
+| Tabela | Sai | Fica sempre | Variável (padrão, mínimo) |
+|---|---|---|---|
+| `webhook_deliveries` | `delivered`/`failed` não retidas com a última tentativa antes do corte; todas as entregas de endpoint desativado antes do corte, criadas antes do corte | retidas, `pending`, recentes | `WEBHOOK_DELIVERY_RETENTION_DAYS` (30, 7) |
+| `outbox_events` | despachados antes do corte e sem nenhuma entrega restante | não despachados e com entrega restante | `OUTBOX_RETENTION_DAYS` (30, 7) |
+| `inbound_webhooks` | `processed`/`ignored` processados antes do corte | `received` e `failed` | `INBOUND_WEBHOOK_RETENTION_DAYS` (90, 45) |
+
+- O máximo de todas as janelas é 3650 dias. Valores abaixo do mínimo ou acima do máximo impedem a partida
+  dos processos (`... deve estar entre <mínimo> e 3650 dias (mínimo seguro: <mínimo>)`). O mínimo de 7 dias
+  supera a janela de retentativas das entregas (cerca de 3 h). O mínimo de 45 dias dos recebidos cobre os 30
+  dias da conciliação, 14 dias de reenvio do provedor (hipótese adotada) e 1 dia de margem: dentro da janela,
+  um reenvio do provedor continua sendo reconhecido como duplicado. Fora dela, é aceito e processado de
+  forma idempotente (confirmação repetida vira `ignored`).
+- Cada execução remove lotes de 1.000 linhas por tipo, cada lote numa transação curta, até 10 lotes por tipo,
+  na ordem entregas → outbox → recebidos (um evento só sai depois das suas entregas). A capacidade é de até
+  240 mil linhas por tabela, por organização, por dia; um acúmulo maior é absorvido nas horas seguintes.
+- A rotina roda no contexto de cada organização (a RLS esconde as entregas sem o contexto) e somente para
+  organizações **ativas**: o histórico das suspensas ou encerradas não é removido.
+- Para acompanhar: `locentra_retention_purged_total{kind="webhook_deliveries"|"outbox_events"|"inbound_webhooks"}`
+  cresce depois de cada hora com histórico vencido; um valor parado com tabelas crescendo indica a rotina sem
+  execução (confira tarefas `organization.retention` mortas na seção 5 e `locentra_jobs_queue_size{queue="default"}`).
+- Para guardar mais histórico (auditoria externa, por exemplo), aumente as variáveis e reinicie web e worker;
+  para guardar menos, respeite os mínimos. Uma janela maior não restaura o que já foi removido: use o backup.
 
 ## 10. Dimensionamento de conexões — procedimento escrito
 
 Conexões máximas = processos web × `DB_POOL_SIZE` (≥ `PUMA_THREADS`) + workers × (`WORKER_CONCURRENCY` +
 `WEBHOOK_CONCURRENCY` + 2) +
-execuções de CLI/migrations. Mantenha abaixo de `max_connections` com folga. Espera por conexão aparece em
+execuções de CLI/migrations. Com os padrões (`WORKER_CONCURRENCY=4` e `WEBHOOK_CONCURRENCY=4`, antes 1), cada
+worker usa 4 + 4 + 2 = 10 conexões. Mantenha abaixo de `max_connections` com folga. Manter
+`WEBHOOK_CONCURRENCY` acima de `WEBHOOK_MAX_PER_ORGANIZATION` (padrão 2) é o que deixa vagas para as demais
+organizações quando os destinos de uma delas estão lentos. Espera por conexão aparece em
 `locentra_db_pool_wait_seconds` e esgotamento em `locentra_db_pool_timeouts_total` (resposta 503).
 
 ## 11. Proxy reverso e IP do cliente — procedimento escrito
@@ -225,8 +253,8 @@ Os passos 1 a 4 foram exercitados na atualização da 1.0.0 para a 1.1.0 (regist
 construídas localmente; o download da imagem publicada no GHCR não foi exercitado, porque a publicação não
 está habilitada no repositório.
 
-Versões com verificação prévia ou restrição de retorno têm seção própria: migration 0015 na seção 13 e
-migration 0016 na seção 14.
+Versões com verificação prévia ou restrição de retorno têm seção própria: migration 0015 na seção 13,
+migration 0016 na seção 14 e migration 0017 na seção 16.
 
 ## 13. Atualização para a migration 0015 (condições comerciais) — exercitado em 21/11/2026
 
@@ -487,3 +515,83 @@ alterado manualmente para `{"hold_minutes": 2}`.
 | Reenvio do formulário com a versão anterior (outra aba) | 409 com "as configurações da organização foram alteradas por outra operação; revise os valores atuais" |
 | 14.3, consulta de retorno | nenhuma reserva com política diferente da atual |
 | Retorno à 1.1.0 e volta à versão nova | os dois sentidos `healthy` e `/health/ready` 200; parada final de web e worker com código 0 |
+
+## 15. Endpoint de webhook pausado — procedimento escrito (regras cobertas por testes de integração, HTTP e concorrência)
+
+Um endpoint é pausado automaticamente com pelo menos 20 falhas consecutivas e pelo menos 1 h desde a
+primeira (`docs/modulos/worker-webhooks-retencao.md`). Enquanto pausado, as entregas ficam retidas, sem
+chamada de rede e sem gastar tentativas; nada se perde.
+
+1. **Identificação:**
+   - tela **Integrações**: situação "Pausado", com o número de falhas, o início da sequência e as entregas
+     retidas; as entregas aparecem como "Retida (endpoint pausado)";
+   - **Auditoria**: "Endpoint de webhook pausado automaticamente" (`webhook.endpoint_paused`, ator Sistema), com
+     o último status HTTP e o último erro redigido (sem a URL);
+   - métricas: `locentra_webhook_endpoint_pauses_total` cresce e
+     `locentra_webhook_deliveries_total{outcome="held"}` passa a crescer.
+2. **Correção do destino:** confira com o cliente o serviço que recebe os webhooks (certificado, DNS, firewall,
+   resposta 2xx em até 15 s, validação da assinatura). O último status e o último erro da auditoria e da lista
+   de entregas indicam a causa. Se a URL mudou, crie um endpoint novo e desative o antigo: as entregas retidas
+   do antigo não migram e saem pela retenção depois da janela.
+3. **Reativação pela tela:** **Integrações → Reativar** (proprietário ou administrador). O aviso informa quantas
+   entregas retidas serão reenviadas em segundo plano; a auditoria registra "Endpoint de webhook reativado" com
+   a contagem. Não há reativação pela API nem pela CLI.
+4. **Acompanhamento:** `locentra_webhook_deliveries_total{outcome="released"}` sobe em lotes de 500 (uma tarefa
+   `webhooks.release_held` por lote, na fila `default`) e, em seguida, `outcome="delivered"`. As entregas
+   liberadas respeitam o limite por organização da fila `webhooks`, então um volume grande sai aos poucos sem
+   ocupar as vagas das demais organizações (`locentra_jobs_oldest_age_seconds{queue="webhooks"}`). Se o destino
+   voltar a falhar, o endpoint é pausado de novo depois de 20 falhas e 1 h, e a liberação restante para.
+
+## 16. Atualização para a migration 0017 (webhooks por organização e retenção) — procedimento escrito (atualização coberta por `test/repository/migration_0017_test.rb`)
+
+A migration `0017_webhooks_por_organizacao_e_retencao.sql` adiciona colunas anuláveis ou com DEFAULT em
+`webhook_endpoints` e `webhook_deliveries`, sete índices (seis parciais ou simples nas tabelas existentes e a
+chave da tabela nova) e a tabela `worker_outcome_totals`. Não há verificação prévia: nenhum dado existente
+impede a migration.
+
+### 16.1 Aplicação com a 1.2.0 em execução
+
+1. Faça o backup (seção 3).
+2. Aplique com tempo máximo de espera por lock, para que a migration falhe em vez de enfileirar as consultas
+   da aplicação atrás dela:
+   `docker run --rm -e APP_ENV=production -e MIGRATION_DATABASE_URL=... -e PGOPTIONS='-c lock_timeout=5s' ghcr.io/<repositório>:X.Y.Z ruby bin/locentra-admin db:migrate`.
+   Os índices são criados sem `CONCURRENTLY` (o Migrator aplica cada migration numa transação) e a
+   construção percorre `jobs`, `outbox_events`, `webhook_deliveries` e `inbound_webhooks`. Com tabelas
+   grandes, aplique fora do pico. Se o `lock_timeout` estourar, a transação é desfeita por inteiro; repita.
+3. A 1.2.0 continua funcionando com o esquema novo: insere endpoints e entregas sem as colunas novas e ignora a
+   pausa e o limite por organização.
+4. Substitua web e worker pela versão nova (seção 12, passo 3). Confira no log `worker.started` os campos
+   `lanes` (`webhooks` com 4 threads, se o padrão não foi alterado) e `webhook_max_per_organization`.
+   Revise o dimensionamento de conexões (seção 10), porque o padrão de `WEBHOOK_CONCURRENCY` subiu de 1 para 4.
+
+### 16.2 Conferência dos índices
+
+Com o proprietário ou o papel `locentra_backup`:
+
+```sql
+SELECT indexname FROM pg_indexes
+ WHERE schemaname = 'public'
+   AND indexname IN ('jobs_ready_org_idx', 'outbox_events_dispatched_idx', 'webhook_deliveries_event_idx',
+                     'webhook_deliveries_finished_idx', 'webhook_deliveries_held_idx', 'inbound_webhooks_processed_idx',
+                     'worker_outcome_totals_pkey')
+ ORDER BY indexname;
+```
+
+São esperadas 7 linhas. Na primeira hora depois da troca, a retenção remove o histórico vencido (seção 9):
+acompanhe `locentra_retention_purged_total`.
+
+### 16.3 Retorno à versão 1.2.0
+
+O retorno não exige mudança no banco: a 1.2.0 ignora as colunas, os índices e a tabela nova. Consequências:
+
+- endpoints pausados continuam com `paused_at`, mas a 1.2.0 não lê a coluna e volta a entregar normalmente;
+- entregas **retidas** continuam retidas e sem tarefa: a 1.2.0 não as reenvia. Ao voltar à versão nova,
+  reative o endpoint pela tela (seção 15) para liberá-las;
+- a 1.2.0 não faz retenção do histórico de integrações nem atualiza `worker_outcome_totals`.
+
+Antes de retornar, liste as entregas retidas por endpoint (com contexto de cada organização ou pelo papel
+`locentra_backup`):
+
+```sql
+SELECT organization_id, endpoint_id, count(*) FROM webhook_deliveries WHERE held_at IS NOT NULL GROUP BY 1, 2;
+```
