@@ -116,6 +116,29 @@ class CommercialTermsCouponsTest < DatabaseTest
     assert_equal 1, owner_query("SELECT count(*) AS n FROM reservations").first["n"].to_i, "reservas recusadas são desfeitas por inteiro"
   end
 
+  # A vigência editada é gravada: a precificação das reservas seguintes e a consulta leem o banco.
+  def test_edited_validity_is_stored_and_applies_to_the_next_reservations
+    coupon = create_coupon("VIGENCIA", valid_until: @clock.now + 3_600)
+    @clock.advance(3_600)
+
+    assert_equal ["cupom expirado"], coupon_error(coupon_code: "VIGENCIA")
+    uc(:update_coupon).call(@actor, coupon.id, { valid_until: @clock.now + 7_200 })
+
+    assert_equal 9_000, book(coupon_code: "VIGENCIA").total.cents, "fim estendido"
+    uc(:update_coupon).call(@actor, coupon.id, { valid_from: @clock.now + 60, valid_until: @clock.now + 120 })
+    stored = coupon_data(coupon.id)[:coupon]
+
+    assert_equal [@clock.now + 60, @clock.now + 120, @clock.now], [stored.valid_from, stored.valid_until, stored.updated_at]
+    assert_equal ["cupom ainda não está vigente"], coupon_error(coupon_code: "VIGENCIA", day: 12)
+    @clock.advance(120)
+
+    assert_equal ["cupom expirado"], coupon_error(coupon_code: "VIGENCIA", day: 12), "fim encurtado"
+    uc(:update_coupon).call(@actor, coupon.id, { valid_from: nil, valid_until: nil })
+
+    assert_equal([nil, nil], coupon_data(coupon.id)[:coupon].then { |c| [c.valid_from, c.valid_until] })
+    assert_equal 9_000, book(coupon_code: "VIGENCIA", day: 12).total.cents, "sem prazo"
+  end
+
   def test_coupon_edit_validates_active_uses_and_uses_optimistic_control
     coupon = create_coupon("EDITAVEL", description: "Antiga", max_redemptions: 5)
     2.times { |i| book(coupon_code: "EDITAVEL", day: 10 + i) }

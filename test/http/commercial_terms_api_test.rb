@@ -94,10 +94,18 @@ class CommercialTermsApiTest < CommercialTermsApiTestCase
     patch!(200, path, { "description" => "Nova descrição", "valid_from" => "2026-04-01T03:00:00Z", "lock_version" => 2 })
 
     assert_equal ["Nova descrição", "2026-04-01T03:00:00Z", "scheduled", 3], json_body.values_at("description", "valid_from", "status", "lock_version")
+    get!(200, path)
+
+    assert_equal ["2026-04-01T03:00:00Z", nil, "scheduled", 3], json_body.values_at("valid_from", "valid_until", "status", "lock_version"),
+                 "a consulta lê a vigência gravada"
+    patch!(200, path, { "valid_from" => nil, "valid_until" => "2026-05-01T03:00:00Z" })
+    get!(200, path)
+
+    assert_equal [nil, "2026-05-01T03:00:00Z", "active", 4], json_body.values_at("valid_from", "valid_until", "status", "lock_version")
     patch!(200, path, { "description" => "Repetida" }, key: "patch-chave-0001")
     patch!(200, path, { "description" => "Repetida" }, key: "patch-chave-0001")
 
-    assert_equal ["true", 4], [last_response.headers["idempotent-replayed"], json_body["lock_version"]]
+    assert_equal ["true", 5], [last_response.headers["idempotent-replayed"], json_body["lock_version"]]
     patch!(409, path, { "description" => "Outra" }, key: "patch-chave-0001")
 
     assert_equal "idempotency_key_reused", error_code

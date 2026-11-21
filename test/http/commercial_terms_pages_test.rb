@@ -268,6 +268,26 @@ class CommercialTermsPagesTest < CommercialTermsHttpTest
     assert_nil coupon_data(coupon.id)[:coupon].description
   end
 
+  # Vigência informada nos campos do formulário (fuso da organização), no cadastro e na edição, gravada e
+  # exibida na página do cupom e na lista filtrada por situação.
+  def test_validity_fields_are_stored_on_creation_and_edition
+    post_form "/cupons", coupon_form(codigo: "TEMPORADA", valido_de: "2026-04-01T00:00", valido_ate: "2026-05-01T00:00")
+    follow_redirect!
+
+    assert_includes last_response.body, "desde 01/04/2026 00:00 até 01/05/2026 00:00"
+    coupon = coupon_data("TEMPORADA")[:coupon]
+
+    assert_equal [t("2026-04-01T03:00:00Z"), t("2026-05-01T03:00:00Z")], [coupon.valid_from, coupon.valid_until]
+    assert_includes get_ok("/cupons?situacao=scheduled"), "TEMPORADA"
+    post_form "/cupons/#{coupon.id}", edit_form(coupon, valido_de: "2026-03-01T00:00", valido_ate: "2026-06-01T00:00")
+    follow_redirect!
+
+    assert_includes last_response.body, "desde 01/03/2026 00:00 até 01/06/2026 00:00"
+    assert_equal([t("2026-03-01T03:00:00Z"), t("2026-06-01T03:00:00Z")], coupon_data(coupon.id)[:coupon].then { |c| [c.valid_from, c.valid_until] })
+    assert_includes get_ok("/cupons?situacao=active"), "TEMPORADA"
+    refute_includes get_ok("/cupons?situacao=scheduled"), "TEMPORADA"
+  end
+
   def test_edit_with_optimistic_lock_null_operation_and_field_errors
     coupon = create_coupon("EDITAVEL", description: "Original", max_redemptions: 5, valid_until: t("2026-06-01T03:00:30Z"))
     page = get_ok("/cupons/#{coupon.id}")
