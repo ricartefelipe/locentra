@@ -30,9 +30,11 @@ dados de outra organização.
   duas organizações, com cadastros independentes. O cupom de uma organização responde "cupom inexistente" na
   outra, e um identificador de tarifa, cupom ou condição de outra organização responde "não encontrado".
 - **Privilégios de coluna:** além da RLS, `locentra_app` só atualiza as colunas editáveis de `coupons`
-  (descrição, vigência, máximo de usos, subtotal mínimo, ativação e controle de versão) e de
-  `additional_fees` (nome, descrição, valor padrão, ativação e controle de versão), e somente as colunas de
-  encerramento de `customer_price_agreements`. `coupon_redemptions` é somente inserção. `locentra_worker`
+  (descrição, vigência, máximo de usos, subtotal mínimo, ativação e controle de versão) e o contador legado
+  `coupons.redemptions`, que continua atualizável apenas para o retorno à 1.0.0 (`RUNBOOKS.md` §13.4): o
+  congelamento desse contador é regra da aplicação, porque a 1.1.0 não grava a coluna. Também atualiza as
+  colunas editáveis de `additional_fees` (nome, descrição, valor padrão, ativação e controle de versão) e
+  somente as colunas de encerramento de `customer_price_agreements`. `coupon_redemptions` é somente inserção. `locentra_worker`
   não tem `UPDATE` nem `DELETE` em nenhuma dessas tabelas: o worker não altera condições comerciais, porque a
   liberação de um uso de cupom não grava nada.
 - **`NO FORCE` pontual na migration 0015:** com a RLS forçada, nem o proprietário das tabelas enxerga linhas

@@ -68,7 +68,7 @@ erDiagram
 | Agendamento único por janela | índice único `jobs (unique_key)` |
 | Idempotência de API | `UNIQUE (organization_id, scope, key)` |
 | Código de cupom e de tarifa único por organização | `UNIQUE (organization_id, code)` em `coupons` e `additional_fees`, com `CHECK` do formato |
-| Código, tipo e valor do cupom e código da tarifa não mudam | `UPDATE` concedido a `locentra_app` somente nas colunas editáveis; `DELETE` de tarifa revogado |
+| Código, tipo e valor do cupom e código da tarifa não mudam | `UPDATE` concedido a `locentra_app` somente nas colunas editáveis e, em `coupons`, também no contador legado `redemptions` (mantido apenas para o retorno à 1.0.0; a 1.1.0 não grava a coluna, e o congelamento é regra da aplicação); `DELETE` de tarifa revogado |
 | No máximo um uso de cupom por reserva; uso imutável | `UNIQUE (organization_id, reservation_id)` em `coupon_redemptions`; `UPDATE` e `DELETE` revogados |
 | Usos ativos do cupom ≤ `max_redemptions` | Gatilho `coupon_redemptions_enforce_limit` (`BEFORE INSERT`): trava o cupom e conta os usos ativos no instante do uso (bloqueio vencido conta durante a carência de 5 minutos); a aplicação faz a mesma verificação sob `FOR UPDATE` |
 | Vigência do cupom com fim posterior ao início e máximo de usos até 1.000.000 | Gatilho `coupons_enforce_limits` (`BEFORE INSERT OR UPDATE`): verifica a inserção e as colunas alteradas, para que cupons da 1.0.0 fora desses limites continuem desativáveis e reativáveis |
