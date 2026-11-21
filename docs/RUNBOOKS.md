@@ -552,16 +552,63 @@ impede a migration.
 
 ### 16.1 Aplicação com a 1.2.0 em execução
 
-1. Faça o backup (seção 3).
-2. Aplique com tempo máximo de espera por lock, para que a migration falhe em vez de enfileirar as consultas
-   da aplicação atrás dela:
+A migration roda numa única transação, e os locks ficam até o commit:
+
+- `webhook_endpoints` e `webhook_deliveries` em `ACCESS EXCLUSIVE` do início ao fim (validação dos CHECKs
+  novos e construção dos índices das entregas, com leitura completa de `webhook_deliveries`): a tela
+  **Integrações**, o reenvio, o despacho de eventos e as entregas de webhook esperam;
+- `jobs`, `outbox_events` e `inbound_webhooks` em `SHARE` a partir do respectivo `CREATE INDEX`: inserções e
+  atualizações esperam, ou seja, o enfileiramento e a reivindicação de tarefas de todas as filas, as
+  requisições que publicam eventos e o recebimento de webhooks dos provedores.
+
+O `lock_timeout` limita somente a espera da migration para obter cada lock; não encurta o tempo em que ela
+segura os locks. A duração cresce linearmente com o tamanho das tabelas, que estão no maior tamanho
+justamente nesta atualização (a retenção só começa com a versão nova). Como referência, com 1 milhão de
+entregas, 1 milhão de eventos da outbox e 500 mil tarefas, a migration levou cerca de 5 s em PostgreSQL 18, e
+o enfileiramento da 1.2.0 e a tela de integrações esperaram praticamente esse tempo inteiro.
+
+1. Faça o backup (seção 3) e estime o volume, com o proprietário ou o papel `locentra_backup`:
+
+   ```sql
+   SELECT relname, pg_size_pretty(pg_total_relation_size(oid)) AS tamanho, reltuples::bigint AS linhas_estimadas
+     FROM pg_class
+    WHERE relnamespace = 'public'::regnamespace
+      AND relname IN ('jobs', 'outbox_events', 'webhook_deliveries', 'webhook_endpoints', 'inbound_webhooks')
+    ORDER BY pg_total_relation_size(oid) DESC;
+   ```
+
+   `linhas_estimadas` igual a -1 indica tabela ainda não analisada; nesse caso, use `count(*)`. Se alguma
+   tabela passar de 1 milhão de linhas ou a soma passar de 1 GB, faça o passo 2 ou aplique a
+   migration em janela de manutenção, com web e worker parados. Abaixo disso, aplique fora do pico.
+2. **Opcional, para tabelas grandes:** construa antes, sem bloquear a aplicação, os quatro índices que não
+   dependem das colunas novas. Use uma sessão `psql` com o papel proprietário (`MIGRATION_DATABASE_URL`),
+   um comando por vez e fora de transação (`CONCURRENTLY` não roda dentro de `BEGIN`):
+
+   ```sql
+   CREATE INDEX CONCURRENTLY IF NOT EXISTS jobs_ready_org_idx ON jobs (queue, organization_id, priority, run_at) WHERE status = 'pending';
+   CREATE INDEX CONCURRENTLY IF NOT EXISTS outbox_events_dispatched_idx ON outbox_events (organization_id, dispatched_at) WHERE dispatched_at IS NOT NULL;
+   CREATE INDEX CONCURRENTLY IF NOT EXISTS webhook_deliveries_event_idx ON webhook_deliveries (organization_id, event_id);
+   CREATE INDEX CONCURRENTLY IF NOT EXISTS inbound_webhooks_processed_idx ON inbound_webhooks (organization_id, processed_at) WHERE status IN ('processed', 'ignored');
+   ```
+
+   A 0017 cria esses índices com `IF NOT EXISTS` e os deixa por último: com eles prontos, `jobs`,
+   `outbox_events` e `inbound_webhooks` ficam travadas só por um instante antes do commit, e o bloqueio
+   restante se limita às tabelas de webhooks. Um `CONCURRENTLY` interrompido deixa o índice inválido, e o
+   `IF NOT EXISTS` da migration o aceitaria como pronto. Antes de seguir, confira que a consulta abaixo não
+   devolve linhas; se devolver, remova o índice com `DROP INDEX CONCURRENTLY <nome>;` e construa de novo:
+
+   ```sql
+   SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+    WHERE NOT i.indisvalid AND c.relname IN ('jobs_ready_org_idx', 'outbox_events_dispatched_idx',
+                                             'webhook_deliveries_event_idx', 'inbound_webhooks_processed_idx');
+   ```
+3. Aplique com tempo máximo de espera por lock, para que a migration desista se não conseguir os locks em
+   vez de ficar na fila e bloquear também quem chegar depois dela:
    `docker run --rm -e APP_ENV=production -e MIGRATION_DATABASE_URL=... -e PGOPTIONS='-c lock_timeout=5s' ghcr.io/<repositório>:X.Y.Z ruby bin/locentra-admin db:migrate`.
-   Os índices são criados sem `CONCURRENTLY` (o Migrator aplica cada migration numa transação) e a
-   construção percorre `jobs`, `outbox_events`, `webhook_deliveries` e `inbound_webhooks`. Com tabelas
-   grandes, aplique fora do pico. Se o `lock_timeout` estourar, a transação é desfeita por inteiro; repita.
-3. A 1.2.0 continua funcionando com o esquema novo: insere endpoints e entregas sem as colunas novas e ignora a
+   Se o `lock_timeout` estourar, a transação é desfeita por inteiro (os índices do passo 2 continuam); repita.
+4. A 1.2.0 continua funcionando com o esquema novo: insere endpoints e entregas sem as colunas novas e ignora a
    pausa e o limite por organização.
-4. Substitua web e worker pela versão nova (seção 12, passo 3). Confira no log `worker.started` os campos
+5. Substitua web e worker pela versão nova (seção 12, passo 3). Confira no log `worker.started` os campos
    `lanes` (`webhooks` com 4 threads, se o padrão não foi alterado) e `webhook_max_per_organization`.
    Revise o dimensionamento de conexões (seção 10), porque o padrão de `WEBHOOK_CONCURRENCY` subiu de 1 para 4.
 
@@ -570,15 +617,15 @@ impede a migration.
 Com o proprietário ou o papel `locentra_backup`:
 
 ```sql
-SELECT indexname FROM pg_indexes
- WHERE schemaname = 'public'
-   AND indexname IN ('jobs_ready_org_idx', 'outbox_events_dispatched_idx', 'webhook_deliveries_event_idx',
+SELECT c.relname, i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+ WHERE c.relnamespace = 'public'::regnamespace
+   AND c.relname IN ('jobs_ready_org_idx', 'outbox_events_dispatched_idx', 'webhook_deliveries_event_idx',
                      'webhook_deliveries_finished_idx', 'webhook_deliveries_held_idx', 'inbound_webhooks_processed_idx',
                      'worker_outcome_totals_pkey')
- ORDER BY indexname;
+ ORDER BY c.relname;
 ```
 
-São esperadas 7 linhas. Na primeira hora depois da troca, a retenção remove o histórico vencido (seção 9):
+São esperadas 7 linhas, todas com `indisvalid` verdadeiro. Na primeira hora depois da troca, a retenção remove o histórico vencido (seção 9):
 acompanhe `locentra_retention_purged_total`.
 
 ### 16.3 Retorno à versão 1.2.0

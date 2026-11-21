@@ -26,7 +26,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 - **Migration 0017:** circuito por endpoint, entregas retidas, índice da reivindicação por organização,
   índices da retenção, tabela `worker_outcome_totals` e gatilho que encerra a retenção quando a entrega volta
   a pendente ou é concluída, compatível com a 1.2.0 em execução e no retorno, inclusive no reenvio manual de
-  uma entrega retida (`docs/RUNBOOKS.md`, seção 16).
+  uma entrega retida. Os quatro índices que não dependem das colunas novas podem ser construídos antes com
+  `CONCURRENTLY`, e o runbook descreve os locks mantidos até o commit e como estimar a duração
+  (`docs/RUNBOOKS.md`, seção 16).
 
 ### Alterado
 

@@ -220,7 +220,7 @@ alteram o status; o gatilho `webhook_deliveries_release_hold` limpa `held_at` ne
 | `test/unit/application/retention_test.rb` | Ordem dos passos, lote incompleto, teto de lotes, corte por tipo, totais e transação por lote |
 | `test/unit/config_test.rb` | Padrões e mínimos das variáveis novas |
 | `test/unit/application/observability_test.rb`, `test/unit/infrastructure/metrics_test.rb` | Métricas novas, rótulos e HELP |
-| `test/repository/migration_0017_test.rb` | Atualização da 1.2.0: colunas, índices, CHECKs, RLS, inserções no formato antigo e reenvio e tentativas da 1.2.0 sobre entregas retidas |
+| `test/repository/migration_0017_test.rb` | Atualização da 1.2.0: colunas, índices, CHECKs, RLS, inserções no formato antigo, reenvio e tentativas da 1.2.0 sobre entregas retidas e índices construídos antes com `CONCURRENTLY` |
 | `test/repository/observability_tables_test.rb` | `worker_outcome_totals` sem dados de tenant, só gravável pelo worker |
 | `test/integration/webhook_fairness_test.rb` | Ordem justa, limite, lease vencido com fencing, tarefas sem organização, fila `default` sem limite, prioridade entre filas, `run_at` futuro e tarefas esgotadas |
 | `test/integration/webhook_circuit_test.rb` | Pausa só depois de 1 h, auditoria, totais, retenção, despacho retido, sucesso que zera, regras e lotes da reativação, reenvio retido de novo |

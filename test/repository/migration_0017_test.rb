@@ -147,6 +147,25 @@ class Migration0017Test < Minitest::Test
     assert_legacy_inserts(org, data)
   end
 
+  # Índices que não dependem de colunas novas, construídos antes com CONCURRENTLY (docs/RUNBOOKS.md §16.1)
+  # com os comandos documentados: a migration os aproveita e cria só os demais.
+  PREBUILT_INDEXES = <<~SQL.lines.map(&:strip).freeze
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS jobs_ready_org_idx ON jobs (queue, organization_id, priority, run_at) WHERE status = 'pending'
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS outbox_events_dispatched_idx ON outbox_events (organization_id, dispatched_at) WHERE dispatched_at IS NOT NULL
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS webhook_deliveries_event_idx ON webhook_deliveries (organization_id, event_id)
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS inbound_webhooks_processed_idx ON inbound_webhooks (organization_id, processed_at) WHERE status IN ('processed', 'ignored')
+  SQL
+
+  def test_upgrade_accepts_indexes_built_beforehand_concurrently
+    legacy_data
+    PREBUILT_INDEXES.each { |sql| TestDatabase.owner_connection.exec(sql) }
+
+    assert_equal ["0017"], migrator(MIGRATIONS).migrate
+    assert_new_indexes
+    runbook = File.read(File.expand_path("../../docs/RUNBOOKS.md", __dir__))
+    PREBUILT_INDEXES.each { |sql| assert_includes runbook, "#{sql};" }
+  end
+
   # SQL da 1.2.0 (Redeliver e Deliver) sobre entregas retidas pela versão nova, como no retorno à 1.2.0 ou
   # num worker da 1.2.0 durante a implantação gradual: o reenvio e a entrega concluída liberam a retenção
   # em vez de violar o CHECK; a falha mantém a entrega retida para a versão nova.

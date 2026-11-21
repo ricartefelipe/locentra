@@ -23,8 +23,13 @@
 -- Compatibilidade com a 1.2.0 (implantação gradual e retorno): somente colunas com DEFAULT ou anuláveis,
 -- índices, uma tabela nova e um gatilho. A 1.2.0 continua inserindo endpoints e entregas sem as colunas
 -- novas e ignora pausa e limite por organização; o reenvio manual e as tentativas da 1.2.0 sobre uma
--- entrega retida não violam o CHECK, porque o gatilho limpa held_at. Sem CONCURRENTLY: o Migrator aplica cada migration numa
--- transação; a construção dos índices percorre as tabelas (ver docs/RUNBOOKS.md, lock_timeout).
+-- entrega retida não violam o CHECK, porque o gatilho limpa held_at.
+--
+-- Locks: o Migrator aplica cada migration numa transação, então não há CONCURRENTLY aqui. Do início ao
+-- commit, webhook_endpoints e webhook_deliveries ficam em ACCESS EXCLUSIVE (validação dos CHECKs e
+-- construção dos índices de entregas) e jobs, outbox_events e inbound_webhooks ficam em SHARE a partir do
+-- respectivo CREATE INDEX. Os índices dessas três tabelas e webhook_deliveries_event_idx podem ser
+-- construídos antes com CONCURRENTLY (docs/RUNBOOKS.md §16.1).
 
 -- Circuito por endpoint
 ALTER TABLE webhook_endpoints
@@ -53,16 +58,10 @@ CREATE TRIGGER webhook_deliveries_release_hold BEFORE UPDATE OF status ON webhoo
   FOR EACH ROW WHEN (NEW.held_at IS NOT NULL AND NEW.status IN ('pending', 'delivered'))
   EXECUTE FUNCTION app_webhook_delivery_release_hold();
 
--- Reivindicação por organização (cabeça de cada organização em O(log n))
-CREATE INDEX jobs_ready_org_idx ON jobs (queue, organization_id, priority, run_at) WHERE status = 'pending';
-
--- Retenção e referência evento -> entregas
-CREATE INDEX outbox_events_dispatched_idx ON outbox_events (organization_id, dispatched_at) WHERE dispatched_at IS NOT NULL;
-CREATE INDEX webhook_deliveries_event_idx ON webhook_deliveries (organization_id, event_id);
+-- Retenção das entregas (dependem de held_at; a tabela já está travada pelo ALTER TABLE acima)
 CREATE INDEX webhook_deliveries_finished_idx ON webhook_deliveries (organization_id, last_attempt_at)
   WHERE status IN ('delivered', 'failed') AND held_at IS NULL;
 CREATE INDEX webhook_deliveries_held_idx ON webhook_deliveries (organization_id, endpoint_id, created_at) WHERE held_at IS NOT NULL;
-CREATE INDEX inbound_webhooks_processed_idx ON inbound_webhooks (organization_id, processed_at) WHERE status IN ('processed', 'ignored');
 
 -- Totais globais por desfecho (sem dados de tenant), gravados pelo worker e lidos pela web
 CREATE TABLE worker_outcome_totals (
@@ -78,3 +77,13 @@ CREATE TABLE worker_outcome_totals (
 );
 REVOKE INSERT, UPDATE, DELETE ON worker_outcome_totals FROM locentra_app;
 REVOKE DELETE ON worker_outcome_totals FROM locentra_worker;
+
+-- Índices que não dependem das colunas novas, por último e com IF NOT EXISTS, porque podem ser construídos
+-- antes com CONCURRENTLY. Mesmo quando já existem, o comando trava a tabela em modo SHARE até o commit; no
+-- fim da transação, essa espera é curta.
+-- Reivindicação por organização (cabeça de cada organização em O(log n))
+CREATE INDEX IF NOT EXISTS jobs_ready_org_idx ON jobs (queue, organization_id, priority, run_at) WHERE status = 'pending';
+-- Retenção e referência evento -> entregas
+CREATE INDEX IF NOT EXISTS outbox_events_dispatched_idx ON outbox_events (organization_id, dispatched_at) WHERE dispatched_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS webhook_deliveries_event_idx ON webhook_deliveries (organization_id, event_id);
+CREATE INDEX IF NOT EXISTS inbound_webhooks_processed_idx ON inbound_webhooks (organization_id, processed_at) WHERE status IN ('processed', 'ignored');
