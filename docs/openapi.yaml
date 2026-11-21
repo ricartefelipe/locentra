@@ -736,7 +736,40 @@ components:
               sku: { type: string }
               quantity: { type: integer }
               pricing: { $ref: "#/components/schemas/ReservationItemPricing" }
+        allocations:
+          type: object
+          description: Alocações ativas da reserva (presente no detalhe)
+          properties:
+            assets:
+              type: array
+              description: Ativos serializados alocados
+              items:
+                type: object
+                properties:
+                  asset_id: { type: string, format: uuid }
+                  tag: { type: string, description: Patrimônio do ativo }
+            stock:
+              type: array
+              description: Quantidades alocadas de produtos controlados por quantidade
+              items:
+                type: object
+                properties:
+                  product_id: { type: string, format: uuid }
+                  quantity: { type: integer }
         pricing: { $ref: "#/components/schemas/ReservationPricing" }
+        adjustments:
+          type: array
+          description: Ajustes de valor registrados depois da criação, em ordem cronológica (presente no detalhe)
+          items: { $ref: "#/components/schemas/ReservationAdjustment" }
+    ReservationAdjustment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reservation_item_id: { type: [string, "null"], format: uuid, description: Item ao qual o ajuste se refere; nulo quando vale para a reserva }
+        kind: { type: string, enum: [extension, amendment, late_fee, damage, missing, cancellation_fee] }
+        amount_cents: { type: integer, description: Valor do ajuste; negativo reduz o total }
+        details: { type: object, description: Dados do ajuste conforme o tipo }
+        created_at: { type: string, description: "Instante do registro em UTC, no formato `2026-03-02 12:00:00 +0000` (não ISO 8601)" }
     ReservationItemPricing:
       type: object
       description: >-
@@ -750,7 +783,12 @@ components:
         tracking: { type: string, enum: [serialized, bulk, kit] }
         description: { type: string, description: "Unidades cobradas, por exemplo \"2 diárias (24 h)\"" }
         table: { type: object, description: Tabela de preços do produto no instante da precificação }
-        units: { type: object, description: "Unidades cobradas por tipo (horas, diárias, semanas)" }
+        units:
+          type: object
+          description: >-
+            Unidades cobradas, conforme a tabela: `minutes` (minutos, na cobrança por hora), `days` (diárias ou dias de
+            calendário), `weeks` (semanas) e `rest_days` (dias além das semanas completas, quando a tabela tem diária e
+            semanal)
         quantity: { type: integer }
         unit_amount_cents: { type: integer }
         gross_cents: { type: integer }

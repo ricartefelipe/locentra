@@ -222,14 +222,23 @@ class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
     assert_empty owner_query("SELECT id FROM reservations")
   end
 
-  # As chaves de preço do detalhe da reserva estão no OpenAPI.
-  def assert_documented_keys(detail)
-    schemas = YAML.safe_load_file(File.expand_path("../../docs/openapi.yaml", __dir__)).dig("components", "schemas")
-    item = schemas.dig("Reservation", "properties", "items", "items", "properties")
+  def openapi_schemas = YAML.safe_load_file(File.expand_path("../../docs/openapi.yaml", __dir__)).dig("components", "schemas")
 
+  # As chaves do detalhe da reserva (primeiro nível, itens, alocações e preços) estão no OpenAPI.
+  def assert_documented_keys(detail)
+    schemas = openapi_schemas
+    reservation = schemas.dig("Reservation", "properties")
+    allocations = reservation.dig("allocations", "properties")
+
+    assert_empty detail.keys - reservation.keys
+    assert_empty detail["items"].first.keys - reservation.dig("items", "items", "properties").keys
+    assert_empty detail["allocations"].keys - allocations.keys
+    assert_empty detail["allocations"]["assets"].first.keys - allocations.dig("assets", "items", "properties").keys
     assert_empty detail["pricing"].keys - schemas.dig("ReservationPricing", "properties").keys
-    assert_empty detail["items"].first.keys - item.keys
     assert_empty detail["items"].first["pricing"].keys - schemas.dig("ReservationItemPricing", "properties").keys
+    units = schemas.dig("ReservationItemPricing", "properties", "units", "description")
+
+    detail["items"].first["pricing"]["units"].each_key { |unit| assert_includes units, "`#{unit}`" }
   end
 
   def test_reservation_detail_brings_coupon_agreements_and_fees
@@ -251,8 +260,14 @@ class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
     assert_equal [agreement.id, 800, 7200], json_body["items"].first["pricing"].values_at("negotiated_agreement_id", "negotiated_discount_bps",
                                                                                           "negotiated_discount_cents")
     assert_documented_keys(json_body)
+    reservation_id = json_body["id"]
     get!(200, "/coupons/BEMVINDO10")
 
     assert_equal [1, 1], json_body.values_at("redemptions", "total_redemptions")
+    uc(:extend_reservation).call(@actor, reservation_id, ends_at: t("2026-03-13T12:00:00Z"))
+    adjustment = get!(200, "/reservations/#{reservation_id}")["adjustments"].first
+
+    assert_equal "extension", adjustment["kind"]
+    assert_empty adjustment.keys - openapi_schemas.dig("ReservationAdjustment", "properties").keys
   end
 end
