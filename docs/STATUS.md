@@ -35,6 +35,12 @@ Verificação anterior, na integração do PR #9: 553 testes, 0 falhas; 7 checks
 | #9 | Testes de navegador, métricas, correlação de logs, demonstração de ponta a ponta | Integrado e testado |
 | #10 | Documentação consolidada, backup e restauração, publicação de imagem por tag | Integrado; backup e restauração exercitados (ver `RUNBOOKS.md`) |
 | release/1.0.0 | Estabilização: correções de segurança, concorrência, operação, documentação e interface | Testado (ver acima) |
+| feature/cadastro-condicoes-comerciais | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Implementado e testado na branch; entra na versão 1.1.0 |
+
+A tabela "Última verificação completa" acima registra a versão 1.0.0 (14 migrations). A migration 0015 tem
+teste automatizado de atualização a partir do esquema da 0014, mas backup, restauração e `bin/setup` ainda
+não foram exercitados com ela: serão exercitados e registrados em `RUNBOOKS.md` na release 1.1.0 (o
+procedimento de atualização está na seção 13).
 
 ## Casos obrigatórios cobertos por testes
 
@@ -44,7 +50,11 @@ invade outra reserva; retirada e devolução duplicadas (sequencial e concorrent
 indisponibilidade; isolamento entre organizações e entre clientes; revogação de acesso; cálculos e
 arredondamentos (inclusive propriedades); caução e reembolso (inclusive concorrente); timeout após sucesso no
 provedor; recuperação de tarefas e worker com lease vencido; downloads não autorizados; XSS e CSRF;
-contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
+contrato Rack (`Rack::Lint`); roteiro de demonstração de 15 passos; condições comerciais: dois resgates do
+último uso de um cupom, uso liberado por cancelamento e por expiração (inclusive bloqueio vencido ainda não
+varrido), criação com cupom concorrente com o alocador sem impasse, condições negociadas sobrepostas
+simultâneas, ajuste de tarifa sem permissão ou acima do limite do papel e atualização do esquema da 0014
+para a 0015.
 
 ## Limitações conhecidas
 
@@ -65,11 +75,13 @@ contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
   por e-mail (ADR-026); uma política de bloqueio até a confirmação fica para versão futura.
 - Configurações da organização (`settings`: política de cancelamento e validade padrão do bloqueio
   temporário) são lidas com valores padrão, mas não há tela nem comando para alterá-las nesta versão.
-- Cupons, condições negociadas por cliente e tarifas adicionais: o motor de preços os aplica
-  (`Domain::Pricing`, `Reservations::Pricer`) e há testes, mas não existe caso de uso, tela, endpoint nem
-  comando para cadastrar cupons e condições ou informar tarifas na reserva. Numa instalação nova, o campo
-  "Cupom" da reserva responde "cupom inexistente". Fica para uma versão com funcionalidade nova (branches
-  `release/*` aceitam somente correções).
+- Cupons não se aplicam a orçamentos nem a solicitações do portal: valem somente na criação de reserva pela
+  equipe ou pela API. A reserva convertida de um orçamento copia os preços do orçamento, sem cupom.
+- Tarifas adicionais pela API somente na criação de reserva (sem API de orçamentos). A CLI cadastra cupons e
+  condições negociadas, mas não edita cupons nem gerencia tarifas (ficam na interface web e na API).
+- Os usos de cupom anteriores à migration 0015 não são reconstruídos no livro de usos: aparecem somente no
+  contador legado do cupom. O retorno à versão 1.0.0 depois de usar cupons com limite ou de encerrar
+  condições negociadas tem restrições (`RUNBOOKS.md`, seção 13).
 - Sem medições de desempenho publicadas.
 - Proteções de branch exigem os checks; aprovação de revisão não é exigida porque o repositório tem um único
   mantenedor (revisões independentes não são simuladas).

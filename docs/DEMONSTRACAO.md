@@ -2,8 +2,9 @@
 
 Roteiro para apresentar o Locentra manualmente com os dados do seed, do primeiro acesso ao isolamento
 entre organizações. O mesmo roteiro é executado automaticamente por
-`test/integration/demo_flow_test.rb` (com dados próprios do teste), o que garante que os passos e os
-resultados descritos aqui continuam válidos.
+`test/integration/demo_flow_test.rb` (passos 1 a 14) e por
+`test/integration/demo_commercial_terms_test.rb` (passo 15), com dados próprios dos testes, o que garante
+que os passos e os resultados descritos aqui continuam válidos.
 
 ## Preparação
 
@@ -18,6 +19,16 @@ e a Alfa tem a conta do simulador de pagamentos ativa. Esses dois itens só são
 existiram: repetir o seed não substitui outro provedor configurado na Alfa, não reativa uma conta
 desativada e não devolve um acesso revogado. Nesses casos, configure o simulador em **Financeiro →
 Provedor de pagamentos** antes do passo 12 e use `paulo@beta.demo` no passo 14.
+
+O seed também cria as condições comerciais do passo 15, com a mesma política: tarifas e cupons só são
+criados quando o código nunca existiu na organização (ativo ou desativado), e a condição negociada só é
+criada para o cliente que nunca teve nenhuma. Na Alfa: tarifas **ENTREGA** (R$ 150,00), **MONTAGEM**
+(R$ 250,00) e **LIMPEZA** (R$ 80,00); cupons **BEMVINDO10** (10%, até 100 usos) e **PRIMEIRALOCACAO**
+(R$ 50,00 em locações a partir de R$ 300,00, uso único), válidos por 365 dias a partir do seed; condição
+geral de **8%** para Produtora Horizonte Ltda. e de **10%** na Lente 24-70mm f/2.8 (LEN-2470) para Marina
+Souza. Na Beta: tarifas ENTREGA e MONTAGEM, cupom **PRIMAVERA15** e condição de 5% para Casamentos
+Primavera ME. Se algum desses itens foi alterado, desativado ou encerrado depois do seed, cadastre os
+equivalentes nas telas **Cupons**, **Tarifas adicionais** e **Clientes** antes do passo 15.
 
 | Endereço | Uso |
 |---|---|
@@ -103,7 +114,9 @@ Converter de novo não cria outra reserva. A consulta do passo 4 passa a mostrar
 4. Abra a reserva solicitada do item 1 e clique em **Confirmar reserva**.
 
 **Esperado:** a confirmação é recusada ("Confirmação recusada: …") e a reserva continua **Solicitada**;
-nenhuma unidade é alocada duas vezes. Em `/metrics`, `locentra_domain_conflicts_total{code="unavailable"}`
+nenhuma unidade é alocada duas vezes. As reservas da Produtora Horizonte Ltda. saem com a condição
+negociada de 8% do seed (R$ 276,00 em vez de R$ 300,00), o que não muda o resultado deste passo; a condição
+é o assunto do passo 15. Em `/metrics`, `locentra_domain_conflicts_total{code="unavailable"}`
 aumenta a cada recusa. (A disputa realmente simultânea, com duas transações ao mesmo tempo, é
 comprovada pelo teste automatizado e pela suíte `test/concurrency`.)
 
@@ -213,6 +226,45 @@ credencial sem o escopo `customers.read` recebe `403` (`forbidden`) nessa chamad
 vale entrando como `paulo@beta.demo`. No banco, as políticas de RLS impedem a leitura de linhas de
 outra organização mesmo com SQL incorreto.
 
+### 15. Condições comerciais: cupom, condição negociada e tarifa
+
+1. Entre com `ana@alfa.demo` e escolha **Alfa Audiovisual** (ou use **Trocar organização**).
+2. Confira os cadastros: **Cupons** lista **BEMVINDO10** (10%, "0 de 100") e **PRIMEIRALOCACAO**;
+   **Tarifas adicionais** lista **ENTREGA**, **MONTAGEM** e **LIMPEZA**; em **Clientes → Produtora Horizonte
+   Ltda.**, a seção **Condições negociadas** mostra a condição de **8%** em **Todos os produtos**, vigente.
+3. **Reservas → Nova reserva**: cliente **Produtora Horizonte Ltda.**, retirada **D+20 09:00**, devolução
+   **D+22 09:00**, **1 × Câmera Sony FX6**; em **Tarifas adicionais**, escolha **Entrega e retirada no
+   local** e deixe o valor em branco (vale o padrão); em **Cupom**, digite **bemvindo10** (minúsculas são
+   aceitas); política **Confirmar agora** → **Registrar reserva**.
+4. Abra **Cupons → BEMVINDO10**. Depois volte à reserva e use **Cancelar reserva** (informe um motivo).
+   Abra o cupom de novo.
+5. Saia e entre com `bruno@alfa.demo` (atendente). Abra **Reservas → Nova reserva**.
+6. Saia, entre com `ana@alfa.demo` e escolha **Beta Eventos** (gerente). Em **Reservas → Nova reserva**,
+   para **Casamentos Primavera ME**, mesmo período, **1 × Gerador 5 kVA**, cupom **BEMVINDO10** →
+   **Registrar reserva**.
+
+**Esperado:**
+
+- Item 3: a reserva **Confirmada** mostra, em valores, subtotal **R$ 828,00** com a nota "o subtotal já
+  considera a condição negociada (−R$ 72,00)" (2 diárias × R$ 450,00 = R$ 900,00, menos 8%), **Cupom
+  BEMVINDO10 (10%)** de **−R$ 82,80**, **Entrega e retirada no local R$ 150,00**, **Total contratado
+  R$ 895,20** e **Caução prevista R$ 3.000,00**. A linha do item traz a coluna **Condição** com
+  "−8% (−R$ 72,00)".
+- Item 4: antes do cancelamento, o cupom mostra usos ativos "1 de 100; restantes: 99" e a reserva na seção
+  **Usos**, com situação "Ativo". Depois do cancelamento, "0 de 100; restantes: 100", e a mesma linha
+  aparece como "Liberado: reserva cancelada": o uso é liberado sem apagar o registro.
+- Item 5: o atendente vê a tarifa somente pelo valor padrão ("Entrega e retirada no local · R$ 150,00"),
+  sem o campo de valor e sem tarifas avulsas, com o aviso "Tarifas são aplicadas pelo valor padrão. Valor
+  diferente e tarifa avulsa exigem a permissão de ajustar tarifas (gerente, administrador ou
+  proprietário)." O menu dele tem **Cupons** e **Tarifas adicionais** para consulta, sem os botões de
+  cadastro.
+- Item 6: a reserva é recusada com "cupom inexistente": o cupom da Alfa não existe na Beta, que tem os
+  próprios cupons (**PRIMAVERA15**).
+
+Os mesmos cadastros estão na API (`/api/v1/coupons`, `/api/v1/fees`,
+`/api/v1/customers/<id>/price-agreements`) e na CLI (`bin/locentra coupons list`), com credenciais que
+tenham os escopos `coupons.read`, `fees.read` e `price_agreements.read`.
+
 ## Observabilidade durante o roteiro
 
 - Toda resposta traz `x-request-id`; um cliente pode enviar o próprio identificador
@@ -228,5 +280,6 @@ outra organização mesmo com SQL incorreto.
 
 ```bash
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/demo_flow_test.rb
+docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/demo_commercial_terms_test.rb
 docker compose run --rm dev bundle exec rake test:browser   # fluxos da interface no Chromium
 ```

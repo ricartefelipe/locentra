@@ -217,3 +217,118 @@ explícita.
 3. Substitua web e worker pela imagem nova (mesmas variáveis de ambiente) e confira `/health/ready` (200).
 4. Para voltar à versão anterior, use a imagem anterior; migrations são aditivas, mas confirme no
    `CHANGELOG.md` se a versão nova tem migration que a anterior não tolera antes de reverter.
+
+Versões com verificação prévia ou restrição de retorno têm seção própria: migration 0015 na seção 13.
+
+## 13. Atualização para a migration 0015 (condições comerciais) — procedimento escrito
+
+A migration `0015_condicoes_comerciais.sql` é aplicada numa única transação. A atualização a partir do
+esquema da 0014 é coberta por `test/repository/migration_0015_test.rb` (colunas preenchidas, RLS forçada
+restaurada, contador de usos preservado e recusa de condições sobrepostas); o procedimento abaixo ainda não
+foi executado num ambiente com dados reais e será exercitado na release 1.1.0.
+
+### 13.1 Verificação prévia (antes do passo 2 da seção 12)
+
+A versão 1.0.0 aceitava condições negociadas sobrepostas para o mesmo cliente e escopo (valia a de maior
+desconto). A 0015 não escolhe qual manter: se encontrar sobreposição, **aborta** com a mensagem
+`migração 0015: N par(es) de condições negociadas com vigências sobrepostas (organização …, cliente …)` e
+nada é alterado. Confira antes, com o papel `locentra_backup` (somente leitura, `BYPASSRLS`; os demais
+papéis não enxergam linhas sem contexto de organização):
+
+```sql
+-- psql "postgres://locentra_backup:<senha>@<host>:5432/locentra"
+-- 1) Pares sobrepostos (impedem a migration). Na 1.0.0 a vigência é [created_at, valid_until).
+SELECT a.organization_id, a.customer_id, a.product_id,
+       a.id AS condicao_a, a.discount_bps AS desconto_a, a.created_at AS inicio_a, a.valid_until AS fim_a,
+       b.id AS condicao_b, b.discount_bps AS desconto_b, b.created_at AS inicio_b, b.valid_until AS fim_b
+  FROM customer_price_agreements a
+  JOIN customer_price_agreements b
+    ON b.organization_id = a.organization_id AND b.customer_id = a.customer_id
+   AND b.product_id IS NOT DISTINCT FROM a.product_id AND b.id > a.id
+ WHERE (a.valid_until IS NULL OR a.valid_until > a.created_at)
+   AND (b.valid_until IS NULL OR b.valid_until > b.created_at)
+   AND a.created_at < COALESCE(b.valid_until, 'infinity')
+   AND b.created_at < COALESCE(a.valid_until, 'infinity')
+ ORDER BY 1, 2, 3;
+
+-- 2) Vigências inválidas (não impedem a migration; servem para revisão).
+SELECT 'condição' AS registro, organization_id, id, created_at AS inicio, valid_until AS fim
+  FROM customer_price_agreements WHERE valid_until <= created_at
+UNION ALL
+SELECT 'cupom', organization_id, id, valid_from, valid_until
+  FROM coupons WHERE valid_until <= valid_from OR max_redemptions > 1000000;
+```
+
+A consulta 2 lista condições que nunca valeram (fim anterior ao cadastro) e cupons com fim anterior ao início
+ou máximo acima de 1.000.000. Essas linhas continuam aceitas depois da migration; um cupom nessa situação só
+é editado quando a edição corrige o campo inválido.
+
+### 13.2 Ajuste das condições sobrepostas
+
+Para cada par da consulta 1, decida com quem responde pela política comercial qual condição continua.
+Ainda na versão 1.0.0, ajuste `valid_until` com o papel da aplicação e o contexto da organização (a RLS
+exige o contexto; a transação limita o alcance do `set_config`):
+
+```sql
+-- psql "postgres://locentra_app:<senha>@<host>:5432/locentra"
+BEGIN;
+SELECT set_config('app.tenant_id', '<organization_id>', true);
+-- Condições sucessivas: a mais antiga termina quando a mais nova começa.
+UPDATE customer_price_agreements SET valid_until = '<created_at da condição mais nova>'
+ WHERE organization_id = '<organization_id>' AND id = '<id da condição mais antiga>';
+-- Ou: a condição que não deve valer fica com a vigência vazia.
+UPDATE customer_price_agreements SET valid_until = created_at
+ WHERE organization_id = '<organization_id>' AND id = '<id da condição descartada>';
+COMMIT;
+```
+
+Lembre que, na 1.0.0, entre duas condições sobrepostas valia a de maior desconto: manter a de menor desconto
+muda os preços das próximas reservas do cliente. Reservas, orçamentos e contratos já registrados não mudam.
+Repita a consulta 1 até não haver linhas. Depois da migration, as condições não são mais editadas: o
+ajuste passa a ser feito pelo encerramento (imediato ou agendado) na página do cliente.
+
+### 13.3 Aplicação
+
+- Faça o backup (seção 3) e aplique a migration no passo 2 da seção 12, **antes** de substituir web e
+  worker. A 1.0.0 continua funcionando sobre o esquema da 0015 durante a troca.
+- A 0015 executa `ALTER TABLE` em `coupons` e `customer_price_agreements` (colunas, constraints e
+  privilégios) e cria gatilhos em `reservations` e `reservation_items`. As operações são rápidas, mas pedem
+  trava exclusiva nas tabelas: transações longas em andamento sobre elas atrasam a migration, e a migration
+  atrasa as requisições que chegam enquanto ela espera. Prefira um horário de pouco movimento.
+- Depois da troca, confira `/health/ready` e, por alguns dias, a métrica
+  `locentra_db_transaction_retries_total` em `/metrics`: a criação de reservas com cupom trava o cupom antes
+  dos estoques, e um aumento sustentado de repetições por impasse (`reason="TRDeadlockDetected"`) deve ser
+  investigado.
+- Credenciais de integração existentes não recebem os escopos novos (`coupons.*`, `price_agreements.*`,
+  `fees.*`); crie credenciais novas para as integrações que vão usar esses recursos.
+
+### 13.4 Retorno à versão 1.0.0
+
+O esquema da 0015 é tolerado pela 1.0.0 (nenhuma coluna foi renomeada ou removida, e a 1.0.0 mantém o
+privilégio de atualizar `coupons.redemptions`). O que muda é a **regra**, porque a 1.0.0 não conhece as
+colunas novas:
+
+- **Cupons:** a 1.0.0 conta somente `coupons.redemptions`, que ficou congelado, e ignora os usos gravados em
+  `coupon_redemptions`. Um cupom com limite que foi usado depois da migration volta a aceitar usos como se
+  estivesse no ponto em que a 1.0.0 parou, e os usos feitos depois do retorno não entram no livro.
+- **Condições negociadas:** a 1.0.0 ignora `valid_from`, `ended_at` e a regra de não sobreposição. Uma
+  condição encerrada volta a valer (até `valid_until`) e uma condição agendada vale desde já.
+- **Tarifas:** a 1.0.0 não aplica o catálogo; reservas já criadas mantêm as tarifas no snapshot.
+
+Antes de voltar, verifique com `locentra_backup`:
+
+```sql
+SELECT (SELECT count(*) FROM coupon_redemptions) AS usos_no_livro,
+       (SELECT count(*) FROM coupons WHERE active AND max_redemptions IS NOT NULL
+                                       AND EXISTS (SELECT 1 FROM coupon_redemptions r
+                                                    WHERE r.organization_id = coupons.organization_id AND r.coupon_id = coupons.id))
+         AS cupons_com_limite_usados,
+       (SELECT count(*) FROM customer_price_agreements
+         WHERE ended_at IS NOT NULL OR valid_from > now()) AS condicoes_encerradas_ou_agendadas;
+```
+
+Com `cupons_com_limite_usados` maior que zero, desative esses cupons (tela **Cupons**, API ou
+`bin/locentra coupons deactivate`) antes de voltar, ou não volte. Com `condicoes_encerradas_ou_agendadas`
+maior que zero, não volte: as condições não podem mais ser ajustadas para a regra antiga. Nesses casos,
+corrija o problema na versão nova. A restauração do backup anterior à migration (seção 4) descarta tudo o que
+foi registrado depois dele.
