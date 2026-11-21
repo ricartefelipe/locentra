@@ -190,9 +190,13 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
 ## ADR-024 — Backup com papel dedicado e restauração por administrador
 
 - **Contexto:** a RLS é forçada também para o proprietário; um dump feito sem bypass sairia vazio.
-- **Decisão:** papel `locentra_backup` somente leitura (`pg_read_all_data`) com `BYPASSRLS`, usado apenas por
+- **Decisão:** papel `locentra_backup` somente leitura (`pg_read_all_data`) com `BYPASSRLS`, usado por
   `pg_dump`; restauração executada por superusuário em banco novo, preservando proprietários e políticas.
   Procedimento exercitado e registrado em `RUNBOOKS.md`.
+- **Uso complementar:** o operador também usa o papel em consultas de verificação somente leitura que
+  precisam enxergar todas as organizações (contagem de linhas na restauração e verificações da migration
+  0015 antes de migrar e antes do retorno de versão, `RUNBOOKS.md` §4 e §13). A aplicação, o worker e a CLI
+  nunca usam o papel.
 
 ## ADR-025 — Portal, CLI e observabilidade
 
