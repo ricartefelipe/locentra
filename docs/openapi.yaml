@@ -818,8 +818,12 @@ components:
               source: { type: string, enum: [catalog, custom] }
     ReservationFee:
       description: >-
-        Tarifa do catálogo (`fee_id`, com `amount_cents` opcional) ou tarifa avulsa (`description` e `amount_cents`).
-        Chave com valor nulo vale como ausente: o formato devolvido em `pricing.fees` (`fee_id` nulo na avulsa) é aceito.
+        Tarifa do catálogo (`fee_id`, com `amount_cents` opcional) ou tarifa avulsa (`description` e `amount_cents`);
+        `fee_id` e `description` juntos são recusados (422). Chave com valor nulo vale como ausente, e as demais chaves
+        (`code`, `source`, `default_amount_cents`) são ignoradas. Das entradas devolvidas em `pricing.fees`, somente a
+        entrada avulsa pode ser reenviada como está (`fee_id` nulo). A entrada do catálogo traz `description` com o nome
+        da tarifa e deve ser reenviada só com `fee_id` e, para manter um valor ajustado, `amount_cents`; sem o valor,
+        vale o padrão vigente.
       oneOf:
         - type: object
           required: [fee_id]

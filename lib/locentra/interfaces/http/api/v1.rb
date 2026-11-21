@@ -142,8 +142,9 @@ module Locentra
           end
 
           # Tarifas da reserva: `{ fee_id, amount_cents? }` (catálogo; sem valor vale o padrão) ou
-          # `{ description, amount_cents }` (avulsa). Chave nula vale como ausente. Outro formato é erro
-          # de validação (422).
+          # `{ description, amount_cents }` (avulsa). Chave nula vale como ausente; `fee_id` e `description`
+          # juntos (como na entrada do catálogo de `pricing.fees`) são ambíguos. Outro formato é erro de
+          # validação (422).
           def api_fees(fees)
             list = fees.nil? ? [] : fees
             raise Domain::ValidationError.field("fees", FEES_FORMAT) unless list.is_a?(Array) && list.all?(Hash)

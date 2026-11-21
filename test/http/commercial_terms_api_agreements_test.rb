@@ -162,19 +162,35 @@ class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
     assert_equal 2, owner_query("SELECT count(*) AS n FROM reservations").first["n"].to_i
   end
 
-  # Chave nula vale como ausente, como em amount_cents: o formato devolvido em pricing.fees (fee_id nulo
-  # na tarifa avulsa) é aceito na criação.
-  def test_reservation_fees_treat_null_keys_as_absent
+  # Chave nula vale como ausente, como em amount_cents, e chaves fora do formato são ignoradas. Das
+  # entradas devolvidas em pricing.fees, a avulsa é aceita como está; a do catálogo traz `description`
+  # (nome da tarifa) junto com `fee_id` e é recusada, como o OpenAPI descreve, até ficar só com fee_id e valor.
+  def test_reservation_fees_resent_from_pricing_fees
     fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000)
+    post!(201, "/reservations", reservation_payload(fees: [{ "fee_id" => fee.id },
+                                                           { "description" => "Taxa de estacionamento", "amount_cents" => 3000 }]))
+    returned = get!(200, "/reservations/#{json_body["id"]}")["pricing"]["fees"]
+    catalog, custom = returned.partition { |entry| entry["source"] == "catalog" }.map(&:first)
 
-    post!(201, "/reservations", reservation_payload(fees: [{ "fee_id" => fee.id, "description" => nil, "amount_cents" => nil },
-                                                           { "fee_id" => nil, "code" => nil, "description" => "Taxa de estacionamento",
-                                                             "amount_cents" => 3000 }]))
+    assert_equal [fee.id, "Entrega e retirada no local", nil], [catalog["fee_id"], catalog["description"], custom["fee_id"]]
+    post!(201, "/reservations", reservation_payload(day: 14, fees: [custom]))
+
+    assert_equal 93_000, json_body["total"]["amount_cents"]
+    [[catalog], returned].each do |fees|
+      post!(422, "/reservations", reservation_payload(day: 16, fees: fees))
+
+      assert_equal ["deve ser uma lista de objetos com fee_id ou description e amount_cents"], fields["fees"], fees.inspect
+    end
+    post!(201, "/reservations", reservation_payload(day: 18, fees: [catalog.slice("fee_id", "amount_cents"), custom]))
 
     assert_equal 108_000, json_body["total"]["amount_cents"]
+    post!(201, "/reservations", reservation_payload(day: 20, fees: [{ "fee_id" => fee.id, "description" => nil, "amount_cents" => nil }]))
     post!(422, "/reservations", reservation_payload(fees: [{ "fee_id" => nil, "description" => nil, "amount_cents" => 100 }]))
 
     assert_equal ["deve ser uma lista de objetos com fee_id ou description e amount_cents"], fields["fees"]
+    description = YAML.safe_load_file(File.expand_path("../../docs/openapi.yaml", __dir__)).dig("components", "schemas", "ReservationFee", "description")
+
+    assert_includes description, "somente a entrada avulsa pode ser reenviada como está", "o contrato descreve o reenvio de pricing.fees"
   end
 
   def test_reservation_fees_format_and_lookup_errors
