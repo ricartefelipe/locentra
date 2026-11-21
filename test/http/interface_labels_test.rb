@@ -36,6 +36,27 @@ class InterfaceLabelsTest < HttpTest
     assert_includes last_response.body, "Em avaliação"
   end
 
+  def test_commercial_terms_actions_statuses_and_fields_have_portuguese_labels
+    labels = Locentra::Interfaces::HTTP::Labels
+    actions = { "coupon.created" => "Cupom cadastrado", "coupon.updated" => "Cupom alterado", "coupon.deactivated" => "Cupom desativado",
+                "coupon.reactivated" => "Cupom reativado", "coupon.deleted" => "Cupom excluído", "fee.created" => "Tarifa cadastrada",
+                "fee.updated" => "Tarifa alterada", "fee.deactivated" => "Tarifa desativada", "fee.reactivated" => "Tarifa reativada",
+                "price_agreement.created" => "Condição negociada cadastrada", "price_agreement.ended" => "Condição negociada encerrada" }
+    fields = { "tarifas" => "Tarifas adicionais", "maximo_usos" => "Máximo de usos", "subtotal_minimo" => "Subtotal mínimo",
+               "valido_de" => "Início da vigência", "valido_ate" => "Fim da vigência", "valor_padrao" => "Valor padrão",
+               "encerrar_em" => "Encerrar em", "produto" => "Produto" }
+
+    actions.each { |action, text| assert_equal text, labels.label(:audit_action, action) }
+    fields.each { |field, text| assert_equal text, labels.label(:field, field) }
+    assert_equal(%w[Vigente Agendado Expirado Esgotado Desativado],
+                 %w[active scheduled expired exhausted inactive].map { |status| labels.label(:coupon_status, status) })
+    assert_equal(%w[Vigente Agendada Expirada Encerrada], %w[active scheduled expired ended].map { |status| labels.label(:agreement_status, status) })
+    assert_equal(%w[Ativa Inativa], %w[active inactive].map { |status| labels.label(:fee_status, status) })
+    assert_equal "Liberado: bloqueio temporário expirado", labels.label(:redemption_state, "released_expired")
+    assert_equal(["Percentual", "Valor fixo"], %w[percent fixed].map { |kind| labels.label(:coupon_kind, kind) })
+    assert_equal "valor padrão", labels.label(:changed_field, "default_amount_cents")
+  end
+
   def test_error_summary_shows_field_names_and_transition_errors_use_status_labels
     get "/produtos/novo"
     post_form "/produtos", { "sku" => "X-1", "nome" => "Produto", "rastreamento" => "bulk", "preco_diaria" => "10,00", "caucao" => "-5" }
