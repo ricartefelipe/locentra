@@ -3,6 +3,37 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versões seguem
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Adicionado
+
+- **Limite por organização na fila de webhooks:** no máximo `WEBHOOK_MAX_PER_ORGANIZATION` (padrão 2)
+  entregas de uma mesma organização em execução ao mesmo tempo, somadas entre todos os workers; organizações
+  sem entregas em curso têm preferência, e os destinos lentos de uma organização não ocupam as vagas das
+  demais.
+- **Pausa automática de endpoints e reativação:** endpoint com pelo menos 20 falhas consecutivas e pelo menos
+  1 hora desde a primeira é pausado (auditoria "Endpoint de webhook pausado automaticamente"); as entregas
+  ficam retidas sem chamada de rede e sem gastar tentativas. A tela **Integrações** mostra o endpoint pausado,
+  as falhas e as entregas retidas, e o botão **Reativar** (proprietário e administrador, auditado) libera as
+  retidas em segundo plano, em lotes.
+- **Retenção do histórico de integrações:** por organização, uma vez por hora e em lotes, saem as entregas
+  concluídas antigas, as entregas de endpoints desativados, os eventos da outbox sem entrega restante e os
+  webhooks recebidos já processados ou ignorados, conforme `OUTBOX_RETENTION_DAYS` e
+  `WEBHOOK_DELIVERY_RETENTION_DAYS` (padrão 30, mínimo 7) e `INBOUND_WEBHOOK_RETENTION_DAYS` (padrão 90,
+  mínimo 45).
+- **Métricas:** `locentra_webhook_deliveries_total{outcome}`, `locentra_webhook_endpoint_pauses_total` e
+  `locentra_retention_purged_total{kind}`, somadas entre todos os workers e expostas em `/metrics`.
+- **Migration 0017:** circuito por endpoint, entregas retidas, índice da reivindicação por organização,
+  índices da retenção e tabela `worker_outcome_totals`, compatível com a 1.2.0 em execução
+  (`docs/RUNBOOKS.md`, seção 16).
+
+### Alterado
+
+- O padrão de `WEBHOOK_CONCURRENCY` passou de 1 para 4 (o worker usa 10 conexões com os padrões).
+- O `platform.housekeeping` soma as tarefas removidas em `locentra_retention_purged_total{kind="jobs"}`; eventos
+  da outbox, entregas de webhook e webhooks recebidos deixaram de ser mantidos indefinidamente e passam pela
+  retenção por organização.
+
 ## [1.2.0] — 2026-11-21
 
 ### Adicionado
