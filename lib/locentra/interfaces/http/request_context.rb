@@ -69,7 +69,7 @@ module Locentra
             merged = rack.GET.merge(rack.POST)
             merged.each do |key, value|
               raise BadRequest, "parâmetro aninhado não suportado" if value.is_a?(Hash) && value.size > 200
-              raise BadRequest, "parâmetros com #{INVALID_TEXT}" unless clean_text?(key) && Array(value).all? { |item| clean_text?(item) }
+              raise BadRequest, "parâmetros com #{INVALID_TEXT}" unless clean_text?(key) && clean_param?(value)
             end
             merged
           end
@@ -126,8 +126,24 @@ module Locentra
         end
 
         # Textos recebidos precisam ser UTF-8 válido e sem caractere nulo, que o banco não armazena: o
-        # erro sai como erro do cliente (no campo, quando há um) e não como falha interna.
-        def clean_text?(value) = !value.is_a?(String) || (value.valid_encoding? && !value.include?("\u0000"))
+        # erro sai como erro do cliente (no campo, quando há um) e não como falha interna. Uma parte
+        # multipart text/plain com outro charset chega nessa codificação (ASCII-8BIT é sempre "válida"):
+        # só é aceita quando o texto é ASCII puro, compatível com UTF-8.
+        def clean_text?(value)
+          return true unless value.is_a?(String)
+
+          value.valid_encoding? && (value.encoding == Encoding::UTF_8 || value.ascii_only?) && !value.include?("\u0000")
+        end
+
+        # Parâmetro de formulário em qualquer nível (nome[chave], nome[], nome[chave][]): chaves e valores.
+        # O Hash de arquivo do multipart (com :tempfile) não é texto e fica de fora.
+        def clean_param?(value)
+          case value
+          when Hash then value.key?(:tempfile) || value.all? { |key, item| clean_text?(key) && clean_param?(item) }
+          when Array then value.all? { |item| clean_param?(item) }
+          else clean_text?(value)
+          end
+        end
 
         # No JSON, o erro aponta a chave de primeiro nível que contém o texto.
         def check_json_text!(node, field)
