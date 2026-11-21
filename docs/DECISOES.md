@@ -246,9 +246,10 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   instrução separada, executada depois da trava: em READ COMMITTED, uma subconsulta na mesma instrução usaria
   o snapshot anterior à espera e não veria o uso confirmado pela transação concorrente. Um gatilho de inserção
   no livro repete a verificação no banco, com o instante do próprio uso como referência (o relógio da
-  aplicação). Para o limite, aplicação e gatilho recuam esse instante por uma carência de 5 minutos: uma
-  confirmação que leu o relógio antes do vencimento do bloqueio só grava a nova situação no COMMIT, e até lá
-  quem conta veria o bloqueio vencido e aceitaria um uso além do máximo. A carência é maior que a duração
+  aplicação). Para o limite, aplicação (resgate e redução do máximo) e gatilho recuam esse instante por uma
+  carência de 5 minutos: uma confirmação que leu o relógio antes do vencimento do bloqueio só grava a nova
+  situação no COMMIT, e até lá quem conta veria o bloqueio vencido e aceitaria um uso além do máximo (ou uma
+  redução do máximo abaixo dos usos). A carência é maior que a duração
   de uma transação (instruções até 15 s, ociosidade até 60 s) e que a diferença de relógio entre
   instâncias; o custo é o uso do bloqueio vencido ficar reservado por esse tempo. A situação exibida do uso
   não usa a carência.

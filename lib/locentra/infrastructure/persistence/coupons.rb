@@ -47,6 +47,17 @@ module Locentra
         def lock(tx, id, now:) = load(tx, "id = $2", id, now, lock: true)
         def lock_by_code(tx, code, now:) = load(tx, "code = $2", code, now, lock: true)
 
+        # Usos que contam para o limite (contador legado mais usos do livro com a carência de
+        # Domain::Pricing::Redemptions.limit_reference, como no resgate e no gatilho). Usado na edição, depois
+        # da trava do cupom, para que o máximo não fique abaixo de um bloqueio cuja confirmação está em andamento.
+        def limit_redemptions(tx, coupon, now:)
+          coupon.legacy_redemptions + tx.query_value(<<~SQL, [tx.tenant_id!, coupon.id, Domain::Pricing::Redemptions.limit_reference(now)])
+            SELECT count(*) FROM coupon_redemptions r
+              JOIN reservations v ON v.organization_id = r.organization_id AND v.id = r.reservation_id
+             WHERE r.organization_id = $1 AND r.coupon_id = $2 AND #{format(PricingRepository::ACTIVE_USE_SQL, now: 3)}
+          SQL
+        end
+
         def ever_redeemed?(tx, coupon_id)
           !tx.query_one("SELECT 1 FROM coupon_redemptions WHERE organization_id = $1 AND coupon_id = $2 LIMIT 1", [tx.tenant_id!, coupon_id]).nil?
         end

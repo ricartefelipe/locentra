@@ -169,8 +169,8 @@ gestão de tarifas ficam na web e na API.
   referência; a violação chega à aplicação como "cupom esgotado".
 - **Confirmação em andamento:** a confirmação lê o relógio antes de travar a reserva e grava a nova
   situação só no COMMIT. Para que um resgate concorrente não conte como liberado um bloqueio que está sendo
-  confirmado, o limite (aplicação e gatilho) conta o bloqueio vencido durante a carência de 5 minutos
-  (`Redemptions::LIMIT_GRACE`); a situação exibida do uso não usa a carência.
+  confirmado, o limite (resgate, redução do máximo na edição e gatilho) conta o bloqueio vencido durante a
+  carência de 5 minutos (`Redemptions::LIMIT_GRACE`); a situação exibida do uso não usa a carência.
 - **Condições simultâneas:** a pré-verificação de sobreposição é seguida da inserção num savepoint; a
   exclusion constraint recusa a segunda de duas criações concorrentes, que recebe o mesmo conflito
   (`price_agreement_overlap`).
@@ -190,7 +190,7 @@ gestão de tarifas ficam na web e na API.
 | `test/integration/commercial_terms_coupons_test.rb`, `commercial_terms_agreements_test.rb`, `commercial_terms_fees_test.rb`, `commercial_terms_access_test.rb` | Fluxos completos de cupons (uso, liberação por todos os caminhos, bloqueio vencido não varrido), condições (troca agendada sem intervalo), tarifas (autorização, continuidade, contrato e PDF), matriz de papéis, credenciais e isolamento |
 | `test/integration/seed_test.rb` | Condições comerciais do seed criadas uma única vez, sem reativar o que foi desativado |
 | `test/integration/demo_commercial_terms_test.rb` | Passo 15 da demonstração pela interface web |
-| `test/concurrency/coupon_redemption_race_test.rb` | Dois resgates do último uso; criação com cupom contra o alocador no mesmo estoque, sem impasse; cancelamento concorrente com resgate; confirmação de bloqueio em andamento no vencimento contra o último uso; redução do máximo durante o resgate; condições sobrepostas simultâneas |
+| `test/concurrency/coupon_redemption_race_test.rb` | Dois resgates do último uso; criação com cupom contra o alocador no mesmo estoque, sem impasse; cancelamento concorrente com resgate; confirmação de bloqueio em andamento no vencimento contra o último uso e contra a redução do máximo; redução do máximo durante o resgate; condições sobrepostas simultâneas |
 | `test/http/commercial_terms_pages_test.rb`, `commercial_terms_fees_pages_test.rb`, `commercial_terms_agreements_pages_test.rb`, `commercial_terms_forms_test.rb`, `portal_pages_test.rb` | Telas com `Rack::Lint`: filtros, erros no campo, controle otimista, papéis, XSS e CSRF, tarifas nos formulários e detalhamento de valores para a equipe e para o cliente |
 | `test/http/commercial_terms_legacy_snapshot_test.rb` | Snapshot de preços no formato da 1.0.0 (cupom só em `coupon_code`, sem condições) nas telas da equipe e do portal, na API, nos termos e no PDF |
 | `test/http/commercial_terms_api_test.rb`, `commercial_terms_api_agreements_test.rb` | API: cadastro, consulta por código, `PATCH` com `null` e sem mudança, idempotência, inteiros estritos, escopos, isolamento, usos conforme os escopos, condições e tarifas na criação de reserva |

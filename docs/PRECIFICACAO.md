@@ -85,7 +85,8 @@ R$ 895,20.
   por uma **carência de 5 minutos** depois de `hold_expires_at`: uma confirmação que leu o relógio antes do
   vencimento pode gravar a reserva como confirmada depois dele, e até o COMMIT quem conta ainda vê o
   bloqueio. Nesse intervalo o cupom pode aparecer com uso disponível e ainda responder "cupom esgotado". O
-  máximo não pode ser reduzido abaixo dos usos ativos.
+  máximo não pode ser reduzido abaixo dos usos ativos; na edição, a comparação usa a mesma carência, e a
+  mensagem avisa quando um bloqueio vencido há menos de 5 minutos entrou na contagem.
 - **Base legada:** `coupons.redemptions` guarda os usos registrados até a versão 1.0.0, quando o contador só
   aumentava. A coluna ficou congelada: usos ativos = contador legado + usos ativos do livro.
 - **Situação** (nesta ordem de precedência): desativado, expirado, agendado, esgotado, vigente. A recusa na

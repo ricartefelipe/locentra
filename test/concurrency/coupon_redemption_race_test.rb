@@ -160,6 +160,35 @@ class CouponRedemptionRaceTest < DatabaseTest
     assert_equal 0, retries
   end
 
+  # Mesma corrida, com a redução do máximo no lugar do resgate: a edição compara o novo máximo com os
+  # usos que contam para o limite (com a carência), e o cupom não fica com mais usos ativos que o máximo.
+  def test_maximum_reduction_refused_while_a_confirmation_read_the_clock_before_the_hold_expired
+    coupon = create_coupon("REDUZCONF", max_redemptions: 2)
+    book(coupon_code: "REDUZCONF")
+    hold = book(@customers.last, day: 12, mode: "hold", hold_minutes: 10, coupon_code: "REDUZCONF")
+    @clock.advance(599)
+    reached = Barrier.new(2)
+    released = Barrier.new(2)
+    reservations = PausingProxy.new(PausingProxy.new(repos[:reservations], :update_status, released), :update_status, reached)
+    confirm = R::ConfirmReservation.new(uow: @system.uow, reservations: reservations, allocator: services[:allocator], audit: services[:audit],
+                                        events: services[:events], clock: @clock, guard: services[:reservation_guard],
+                                        expiry: services[:hold_expiry])
+
+    confirmation = attempt { confirm.call(@actor, hold.id).status }
+    reached.wait
+    @clock.advance(2)
+    reduction = attempt { uc(:update_coupon).call(@actor, coupon.id, { max_redemptions: 1 }).record.max_redemptions }.value
+    released.wait
+
+    assert_equal [:ok, "confirmed"], confirmation.value
+    message = "não pode ser menor que os usos que contam para o limite (2, inclusive bloqueio vencido há menos de 5 minutos, " \
+              "cuja confirmação pode estar em andamento)"
+
+    assert_equal [:validation, { "maximo_usos" => [message] }], reduction
+    assert_equal "2 de 2", usage(coupon.id)
+    assert_equal 0, retries
+  end
+
   def test_maximum_cannot_be_reduced_below_a_use_being_redeemed
     coupon = create_coupon("REDUZ", max_redemptions: 3)
     book(coupon_code: "REDUZ")

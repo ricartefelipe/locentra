@@ -111,7 +111,8 @@ module Locentra
       end
 
       # Edição dos campos editáveis com controle otimista (`lock_version` informado diferente do atual
-      # resulta em `stale_coupon`). Os usos ativos são contados depois da trava do cupom.
+      # resulta em `stale_coupon`). Os usos ativos são contados depois da trava do cupom; o novo máximo é
+      # comparado com os usos que contam para o limite, com a mesma carência do resgate.
       class UpdateCoupon
         def initialize(uow:, coupons:, audit:, clock:)
           @uow = uow
@@ -125,7 +126,8 @@ module Locentra
             now = @clock.now
             coupon = Support.coupon(@coupons, t, reference, now: now, lock: true)
             Support.stale!(coupon, lock_version, "stale_coupon", "o cupom")
-            revised = P::Coupons.revise(coupon, attrs, now: now)
+            limit_uses = attrs.key?(:max_redemptions) ? @coupons.limit_redemptions(t, coupon, now: now) : coupon.redemptions
+            revised = P::Coupons.revise(coupon, attrs, now: now, limit_uses: limit_uses)
             next Result.new(record: coupon, changed: false) if revised.equal?(coupon)
 
             if @coupons.update(t, revised, coupon.lock_version).zero?

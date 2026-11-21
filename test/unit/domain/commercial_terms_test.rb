@@ -107,6 +107,11 @@ class CommercialTermsDomainTest < UnitTest
 
     assert_equal ["não pode ser menor que os usos ativos (4)"], errors_of { P::Coupons.revise(used, { max_redemptions: 3 }, now: now) }["maximo_usos"]
     assert_equal 4, P::Coupons.revise(used, { max_redemptions: 4 }, now: now).max_redemptions
+    assert_equal ["não pode ser menor que os usos que contam para o limite (5, inclusive bloqueio vencido há menos de 5 minutos, " \
+                  "cuja confirmação pode estar em andamento)"],
+                 errors_of { P::Coupons.revise(used, { max_redemptions: 4 }, now: now, limit_uses: 5) }["maximo_usos"],
+                 "o bloqueio vencido durante a carência conta para o limite"
+    assert_equal 5, P::Coupons.revise(used, { max_redemptions: 5 }, now: now, limit_uses: 5).max_redemptions
     expiring = coupon(valid_until: now + 60)
 
     assert_equal ["não pode estar no passado"], errors_of { P::Coupons.revise(expiring, { valid_until: now - 1 }, now: now) }["valido_ate"]

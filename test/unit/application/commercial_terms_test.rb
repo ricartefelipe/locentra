@@ -81,6 +81,7 @@ class CommercialTermsApplicationTest < UnitTest
     def lock_by_code(_tx, code, **) = @stored && @stored.code == code ? @stored : nil
     def find(tx, id, **) = lock(tx, id)
     def find_by_code(tx, code, **) = lock_by_code(tx, code)
+    def limit_redemptions(_tx, coupon, **) = coupon.redemptions
 
     def insert(_tx, record)
       return 0 if @stored && @stored.code == record.code

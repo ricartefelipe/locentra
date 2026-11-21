@@ -159,8 +159,9 @@ module Locentra
         # Somente as chaves presentes mudam; nil limpa descrição, vigência e máximo, e vale 0 no subtotal
         # mínimo. O estado resultante é validado por inteiro (inclusive cupons da 1.0.0 com fim anterior
         # ao início ou máximo acima do limite): o erro sai no campo a corrigir. A ativação e a desativação
-        # não passam por aqui e valem para qualquer cupom.
-        def revise(coupon, attrs, now:)
+        # não passam por aqui e valem para qualquer cupom. `limit_uses` são os usos que contam para o limite
+        # (com a carência de Redemptions.limit_reference); sem ele, valem os usos ativos do cupom.
+        def revise(coupon, attrs, now:, limit_uses: coupon.redemptions)
           unknown = attrs.keys - EDITABLE
           raise ArgumentError, "campos não editáveis: #{unknown.join(", ")}" unless unknown.empty?
 
@@ -176,7 +177,7 @@ module Locentra
               validity!(revised.valid_from, revised.valid_until, now, future: revised.valid_until != coupon.valid_until)
             end
             check.call("maximo_usos") { max_redemptions!(revised.max_redemptions) } unless attrs.key?(:max_redemptions)
-            check.call("maximo_usos") { below_active!(revised) }
+            check.call("maximo_usos") { below_active!(revised, limit_uses) }
             data
           end
           revised = coupon.with(**changes)
@@ -246,10 +247,17 @@ module Locentra
           Input.fail!("valido_ate", "não pode estar no passado") if future && to <= now
         end
 
-        def below_active!(coupon)
-          return if coupon.max_redemptions.nil? || coupon.max_redemptions >= coupon.redemptions
+        # O máximo não fica abaixo dos usos que contam para o limite. Quando a carência inclui bloqueio
+        # vencido (confirmação possivelmente em andamento), a mensagem explica a diferença para os usos exibidos.
+        def below_active!(coupon, limit_uses = coupon.redemptions)
+          return if coupon.max_redemptions.nil? || coupon.max_redemptions >= limit_uses
 
-          Input.fail!("maximo_usos", "não pode ser menor que os usos ativos (#{Pricing.count_label(coupon.redemptions)})")
+          count = Pricing.count_label(limit_uses)
+          if limit_uses > coupon.redemptions
+            Input.fail!("maximo_usos", "não pode ser menor que os usos que contam para o limite (#{count}, inclusive bloqueio vencido há " \
+                                       "menos de #{Redemptions::LIMIT_GRACE / 60} minutos, cuja confirmação pode estar em andamento)")
+          end
+          Input.fail!("maximo_usos", "não pode ser menor que os usos ativos (#{count})")
         end
       end
 
