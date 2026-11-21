@@ -261,9 +261,11 @@ module Locentra
         def selected(current, value) = raw(current.to_s == value.to_s ? " selected" : "")
 
         # Opções de filial. Formulários que criam vínculo com a filial listam só as ativas (`active_only`);
-        # os demais listam todas, com " (inativa)" nas desativadas. `code` acrescenta o código ao nome.
+        # os demais listam todas, com " (inativa)" nas desativadas. A filial já selecionada (a do registro
+        # em edição) continua na lista mesmo inativa, marcada, para que a troca de filial seja explícita e o
+        # caso de uso recuse o envio no campo. `code` acrescenta o código ao nome.
         def branch_options(branches, selected_id, active_only:, code: false)
-          list = active_only ? branches.select(&:active) : branches
+          list = active_only ? branches.select { |branch| branch.active || branch.id.to_s == selected_id.to_s } : branches
           raw(list.map do |branch|
             text = code ? "#{branch.name} (#{branch.code})" : branch.name
             text = "#{text} (inativa)" unless branch.active
@@ -273,6 +275,9 @@ module Locentra
 
         # Fuso da organização no momento em que o formulário foi exibido: se mudar antes do envio, os
         # horários digitados são recusados (Controller#local_time) em vez de interpretados no fuso novo.
+        # Filial selecionada que está inativa (nil quando ativa ou não selecionada).
+        def inactive_branch(branches, selected_id) = branches.find { |branch| !branch.active && branch.id.to_s == selected_id.to_s }
+
         def time_zone_field = raw(%(<input type="hidden" name="fuso" value="#{h(time_zone.identifier)}">))
 
         # Deslocamento de um fuso em relação ao UTC num instante ("UTC−03:00"), com o sinal de menos tipográfico.

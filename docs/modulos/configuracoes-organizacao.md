@@ -117,7 +117,9 @@ de orçamento com a da organização, desligando `quote_versions_protect` soment
   do plano).
 - Os formulários de criação listam somente as filiais ativas; estoque (entrada, baixa e perda), origem de
   transferência, manutenção, listagens e filtros listam todas, com " (inativa)". O calendário usa como padrão
-  a primeira filial ativa.
+  a primeira filial ativa. Na nova versão de um orçamento cuja filial foi desativada, a filial atual continua
+  selecionada, com " (inativa)" e um aviso no campo; o envio sem trocar de filial é recusado com "filial
+  inativa", para que a troca nunca aconteça sem o usuário perceber.
 
 ## Permissões
 

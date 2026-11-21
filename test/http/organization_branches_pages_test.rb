@@ -123,6 +123,29 @@ class OrganizationBranchesPagesTest < CommercialTermsHttpTest
     refute_match(/id="destino-ativo"[^\n]*Unidade Norte/, transfers)
   end
 
+  # A nova versão de um orçamento cuja filial foi desativada mantém a filial atual selecionada, marcada como
+  # inativa e com aviso; o envio sem trocar de filial é recusado no campo, em vez de gravar em outra filial.
+  def test_quote_revision_keeps_the_inactive_branch_selected_and_refuses_it
+    quote = uc(:create_quote).call(@actor, { customer_id: @customer.id, branch_id: @north.id, period: rental, lines: [line(@camera, 1)],
+                                             valid_until: t("2026-03-05T12:00:00Z") })
+    uc(:set_branch_active).call(@actor, @north.id, active: false)
+    body = get_ok("/orcamentos/#{quote.id}/nova-versao")
+    select = body[%r{<select id="filial_id".*?</select>}m]
+
+    assert_includes select, %(<option value="#{@north.id}" selected>Unidade Norte (NORTE) (inativa)</option>)
+    assert_includes select, "Matriz (MATRIZ)"
+    assert_includes body, %(aria-describedby="ajuda-filial")
+    assert_includes body, "A filial deste orçamento está inativa: escolha uma filial ativa para a nova versão."
+    post_form "/orcamentos/#{quote.id}/versoes", { "filial_id" => @north.id, "inicio" => "2026-03-10T09:00", "fim" => "2026-03-12T09:00",
+                                                   "validade" => "2026-03-05T09:00", "produto" => [@camera.id], "quantidade" => ["1"],
+                                                   "politica_bloqueio" => "none" }
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "filial inativa: escolha uma filial ativa"
+    assert_match(/id="filial_id"[^>]*aria-invalid="true"/, last_response.body)
+    assert_equal 1, owner_query("SELECT count(*) AS n FROM quote_versions WHERE quote_id = $1", [quote.id]).first["n"].to_i
+  end
+
   def test_reader_sees_the_organization_without_forms_or_subscription
     sign_in_as("manager")
     home = get_ok("/")
