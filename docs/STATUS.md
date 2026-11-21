@@ -5,20 +5,21 @@
 
 ## Última verificação completa
 
-Executada na branch `release/1.0.0`, depois das correções da estabilização (segurança das rotas públicas,
-webhooks, fila, financeiro, backup, configuração e interface), em 20/11/2026:
+Executada na branch `release/1.1.0` (cadastro de cupons, condições negociadas e tarifas adicionais, migration
+0015), em 21/11/2026:
 
 | Verificação | Resultado |
 |---|---|
-| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 624 testes, 0 falhas |
-| Cobertura de domínio + aplicação | 99,10% de linhas, 92,10% de branches (metas 90% / 80%) |
-| `rake test:browser` (Ferrum, Chrome headless) | 9 testes, 0 falhas |
-| `rubocop` (árvore da branch, com os modos de arquivo do repositório), actionlint | sem ofensas |
-| Backup e restauração com o esquema final (14 migrations) | exercitados; registro em `RUNBOOKS.md` |
-| `bin/setup` completo a partir de diretório limpo, com healthchecks e parada graciosa | exercitado; registro em `RUNBOOKS.md` §1 |
-| CI do PR da release (#11) | 7 checks aprovados |
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 819 testes, 0 falhas |
+| Cobertura de domínio + aplicação | 99,25% de linhas, 93,14% de branches (metas 90% / 80%) |
+| `rake test:browser` (Ferrum, Chrome headless) | 11 testes, 0 falhas |
+| `rubocop` (árvore da branch, com os modos de arquivo do repositório) | sem ofensas |
+| Atualização de um banco da 1.0.0 para a 0015 (verificação prévia, aborto por condições sobrepostas, ajuste, migration com a 1.0.0 em execução, troca para a 1.1.0, retorno à 1.0.0) | exercitada; registro em `RUNBOOKS.md` §13.5 |
+| Backup e restauração com o esquema final (15 migrations, 71 tabelas) | exercitados; registro em `RUNBOOKS.md` §4 |
+| `bin/setup` completo a partir de diretório limpo | exercitado na 1.0.0 (`RUNBOOKS.md` §1); na 1.1.0, web e worker `healthy` e parada com código 0 conferidos na atualização |
 
-Verificação anterior, na integração do PR #9: 553 testes, 0 falhas; 7 checks de CI aprovados.
+Verificação anterior, na `release/1.0.0` (20/11/2026): 624 testes, 0 falhas; 9 testes de navegador; backup,
+restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprovados no PR #11.
 
 ## Entregas por incremento
 
@@ -34,13 +35,8 @@ Verificação anterior, na integração do PR #9: 553 testes, 0 falhas; 7 checks
 | #8 | CLI operacional e correção do detalhe de reserva na API | Integrado e testado |
 | #9 | Testes de navegador, métricas, correlação de logs, demonstração de ponta a ponta | Integrado e testado |
 | #10 | Documentação consolidada, backup e restauração, publicação de imagem por tag | Integrado; backup e restauração exercitados (ver `RUNBOOKS.md`) |
-| release/1.0.0 | Estabilização: correções de segurança, concorrência, operação, documentação e interface | Testado (ver acima) |
-| feature/cadastro-condicoes-comerciais | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Implementado e testado na branch; entra na versão 1.1.0 |
-
-A tabela "Última verificação completa" acima registra a versão 1.0.0 (14 migrations). A migration 0015 tem
-teste automatizado de atualização a partir do esquema da 0014, mas backup, restauração e `bin/setup` ainda
-não foram exercitados com ela: serão exercitados e registrados em `RUNBOOKS.md` na release 1.1.0 (o
-procedimento de atualização está na seção 13).
+| #11 | Estabilização da versão 1.0.0: correções de segurança, concorrência, operação, documentação e interface | Integrado e testado; versão 1.0.0 |
+| #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 (ver acima) |
 
 ## Casos obrigatórios cobertos por testes
 
