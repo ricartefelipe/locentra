@@ -94,6 +94,7 @@
     <% end %>
   </section>
 </div>
+<% if @agreements %><%= partial("customers/price_agreements") %><% end %>
 <%= partial("customers/portal_access") %>
 <%= partial("shared/attachments", owner_type: "customer", owner_id: c.id, can_upload: can?("customers.write")) %>
 <section class="panel">

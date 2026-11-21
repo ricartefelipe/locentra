@@ -71,7 +71,7 @@ module Locentra
           r.post "/clientes/:id", customers, :update
           r.post "/clientes/:id/contatos", customers, :add_contact
           r.post "/clientes/:id/enderecos", customers, :add_address
-          CommercialTermsRoutes.draw_web(r, deps)
+          CommercialTermsRoutes.draw_web(r, deps, customers: customers)
 
           catalog = w::CatalogController.new(deps)
           r.get "/produtos", catalog, :index

@@ -5,13 +5,14 @@ require_relative "web/commercial_terms_controllers"
 module Locentra
   module Interfaces
     module HTTP
-      # Rotas das condições comerciais (cupons e tarifas adicionais). As rotas literais vêm antes das
-      # parametrizadas ("/cupons/novo" antes de "/cupons/:id").
+      # Rotas das condições comerciais: cupons, tarifas adicionais e condições negociadas por cliente. As
+      # rotas literais vêm antes das parametrizadas ("/cupons/novo" antes de "/cupons/:id").
       module CommercialTermsRoutes
         module_function
 
-        # Interface web da equipe.
-        def draw_web(router, deps)
+        # Interface web da equipe. `customers` é o controlador de clientes já montado pela tabela
+        # principal: as condições negociadas são ações da página do cliente.
+        def draw_web(router, deps, customers:)
           r = router
           coupons = Web::CouponsController.new(deps)
           r.get "/cupons", coupons, :index
@@ -31,6 +32,9 @@ module Locentra
           r.post "/tarifas/:id", fees, :update
           r.post "/tarifas/:id/desativar", fees, :deactivate
           r.post "/tarifas/:id/reativar", fees, :reactivate
+
+          r.post "/clientes/:id/condicoes", customers, :create_agreement
+          r.post "/clientes/:id/condicoes/:condicao_id/encerrar", customers, :end_agreement
         end
       end
     end
