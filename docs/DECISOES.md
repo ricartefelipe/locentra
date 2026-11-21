@@ -282,6 +282,7 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   desativação no mesmo estado são operações nulas, sem auditoria, em todos os canais. Não há evento novo de
   webhook; o uso do cupom é auditado na criação da reserva.
 - **Consequências:** a situação de cupons, condições e usos é sempre calculada no instante da consulta, com a
-  mesma regra no domínio, nas consultas SQL e no gatilho (testes de propriedade comparam as três). A contagem
-  de usos ativos custa uma consulta ao livro por cupom; o índice `(organization_id, coupon_id, redeemed_at)`
-  atende a esse acesso.
+  mesma regra no domínio, nas consultas SQL e no gatilho. Testes de propriedade comparam as três com dados
+  aleatórios: a situação e os usos ativos calculados na SQL com o domínio, e a decisão do gatilho de limite
+  com `Redemptions.counts_toward_limit?` somado ao contador legado. A contagem de usos ativos custa uma
+  consulta ao livro por cupom; o índice `(organization_id, coupon_id, redeemed_at)` atende a esse acesso.

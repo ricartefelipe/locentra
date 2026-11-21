@@ -199,6 +199,53 @@ class CommercialTermsRepositoryTest < DatabaseTest
     assert_equal([true, false], tenant_tx { |tx| [coupon, unused].map { |c| @coupons.ever_redeemed?(tx, c.id) } })
   end
 
+  # O gatilho conta todas as situações ativas da reserva (não só a solicitação) e soma o contador legado.
+  def test_limit_trigger_counts_every_active_status_and_the_legacy_counter
+    coupon = create_coupon("SITUACOES", max_redemptions: 4)
+    owner_query("UPDATE coupons SET redemptions = 1 WHERE id = $1", [coupon.id])
+    used = Array.new(3) { |i| book(mode: "request", day: 10 + i) }
+    used.each { |reservation| redeem(coupon, reservation) }
+    %w[confirmed in_progress completed].zip(used) { |status, r| owner_query("UPDATE reservations SET status = $2 WHERE id = $1", [r.id, status]) }
+    other = book(mode: "request", day: 20)
+
+    assert_equal({ "base" => ["dados inválidos"] }, error_fields { redeem(coupon, other) }, "1 legado + 3 ativos = máximo")
+    owner_query("UPDATE reservations SET status = 'cancelled' WHERE id = $1", [used.first.id])
+    redeem(coupon, other)
+
+    assert_equal "4 de 4", usage(coupon.id)
+  end
+
+  # Dados aleatórios, instante aleatório: o gatilho aceita o uso exatamente quando o contador legado mais
+  # os usos que contam para o limite no domínio (Redemptions.counts_toward_limit?) ficam abaixo do máximo.
+  def test_property_limit_trigger_matches_the_domain
+    base = @clock.now
+    spare = book(mode: "request", day: 28)
+    uses = random_uses(Random.new(Integer(ENV.fetch("SEED", Minitest.seed.to_s))), base)
+    coupons = owner_query("SELECT id, max_redemptions, redemptions FROM coupons WHERE max_redemptions IS NOT NULL")
+    property("gatilho de limite igual ao domínio", runs: 40) do |generator|
+      coupon = coupons.sample(random: generator)
+      at = base + generator.rand(-9_000..9_000)
+      counted = uses.fetch(coupon["id"]).count { |state, hold, _id| Pricing::Redemptions.counts_toward_limit?(state, hold, at) }
+      expected = coupon["redemptions"].to_i + counted < coupon["max_redemptions"].to_i
+
+      assert_equal expected, trigger_accepts?(coupon["id"], spare, at), "cupom #{coupon["id"]} em #{at.iso8601}"
+    end
+  end
+
+  class Rollback < StandardError; end
+
+  # Tenta gravar o uso e desfaz a transação em seguida: verdadeiro quando o gatilho aceitou.
+  def trigger_accepts?(coupon_id, reservation, at)
+    tenant_tx do |tx|
+      @pricing.insert_redemption(tx, redemption_row(Struct.new(:id).new(coupon_id), reservation, at: at))
+      raise Rollback
+    end
+  rescue D::ValidationError
+    false
+  rescue Rollback
+    true
+  end
+
   def test_redemption_listing_respects_actor_scopes_and_orders_by_instant
     coupon = create_coupon("LISTA")
     first = book(coupon_code: "LISTA")
