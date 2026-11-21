@@ -48,7 +48,9 @@ module Locentra
     private
 
     def build_repositories
-      @queue = I::Jobs::Queue.new(clock: clock, ids: ids)
+      # Limite de execuções simultâneas por organização somente na fila de webhooks (destinos dos clientes).
+      @queue = I::Jobs::Queue.new(clock: clock, ids: ids,
+                                  organization_limits: { A::Webhooks::DELIVERY_QUEUE => config.webhook_max_per_organization }.freeze)
       @repos = {
         users: P::UserRepository.new, sessions: P::SessionRepository.new, user_tokens: P::UserTokenRepository.new,
         access: P::AccessRepository.new, organizations: P::OrganizationRepository.new, subscriptions: P::SubscriptionRepository.new,
