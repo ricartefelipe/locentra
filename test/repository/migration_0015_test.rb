@@ -60,14 +60,16 @@ class Migration0015Test < Minitest::Test
     conn&.exec("RESET app.tenant_id")
   end
 
-  def legacy_coupon(code, redemptions:, max:)
+  def legacy_coupon(code, redemptions:, max:, valid_from: nil, valid_until: nil, active: true)
     id = SecureRandom.uuid
-    owner_query(<<~SQL, [id, @organization_id, code, max, redemptions, LEGACY_AT])
-      INSERT INTO coupons (id, organization_id, code, kind, value, max_redemptions, redemptions, created_at)
-      VALUES ($1, $2, $3, 'percent', 1000, $4, $5, $6)
+    owner_query(<<~SQL, [id, @organization_id, code, max, redemptions, LEGACY_AT, valid_from, valid_until, active])
+      INSERT INTO coupons (id, organization_id, code, kind, value, max_redemptions, redemptions, created_at, valid_from, valid_until, active)
+      VALUES ($1, $2, $3, 'percent', 1000, $4, $5, $6, $7, $8, $9)
     SQL
     id
   end
+
+  def errors_of(&) = assert_raises(D::ValidationError, &).errors
 
   def legacy_agreement(bps, valid_until: nil, product_id: nil)
     id = SecureRandom.uuid
@@ -120,6 +122,38 @@ class Migration0015Test < Minitest::Test
     ended = uc(:end_price_agreement).call(@actor, agreement_id, reason: "Contrato encerrado")
 
     assert_equal @clock.now, ended.ended_at, "a condição legada aceita o encerramento"
+  end
+
+  # A 1.0.0 aceitava fim anterior ao início e máximo acima de 1.000.000. Depois da 0015, esses cupons
+  # continuam desativáveis e reativáveis (a contenção nunca é bloqueada); a edição exige corrigir o campo
+  # inválido, com o erro no próprio campo, e o banco recusa gravar valores novos fora do limite.
+  def test_legacy_coupons_outside_the_new_limits_can_be_deactivated_and_reactivated
+    legacy_coupon("INVERTIDO", redemptions: 0, max: nil, valid_from: "2026-06-01T00:00:00Z", valid_until: "2026-05-01T00:00:00Z")
+    legacy_coupon("GRANDE", redemptions: 0, max: 5_000_000)
+    legacy_coupon("GRANDEINATIVO", redemptions: 0, max: 5_000_000, active: false)
+
+    assert_equal ["0015"], migrator(MIGRATIONS).migrate
+    %w[INVERTIDO GRANDE].each do |code|
+      result = uc(:set_coupon_active).call(@actor, code, active: false)
+
+      assert_equal [true, false, @clock.now], [result.changed, result.record.active, result.record.deactivated_at], code
+      assert_equal "inactive", uc(:get_coupon).call(@actor, code)[:status], code
+    end
+    assert_equal({ "cupom" => ["cupom desativado"] }, errors_of { book(10, coupon_code: "GRANDE") })
+    reactivated = %w[GRANDE GRANDEINATIVO].map { |code| uc(:set_coupon_active).call(@actor, code, active: true).record.active }
+
+    assert_equal [true, true], reactivated
+    assert_equal ["entre 1 e 1.000.000"], errors_of { uc(:update_coupon).call(@actor, "GRANDE", { description: "Legado" }) }["maximo_usos"]
+    assert_equal ["deve ser posterior ao início da vigência"],
+                 errors_of { uc(:update_coupon).call(@actor, "INVERTIDO", { description: "Legado" }) }["valido_ate"]
+    fixed = uc(:update_coupon).call(@actor, "GRANDE", { description: "Legado", max_redemptions: 1_000_000 }).record
+
+    assert_equal ["Legado", 1_000_000], [fixed.description, fixed.max_redemptions]
+    refused = ["max_redemptions = 1000001", "valid_from = '2026-04-01T00:00:00Z', valid_until = '2026-04-01T00:00:00Z'"].map do |change|
+      assert_raises(PG::CheckViolation) { owner_query("UPDATE coupons SET #{change} WHERE code = 'GRANDE'") }.message[/ERROR:  ([^\n]+)/, 1]
+    end
+
+    assert_equal ["o máximo de usos do cupom é 1.000.000", "o fim da vigência do cupom deve ser posterior ao início"], refused
   end
 
   def test_upgrade_refuses_overlapping_legacy_agreements

@@ -224,7 +224,8 @@ Versões com verificação prévia ou restrição de retorno têm seção própr
 
 A migration `0015_condicoes_comerciais.sql` é aplicada numa única transação. A atualização a partir do
 esquema da 0014 é coberta por `test/repository/migration_0015_test.rb` (colunas preenchidas, RLS forçada
-restaurada, contador de usos preservado e recusa de condições sobrepostas); o procedimento abaixo ainda não
+restaurada, contador de usos preservado, cupons legados fora dos limites novos ainda desativáveis e recusa
+de condições sobrepostas); o procedimento abaixo ainda não
 foi executado num ambiente com dados reais e será exercitado na release 1.1.0.
 
 ### 13.1 Verificação prévia (antes do passo 2 da seção 12)
@@ -260,8 +261,10 @@ SELECT 'cupom', organization_id, id, valid_from, valid_until
 ```
 
 A consulta 2 lista condições que nunca valeram (fim anterior ao cadastro) e cupons com fim anterior ao início
-ou máximo acima de 1.000.000. Essas linhas continuam aceitas depois da migration; um cupom nessa situação só
-é editado quando a edição corrige o campo inválido.
+ou máximo acima de 1.000.000. Essas linhas continuam aceitas depois da migration: o gatilho
+`coupons_enforce_limits` verifica somente a inserção e as colunas alteradas, então um cupom nessa situação
+pode ser desativado e reativado normalmente (tela **Cupons**, API ou CLI). A edição exige corrigir o campo
+inválido, e o erro aparece no próprio campo (**Fim da vigência** ou **Máximo de usos**).
 
 ### 13.2 Ajuste das condições sobrepostas
 
@@ -291,8 +294,8 @@ ajuste passa a ser feito pelo encerramento (imediato ou agendado) na página do 
 
 - Faça o backup (seção 3) e aplique a migration no passo 2 da seção 12, **antes** de substituir web e
   worker. A 1.0.0 continua funcionando sobre o esquema da 0015 durante a troca.
-- A 0015 executa `ALTER TABLE` em `coupons` e `customer_price_agreements` (colunas, constraints e
-  privilégios) e cria gatilhos em `reservations` e `reservation_items`. As operações são rápidas, mas pedem
+- A 0015 executa `ALTER TABLE` em `coupons` e `customer_price_agreements` (colunas, constraints, gatilhos
+  e privilégios) e cria gatilhos em `reservations` e `reservation_items`. As operações são rápidas, mas pedem
   trava exclusiva nas tabelas: transações longas em andamento sobre elas atrasam a migration, e a migration
   atrasa as requisições que chegam enquanto ela espera. Prefira um horário de pouco movimento.
 - Depois da troca, confira `/health/ready` e, por alguns dias, a métrica

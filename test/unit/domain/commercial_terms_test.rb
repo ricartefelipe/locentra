@@ -118,6 +118,12 @@ class CommercialTermsDomainTest < UnitTest
 
     assert_equal ["deve ser posterior ao início da vigência"],
                  errors_of { P::Coupons.revise(legacy, { description: "x" }, now: now) }["valido_ate"]
+    oversized = coupon.with(max_redemptions: 5_000_000)
+
+    assert_equal ["entre 1 e 1.000.000"], errors_of { P::Coupons.revise(oversized, { description: "x" }, now: now) }["maximo_usos"],
+                 "máximo da 1.0.0 acima do limite: erro no campo, mesmo sem a chave"
+    assert_equal 1_000, P::Coupons.revise(oversized, { max_redemptions: 1_000 }, now: now).max_redemptions
+    refute P::Coupons.set_active(oversized, false, now: now).active, "a desativação não depende da validação dos campos"
     assert_equal ["até 200 caracteres"], errors_of { P::Coupons.revise(used, { description: "a" * 201 }, now: now) }["descricao"]
   end
 

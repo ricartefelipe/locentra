@@ -27,11 +27,33 @@ ALTER TABLE coupons
   ADD COLUMN lock_version integer NOT NULL DEFAULT 1 CHECK (lock_version > 0);
 UPDATE coupons SET updated_at = created_at;
 ALTER TABLE coupons ALTER COLUMN updated_at SET NOT NULL;
--- NOT VALID: linhas da 1.0.0 não são revalidadas; inserções e alterações novas, sim.
-ALTER TABLE coupons
-  ADD CONSTRAINT coupons_validity_check CHECK (valid_from IS NULL OR valid_until IS NULL OR valid_until > valid_from) NOT VALID,
-  ADD CONSTRAINT coupons_max_redemptions_limit_check CHECK (max_redemptions IS NULL OR max_redemptions <= 1000000) NOT VALID;
 ALTER TABLE coupons FORCE ROW LEVEL SECURITY;
+-- Ordem da vigência e máximo de usos: verificados por gatilho, e não por CHECK, porque a 1.0.0 aceitava fim
+-- anterior ao início e máximo acima de 1.000.000. Uma CHECK, mesmo NOT VALID, seria avaliada em qualquer
+-- UPDATE da linha e impediria desativar ou reativar esses cupons; o gatilho verifica a inserção e somente
+-- as colunas alteradas. A aplicação valida o estado completo antes de editar (erro no campo).
+CREATE FUNCTION coupons_enforce_limits() RETURNS trigger
+  LANGUAGE plpgsql
+  AS $$
+DECLARE
+  validity_changed boolean := true;
+  maximum_changed boolean := true;
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    validity_changed := NEW.valid_from IS DISTINCT FROM OLD.valid_from OR NEW.valid_until IS DISTINCT FROM OLD.valid_until;
+    maximum_changed := NEW.max_redemptions IS DISTINCT FROM OLD.max_redemptions;
+  END IF;
+  IF validity_changed AND NEW.valid_until <= NEW.valid_from THEN
+    RAISE EXCEPTION 'o fim da vigência do cupom deve ser posterior ao início' USING ERRCODE = 'check_violation';
+  END IF;
+  IF maximum_changed AND NEW.max_redemptions > 1000000 THEN
+    RAISE EXCEPTION 'o máximo de usos do cupom é 1.000.000' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER coupons_enforce_limits BEFORE INSERT OR UPDATE ON coupons
+  FOR EACH ROW EXECUTE FUNCTION coupons_enforce_limits();
 COMMENT ON COLUMN coupons.redemptions IS
   'Usos registrados até a versão 1.0.0 (contador congelado). Usos posteriores: coupon_redemptions.';
 CREATE INDEX coupons_org_created_idx ON coupons (organization_id, created_at DESC);

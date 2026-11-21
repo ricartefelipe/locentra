@@ -71,6 +71,7 @@ erDiagram
 | Código, tipo e valor do cupom e código da tarifa não mudam | `UPDATE` concedido a `locentra_app` somente nas colunas editáveis; `DELETE` de tarifa revogado |
 | No máximo um uso de cupom por reserva; uso imutável | `UNIQUE (organization_id, reservation_id)` em `coupon_redemptions`; `UPDATE` e `DELETE` revogados |
 | Usos ativos do cupom ≤ `max_redemptions` | Gatilho `coupon_redemptions_enforce_limit` (`BEFORE INSERT`): trava o cupom e conta os usos ativos no instante do uso (bloqueio vencido conta durante a carência de 5 minutos); a aplicação faz a mesma verificação sob `FOR UPDATE` |
+| Vigência do cupom com fim posterior ao início e máximo de usos até 1.000.000 | Gatilho `coupons_enforce_limits` (`BEFORE INSERT OR UPDATE`): verifica a inserção e as colunas alteradas, para que cupons da 1.0.0 fora desses limites continuem desativáveis e reativáveis |
 | Cupom com uso registrado não é excluído | FK composta de `coupon_redemptions` para `coupons`, sem cascata |
 | Condições negociadas do mesmo cliente e escopo sem vigências sobrepostas | `customer_price_agreements_no_overlap EXCLUDE USING gist` sobre `price_agreement_window(valid_from, valid_until, ended_at)` |
 | Condição negociada imutável, com encerramento único | `UPDATE` concedido somente em `ended_at`, `ended_by` e `end_reason`; gatilho `customer_price_agreements_end_once`; `CHECK` de coerência entre instante, motivo e autor; `DELETE` revogado |

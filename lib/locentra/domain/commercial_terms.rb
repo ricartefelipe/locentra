@@ -157,7 +157,9 @@ module Locentra
         end
 
         # Somente as chaves presentes mudam; nil limpa descrição, vigência e máximo, e vale 0 no subtotal
-        # mínimo. O estado resultante é validado por inteiro (inclusive cupons da 1.0.0).
+        # mínimo. O estado resultante é validado por inteiro (inclusive cupons da 1.0.0 com fim anterior
+        # ao início ou máximo acima do limite): o erro sai no campo a corrigir. A ativação e a desativação
+        # não passam por aqui e valem para qualquer cupom.
         def revise(coupon, attrs, now:)
           unknown = attrs.keys - EDITABLE
           raise ArgumentError, "campos não editáveis: #{unknown.join(", ")}" unless unknown.empty?
@@ -173,6 +175,7 @@ module Locentra
             check.call("valido_ate") do
               validity!(revised.valid_from, revised.valid_until, now, future: revised.valid_until != coupon.valid_until)
             end
+            check.call("maximo_usos") { max_redemptions!(revised.max_redemptions) } unless attrs.key?(:max_redemptions)
             check.call("maximo_usos") { below_active!(revised) }
             data
           end
