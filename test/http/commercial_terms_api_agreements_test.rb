@@ -2,7 +2,8 @@
 
 require_relative "commercial_terms_api_helper"
 
-# Condições negociadas na API v1: paginação, escopos, sobreposição e encerramento imediato e agendado.
+# Condições negociadas e tarifas na criação de reserva pela API v1: paginação, escopos, sobreposição,
+# encerramento imediato e agendado, autorização de ajustes de tarifa e snapshot de preços.
 class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
   AGREEMENT_KEYS = %w[id customer_id scope product_id discount_bps valid_from valid_until notes ended_at end_reason status created_at].freeze
 
@@ -124,5 +125,89 @@ class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
     get!(200, agreements_path)
 
     assert_equal [nil, "active"], json_body["data"].first.values_at("ended_at", "status")
+  end
+
+  def test_reservation_fees_by_default_amount_and_authorized_adjustments
+    fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000)
+    attendant = token(%w[reservations.read reservations.write])
+
+    post!(201, "/reservations", reservation_payload(fees: [{ "fee_id" => fee.id }]), token: attendant)
+
+    assert_equal 105_000, json_body["total"]["amount_cents"]
+    get!(200, "/reservations/#{json_body["id"]}", token: attendant)
+
+    assert_equal [{ "fee_id" => fee.id, "code" => "ENTREGA", "description" => "Entrega e retirada no local", "amount_cents" => 15_000,
+                    "default_amount_cents" => 15_000, "source" => "catalog" }], json_body["pricing"]["fees"]
+    [{ "fee_id" => fee.id, "amount_cents" => 20_000 }, { "description" => "Taxa de estacionamento", "amount_cents" => 3000 }].each do |entry|
+      post!(403, "/reservations", reservation_payload(day: 13, fees: [entry]), token: attendant)
+
+      assert_equal "forbidden", error_code
+      assert_includes error_message, "exige a permissão de ajustar tarifas"
+    end
+    post!(201, "/reservations", reservation_payload(day: 13, fees: [{ "fee_id" => fee.id, "amount_cents" => 20_000 },
+                                                                    { "description" => "Taxa de estacionamento", "amount_cents" => 3000 }]))
+
+    assert_equal 113_000, json_body["total"]["amount_cents"]
+    assert_equal([{ "fee_id" => fee.id, "code" => "ENTREGA", "description" => "Entrega e retirada no local", "default_amount_cents" => 15_000,
+                    "amount_cents" => 20_000, "source" => "catalog" },
+                  { "fee_id" => nil, "code" => nil, "description" => "Taxa de estacionamento", "default_amount_cents" => nil,
+                    "amount_cents" => 3000, "source" => "custom" }].map { |entry| entry.sort.to_h },
+                 audit_events("reservation.created").last["details"]["fee_overrides"].map { |entry| entry.sort.to_h })
+    post!(403, "/reservations", reservation_payload(day: 16, fees: [{ "fee_id" => fee.id, "amount_cents" => 14_999 }]))
+
+    assert_includes error_message, "redução da tarifa ENTREGA acima do limite", "credenciais não reduzem tarifas"
+    assert_equal 2, owner_query("SELECT count(*) AS n FROM reservations").first["n"].to_i
+  end
+
+  def test_reservation_fees_format_and_lookup_errors
+    fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000)
+    ["ENTREGA", [fee.id], [{}], [{ "fee_id" => fee.id, "description" => "Duas formas" }], [{ "amount_cents" => 100 }]].each do |fees|
+      post!(422, "/reservations", reservation_payload(fees: fees))
+
+      assert_equal ["deve ser uma lista de objetos com fee_id ou description e amount_cents"], fields["fees"], fees.inspect
+    end
+    [[{ "fee_id" => fee.id, "amount_cents" => "150" }], [{ "fee_id" => fee.id, "amount_cents" => 150.5 }], [{ "fee_id" => fee.id, "amount_cents" => 0 }],
+     [{ "description" => "Sem valor" }], [{ "description" => 5, "amount_cents" => 100 }], [{ "fee_id" => "abc" }],
+     [{ "fee_id" => fee.id }, { "fee_id" => fee.id }], Array.new(11) { |index| { "description" => "Avulsa #{index}", "amount_cents" => 100 } }].each do |fees|
+      post!(422, "/reservations", reservation_payload(fees: fees))
+
+      assert_equal %w[tarifas], fields.keys, fees.inspect
+    end
+    post!(404, "/reservations", reservation_payload(fees: [{ "fee_id" => SecureRandom.uuid }]))
+
+    assert_equal "tarifa não encontrada", error_message
+    beta = create_organization(name: "Locadora Beta", email: "dona@beta.test")
+    foreign_fee = create_fee("ENTREGA", "Entrega da outra organização", 9000, actor: beta[:actor])
+
+    post!(404, "/reservations", reservation_payload(fees: [{ "fee_id" => foreign_fee.id }]))
+    uc(:set_fee_active).call(@actor, fee.id, active: false)
+
+    post!(422, "/reservations", reservation_payload(fees: [{ "fee_id" => fee.id }]))
+
+    assert_equal ["a tarifa ENTREGA está inativa"], fields["tarifas"]
+    assert_empty owner_query("SELECT id FROM reservations")
+  end
+
+  def test_reservation_detail_brings_coupon_agreements_and_fees
+    fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000)
+    coupon = create_coupon("BEMVINDO10", description: "Boas-vindas")
+    agreement = create_agreement(@customer, 800)
+
+    post!(201, "/reservations", reservation_payload(coupon_code: "bemvindo10", fees: [{ "fee_id" => fee.id }]))
+
+    assert_equal 89_520, json_body["total"]["amount_cents"]
+    get!(200, "/reservations/#{json_body["id"]}")
+    pricing = json_body["pricing"]
+
+    assert_equal [82_800, 8280, 15_000, 89_520], pricing.values_at("subtotal_cents", "coupon_discount_cents", "fees_cents", "total_cents")
+    assert_equal({ "id" => coupon.id, "code" => "BEMVINDO10", "kind" => "percent", "value" => 1000, "description" => "Boas-vindas",
+                   "valid_from" => nil, "valid_until" => nil }, pricing["coupon"])
+    assert_equal([[agreement.id, "general", nil, 800]], pricing["agreements"].map { |row| row.values_at("id", "scope", "product_id", "discount_bps") })
+    assert_equal([[fee.id, "ENTREGA", 15_000, "catalog"]], pricing["fees"].map { |row| row.values_at("fee_id", "code", "amount_cents", "source") })
+    assert_equal [agreement.id, 800, 7200], json_body["items"].first["pricing"].values_at("negotiated_agreement_id", "negotiated_discount_bps",
+                                                                                          "negotiated_discount_cents")
+    get!(200, "/coupons/BEMVINDO10")
+
+    assert_equal [1, 1], json_body.values_at("redemptions", "total_redemptions")
   end
 end

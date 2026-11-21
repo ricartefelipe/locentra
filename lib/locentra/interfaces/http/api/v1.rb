@@ -47,6 +47,7 @@ module Locentra
 
         class V1Controller < Controller
           S = Serializers
+          FEES_FORMAT = "deve ser uma lista de objetos com fee_id ou description e amount_cents"
 
           def availability(ctx)
             ids = ctx.query("product_ids").to_s.split(",").map(&:strip).reject(&:empty?)
@@ -92,14 +93,16 @@ module Locentra
             json(200, S.reservation_details(data))
           end
 
-          # Criação idempotente: exige Idempotency-Key.
+          # Criação idempotente: exige Idempotency-Key. Tarifas (`fees`): do catálogo pelo valor padrão com
+          # `reservations.write`; valor diferente do padrão e tarifa avulsa exigem `fees.override`.
           def create_reservation(ctx)
             data = ctx.json
             lines = api_lines(data["items"])
+            fees = api_fees(data["fees"])
             idempotent(ctx, "reservations.write", "POST /api/v1/reservations", data) do |tx, actor|
               reservation = uc(:create_reservation).call(actor, {
                 customer_id: data["customer_id"], branch_id: data["branch_id"], period: api_period(data),
-                lines: lines, mode: (data["mode"] || "hold").to_s, hold_minutes: data["hold_minutes"],
+                lines: lines, fees: fees, mode: (data["mode"] || "hold").to_s, hold_minutes: data["hold_minutes"],
                 notes: data["notes"], coupon_code: data["coupon_code"], source: "api"
               }.compact, tx: tx)
               [201, S.reservation(reservation)]
@@ -136,6 +139,25 @@ module Locentra
             raise Domain::ValidationError.field("items", "deve ser uma lista de objetos com product_id e quantity") unless list.is_a?(Array) && list.all?(Hash)
 
             list.map { |i| Domain::Reservations::Line.build(product_id: i["product_id"], quantity: i["quantity"]) }
+          end
+
+          # Tarifas da reserva: `{ fee_id, amount_cents? }` (catálogo; sem valor vale o padrão) ou
+          # `{ description, amount_cents }` (avulsa). Outro formato é erro de validação (422).
+          def api_fees(fees)
+            list = fees.nil? ? [] : fees
+            raise Domain::ValidationError.field("fees", FEES_FORMAT) unless list.is_a?(Array) && list.all?(Hash)
+
+            list.map { |item| api_fee(item) }
+          end
+
+          def api_fee(item)
+            raise Domain::ValidationError.field("fees", FEES_FORMAT) unless item.key?("fee_id") ^ item.key?("description")
+
+            cents = strict_integer(item, "amount_cents", "tarifas", min: 1, max: Domain::Money::MAX_CENTS, allow_nil: item.key?("fee_id"))
+            amount = cents && Domain::Money.new(cents)
+            return Domain::Pricing::FeeRequest.catalog(fee_id: item["fee_id"], amount: amount) if item.key?("fee_id")
+
+            Domain::Pricing::FeeRequest.custom(description: strict_text(item, "description", "tarifas"), amount: amount)
           end
 
           # Inteiro do JSON: somente Integer é aceito. Números com casas decimais, textos numéricos e
