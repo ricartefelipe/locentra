@@ -64,6 +64,11 @@ devolução.
   (filial, período, validade, itens, totais, condições, desconto, tarifas e política de bloqueio) é
   recusada. As tarifas fazem parte da impressão digital da versão: uma versão que só muda tarifas é uma
   versão nova.
+- Cada versão grava a política de cancelamento vigente na organização (`quote_versions.cancellation_policy`,
+  imutável), que também faz parte da impressão digital: depois de uma troca da política, uma revisão sem outra
+  mudança gera uma versão nova com a política nova. A equipe e o portal veem a "Política de cancelamento desta
+  versão". O envio exige a filial da versão ativa, com ou sem bloqueio
+  ([configuracoes-organizacao.md](configuracoes-organizacao.md)).
 - Revisar um orçamento enviado o devolve a rascunho e exige novo envio; o bloqueio temporário do envio
   anterior é cancelado. Orçamentos aprovados ou convertidos não aceitam nova versão.
 - A validade (`valid_until`) é obrigatória, futura, de no máximo 90 dias e termina até o início da
@@ -138,8 +143,9 @@ devolução.
 - `IssueContract` exige reserva confirmada (ou em andamento) e é idempotente: a reserva é bloqueada e,
   se já houver contrato, ele é devolvido; `UNIQUE (reservation_id)` garante no banco.
 - `terms_snapshot` congela organização, cliente (documento, contato, endereço), filial, reserva,
-  orçamento de origem, período em UTC e no fuso da organização, itens e preços, ajustes anteriores,
-  total contratado, caução, política de cancelamento vigente (com descrição das faixas) e condições
+  orçamento de origem, período em UTC e no fuso de referência da reserva (o da precificação), itens e preços,
+  ajustes anteriores, total contratado, caução, a política de cancelamento registrada na reserva (com
+  descrição das faixas) e condições
   (informadas na emissão ou as da versão aprovada do orçamento).
 - O número definitivo é atribuído pelo contador da organização no fim da transação, antes da geração
   do documento que o exibe.
@@ -160,7 +166,9 @@ devolução.
 
 - `AmendContract` (extensão de prazo) compõe `ExtendReservation` na mesma transação (`tx:`): as
   alocações são estendidas, a diferença é gravada em `reservation_adjustments` (kind `extension`) com a
-  tabela contratada, o aditivo registra `amount_delta_cents` e uma nova versão do PDF é gerada.
+  tabela contratada, o aditivo registra `amount_delta_cents` e uma nova versão do PDF é gerada. Descrição,
+  horários locais do aditivo e novas versões do documento usam o fuso dos termos do contrato, mesmo depois de
+  uma troca do fuso da organização.
 - Extensão que invade outra reserva gera `Unavailable` com a reserva conflitante e desfaz tudo: nenhum
   aditivo, ajuste, documento ou anexo é gravado.
 - Com contrato em aberto, `RescheduleReservation`, `ExtendReservation` e `CancelReservation` são
@@ -175,7 +183,8 @@ devolução.
 ### Cancelamento
 
 - Multa = total contratado vigente (total da emissão + diferenças dos aditivos) × percentual da faixa da
-  política congelada no contrato, escolhida pela antecedência em relação ao início
+  política congelada no contrato (copiada da reserva, que a recebeu na criação ou da versão do orçamento),
+  escolhida pela antecedência em relação ao início
   (`Domain::Organizations::CancellationPolicy.fee_bps`). Padrão: 72 h ou mais → 0%; de 24 h a menos de
   72 h → 30%; menos de 24 h ou após o início → 100%.
 - `CancelContract` grava `reservation_adjustments` kind `cancellation_fee` quando a multa é positiva,

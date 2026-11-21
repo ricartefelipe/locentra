@@ -18,6 +18,12 @@ plataforma é separada dos contratos de locação entre a organização e seus c
 - **Organizações e acesso:** filiais, usuários, convites, papéis (proprietário, administrador, gerente,
   atendente, operador de estoque, financeiro, auditor), alternância de organização, revogação imediata,
   credenciais de integração com escopos. [Permissões](docs/PERMISSOES.md)
+- **Configurações da organização e filiais:** nome, fuso horário (com as consequências da troca e confirmação),
+  validade padrão do bloqueio temporário e política de cancelamento editáveis pela interface web, com
+  pré-visualização e histórico; a política fica congelada na reserva, na versão do orçamento e no contrato.
+  Filiais com edição, desativação (recusada com compromissos em aberto) e reativação dentro do limite do plano.
+  Consulta pela API (`GET /api/v1/organization`) e pela CLI (`organization show`).
+  [Módulo](docs/modulos/configuracoes-organizacao.md)
 - **Clientes:** pessoa física e jurídica (CPF/CNPJ validados), contatos, pessoas autorizadas a retirar,
   endereços, anexos.
 - **Catálogo e ativos:** produtos com ativos individuais, estoque quantitativo ou kits; histórico,
@@ -85,6 +91,7 @@ docker compose --profile ops run --rm migrate ruby bin/locentra-admin db:status 
 docker compose run --rm --no-deps web ruby bin/locentra-admin db:seed  # idempotente; somente demonstração (recusado em produção)
 read -rs LOCENTRA_TOKEN && export LOCENTRA_TOKEN                     # o token não fica no histórico nem no ps
 docker compose run --rm --no-deps -e LOCENTRA_TOKEN web ruby bin/locentra reservations list
+docker compose run --rm --no-deps -e LOCENTRA_TOKEN web ruby bin/locentra organization show  # fuso, bloqueio, política e filiais
 docker compose logs -f web worker
 ```
 
