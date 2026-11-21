@@ -3,14 +3,14 @@
 require_relative "repository_helper"
 require_relative "../support/worker_support"
 
-# Agregados globais de observabilidade (queue_stats e job_outcome_totals): sem dados de tenant,
-# gravados somente pelo worker e lidos pela aplicação web para /metrics. A fila soma os desfechos
+# Agregados globais de observabilidade (queue_stats, job_outcome_totals e worker_outcome_totals): sem
+# dados de tenant, gravados somente pelo worker e lidos pela aplicação web para /metrics. A fila soma os desfechos
 # somente quando a transição vale (lease atual), e uma tarefa sem tentativas restantes soma como
 # falha permanente.
 class ObservabilityTablesTest < DatabaseTest
   include WorkerHelpers
 
-  TABLES = %w[queue_stats job_outcome_totals].freeze
+  TABLES = %w[queue_stats job_outcome_totals worker_outcome_totals].freeze
   QUEUE = "metricas_teste"
 
   def teardown
@@ -39,6 +39,27 @@ class ObservabilityTablesTest < DatabaseTest
 
     assert_equal %w[queue kind outcome total updated_at], columns["job_outcome_totals"]
     assert_equal %w[queue status size oldest_age_seconds updated_at], columns["queue_stats"]
+    assert_equal %w[family outcome total updated_at], columns["worker_outcome_totals"]
+  end
+
+  # Totais por desfecho de webhooks, pausas de endpoints e retenção: lista fechada de pares no CHECK.
+  def test_only_the_worker_writes_worker_outcome_totals_and_nobody_deletes_them
+    worker = connect(TestDatabase.worker_url)
+    worker.exec("INSERT INTO worker_outcome_totals (family, outcome, total, updated_at) VALUES ('webhook_delivery', 'held', 2, now())")
+    worker.exec("UPDATE worker_outcome_totals SET total = total + 1")
+    app = connect(TestDatabase.app_url)
+
+    assert_equal [%w[webhook_delivery held 3]], app.exec("SELECT family, outcome, total FROM worker_outcome_totals").values
+    assert_raises(PG::InsufficientPrivilege) { app.exec("INSERT INTO worker_outcome_totals VALUES ('retention', 'jobs', 1, now())") }
+    assert_raises(PG::InsufficientPrivilege) { app.exec("UPDATE worker_outcome_totals SET total = 0") }
+    assert_raises(PG::InsufficientPrivilege) { app.exec("DELETE FROM worker_outcome_totals") }
+    assert_raises(PG::InsufficientPrivilege) { worker.exec("DELETE FROM worker_outcome_totals") }
+    assert_raises(PG::CheckViolation) { worker.exec("INSERT INTO worker_outcome_totals VALUES ('retention', 'sessions', 1, now())") }
+    assert_raises(PG::CheckViolation) { worker.exec("INSERT INTO worker_outcome_totals VALUES ('webhook_circuit', 'delivered', 1, now())") }
+    assert_raises(PG::CheckViolation) { worker.exec("INSERT INTO worker_outcome_totals VALUES ('webhook_delivery', 'held', -1, now())") }
+  ensure
+    worker&.close
+    app&.close
   end
 
   def test_only_the_worker_writes_outcome_totals_and_nobody_deletes_them

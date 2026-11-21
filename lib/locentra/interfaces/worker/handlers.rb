@@ -14,6 +14,8 @@ module Locentra
         # Retenção de tarefas concluídas (platform.housekeeping) e tamanho de cada lote removido.
         JOB_RETENTION = 14 * 86_400
         PURGE_BATCH = 5_000
+        # Retenção do histórico de integrações: uma tarefa por organização ativa e por hora.
+        RETENTION_PRIORITY = 95
 
         def initialize(system, mailer:, templates:)
           @system = system
@@ -22,6 +24,7 @@ module Locentra
           @map = {
             "events.dispatch" => method(:dispatch_event),
             "webhooks.deliver" => method(:deliver_webhook),
+            "webhooks.release_held" => method(:release_held_webhooks),
             "email.confirmation" => method(:email_confirmation),
             "email.password_reset" => method(:email_password_reset),
             "email.invitation" => method(:email_invitation),
@@ -29,7 +32,8 @@ module Locentra
             "email.send" => method(:email_send),
             "platform.fanout" => method(:platform_fanout),
             "platform.housekeeping" => method(:platform_housekeeping),
-            "organization.tick" => method(:organization_tick)
+            "organization.tick" => method(:organization_tick),
+            "organization.retention" => method(:organization_retention)
           }
           @finance = FinanceHandlers.new(system)
           @map.merge!(@finance.map)
@@ -57,6 +61,11 @@ module Locentra
 
         def deliver_webhook(job)
           @system.services[:deliver_webhook].call(job.organization_id, job.payload.fetch("delivery_id"), correlation_id: job.correlation_id)
+        end
+
+        # Lote de entregas retidas de um endpoint reativado (a tarefa se reagenda até terminar).
+        def release_held_webhooks(job)
+          @system.services[:release_held_webhooks].call(job.organization_id, job.payload.fetch("endpoint_id"), correlation_id: job.correlation_id)
         end
 
         def email_confirmation(job)
@@ -143,9 +152,11 @@ module Locentra
           orgs.size
         end
 
-        # Limpeza periódica. Tarefas concluídas (succeeded, cancelled) saem depois de JOB_RETENTION, em
-        # lotes, com as tentativas; tarefas mortas ficam até serem reprocessadas ou tratadas. Eventos da
-        # outbox, entregas de webhook e webhooks recebidos são histórico do negócio e não são removidos.
+        # Limpeza periódica da plataforma (sem tenant). Tarefas concluídas (succeeded, cancelled) saem
+        # depois de JOB_RETENTION, em lotes, com as tentativas, e o total soma em `retention/jobs`; tarefas
+        # mortas ficam até serem reprocessadas ou tratadas. Eventos da outbox, entregas de webhook e
+        # webhooks recebidos saem pela retenção por organização (organization.retention), no contexto do
+        # tenant: sem ele, a RLS esconderia as entregas e a verificação de entregas restantes falharia.
         def platform_housekeeping(_job)
           now = @system.clock.now
           purged = @system.transactor.call do |tx|
@@ -153,16 +164,18 @@ module Locentra
             tx.execute("DELETE FROM rate_limits WHERE window_start < $1", [now - 86_400])
             tx.execute("DELETE FROM sessions WHERE absolute_expires_at < $1", [now - (30 * 86_400)])
             tx.execute("DELETE FROM user_tokens WHERE expires_at < $1", [now - (30 * 86_400)])
-            tx.execute(<<~SQL, [now - JOB_RETENTION, PURGE_BATCH])
+            removed = tx.execute(<<~SQL, [now - JOB_RETENTION, PURGE_BATCH])
               DELETE FROM jobs WHERE id IN (
                 SELECT id FROM jobs WHERE status IN ('succeeded', 'cancelled') AND finished_at < $1 ORDER BY finished_at LIMIT $2)
             SQL
+            @system.repos[:outcome_totals].add(tx, "retention", "jobs", removed, now)
+            removed
           end
           { "jobs_purged" => purged }
         end
 
-        # Rotina por organização: expira bloqueios e orçamentos vencidos, detecta atrasos e limpa
-        # chaves de idempotência vencidas. Cada etapa é idempotente.
+        # Rotina por organização: expira bloqueios e orçamentos vencidos, detecta atrasos, limpa chaves de
+        # idempotência vencidas e agenda a conciliação e a retenção da hora. Cada etapa é idempotente.
         def organization_tick(job)
           actor = Application::Actor.system(organization_id: job.organization_id, request_id: job.correlation_id)
           expired = uc(:expire_holds).call(actor)
@@ -170,8 +183,23 @@ module Locentra
           overdue = uc(:detect_overdue).call(actor)
           tenant(job) { |tx| @system.repos[:idempotency].purge(tx, @system.clock.now) }
           reconciliation = @finance.schedule_reconciliation(job)
+          retention = schedule_retention(job)
           { "expired" => expired.size, "expired_quotes" => expired_quotes.size, "overdue" => Array(overdue).size,
-            "reconciliation_scheduled" => !reconciliation.nil? }
+            "reconciliation_scheduled" => !reconciliation.nil?, "retention_scheduled" => !retention.nil? }
+        end
+
+        # Retenção do histórico de integrações: uma tarefa por organização por hora (chave única por janela,
+        # sem duplicar entre workers), separada da rotina por minuto.
+        def schedule_retention(job)
+          hour = job.payload.fetch("bucket", @system.clock.now.utc.iso8601)[0, 13]
+          tenant(job) do |tx|
+            @system.queue.enqueue(tx, "organization.retention", {}, unique_key: "org-retention:#{job.organization_id}:#{hour}",
+                                                                    priority: RETENTION_PRIORITY)
+          end
+        end
+
+        def organization_retention(job)
+          @system.services[:purge_history].call(job.organization_id)
         end
 
         def send_template(template, to, vars)

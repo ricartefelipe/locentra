@@ -5,7 +5,19 @@
 
 ## Última verificação completa
 
-Executada para a versão 1.2.0 (configurações da organização, política congelada na reserva e na versão do
+Executada na branch `feature/webhooks-por-organizacao` (limite de execuções simultâneas por organização na fila
+de webhooks, circuito por endpoint com entregas retidas e reativação, retenção do histórico de integrações por
+organização, métricas por desfecho e migration 0017), em 21/11/2026:
+
+| Verificação | Resultado |
+|---|---|
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 991 testes, 28.772 asserções, 0 falhas (15 min 23 s) |
+| Cobertura de domínio + aplicação | 99,48% de linhas, 93,73% de branches (metas 90% / 80%) |
+| `rake test:browser` (Ferrum, Chrome headless) | 14 testes, 0 falhas |
+| `rubocop` | 319 arquivos, sem ofensas |
+| Atualização de um banco da 1.2.0 para a 0017 | coberta por `test/repository/migration_0017_test.rb`; o procedimento com a 1.2.0 em execução (`RUNBOOKS.md` §16) está escrito, sem exercício em ambiente Compose |
+
+Verificação anterior, executada para a versão 1.2.0 (configurações da organização, política congelada na reserva e na versão do
 orçamento, fuso de referência da reserva, gestão de filiais e migration 0016), em 21/11/2026:
 
 | Verificação | Resultado |
@@ -51,7 +63,8 @@ restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprova
 | #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 |
 | #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 (ver acima) |
 | — | Configurações da organização (nome, fuso, validade padrão do bloqueio, política de cancelamento), política congelada na reserva e na versão do orçamento, fuso de referência da reserva, gestão de filiais, `organization.read`, API, CLI e migration 0016 (branch `feature/configuracoes-organizacao`) | Testado na branch; não integrado |
-| — | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (branch `feature/api-v1-ampliada`, ADR-029) | Testado na branch; não integrado. `rake test:all` com `COVERAGE_CHECK=1`: 1015 testes, 0 falhas; cobertura de domínio + aplicação 99,30% de linhas e 93,64% de branches; `rake test:browser`: 14 testes, 0 falhas; `rubocop`: 320 arquivos, sem ofensas |
+| — | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (branch `feature/api-v1-ampliada`, ADR-030) | Testado na branch; não integrado. `rake test:all` com `COVERAGE_CHECK=1`: 1015 testes, 0 falhas; cobertura de domínio + aplicação 99,30% de linhas e 93,64% de branches; `rake test:browser`: 14 testes, 0 falhas; `rubocop`: 320 arquivos, sem ofensas |
+| — | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (branch `feature/webhooks-por-organizacao`) | Testado na branch; não integrado |
 
 ## Casos obrigatórios cobertos por testes
 
@@ -79,7 +92,10 @@ formulário aberto antes da troca de fuso recusado sem gravar e atualização do
 (inclusive aborto por `settings` fora do formato); API v1 ampliada: duas conversões simultâneas do mesmo
 orçamento com a mesma chave e com chaves diferentes, duas entregas simultâneas da mesma retirada, casos de uso
 compostos desfeitos com a transação da chave (inclusive o arquivo do PDF), aprovação vencida sem aprovar e
-respostas reais conferidas contra o OpenAPI.
+respostas reais conferidas contra o OpenAPI; fila de webhooks e retenção: reivindicações simultâneas
+com as transações abertas ao mesmo tempo sem passar do limite por organização, endpoints lentos de uma
+organização sem monopolizar as threads de webhooks, reativação disputando com a retenção de uma entrega (nas
+duas ordens), limpeza do histórico contra reenvio concorrente e atualização do esquema da 0016 para a 0017.
 
 ## Limitações conhecidas
 
@@ -100,7 +116,7 @@ respostas reais conferidas contra o OpenAPI.
   confirmada entra, convida, cria credenciais e envia orçamentos e contratos. O cadastro é limitado por IP e
   por e-mail (ADR-026); uma política de bloqueio até a confirmação fica para versão futura.
 - Configurações da organização são alteradas somente por usuário com `organization.manage`, pela interface web
-  ou por `PATCH /api/v1/organization/settings` com sessão; credenciais e CLI apenas consultam (ADR-029). Prévia,
+  ou por `PATCH /api/v1/organization/settings` com sessão; credenciais e CLI apenas consultam (ADR-030). Prévia,
   restauração dos padrões e gestão de filiais ficam na interface web. A lista de fusos oferece os fusos do
   Brasil. O CNPJ da organização, impresso nos contratos, ainda não é editável.
 - Cupons não se aplicam a orçamentos nem a solicitações do portal: valem somente na criação de reserva pela
@@ -110,6 +126,11 @@ respostas reais conferidas contra o OpenAPI.
 - Os usos de cupom anteriores à migration 0015 não são reconstruídos no livro de usos: aparecem somente no
   contador legado do cupom. O retorno à versão 1.0.0 depois de usar cupons com limite ou de encerrar
   condições negociadas tem restrições (`RUNBOOKS.md`, seção 13).
+- A retenção do histórico de integrações só roda para organizações ativas: o histórico das suspensas ou
+  encerradas não é removido.
+- Os parâmetros da pausa automática de endpoints (20 falhas consecutivas e 1 h) são fixos.
+- Não há API para consultar ou reativar endpoints de webhook; a reativação é feita somente pela interface web.
+- O limite de execuções simultâneas por organização vale somente para a fila `webhooks`.
 - Sem medições de desempenho publicadas.
 - Proteções de branch exigem os checks; aprovação de revisão não é exigida porque o repositório tem um único
   mantenedor (revisões independentes não são simuladas).

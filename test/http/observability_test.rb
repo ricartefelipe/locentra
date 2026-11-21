@@ -195,6 +195,30 @@ class ObservabilityTest < HttpTest
     end
   end
 
+  # Totais gravados pelo worker: entregas de webhook por desfecho, pausas de endpoints e registros
+  # removidos pela retenção, sem identificadores nos rótulos.
+  def test_metrics_expose_webhook_circuit_and_retention_totals_without_identifiers
+    @capture = CaptureServer.new
+    uc(:create_webhook).call(@actor, url: @capture.url, events: ["reservation.confirmed"])
+    submit_reservation("req-metricas-0001")
+    drain
+    @clock.advance(31 * 86_400)
+    worker_system.services[:purge_history].call(@org[:organization_id])
+    worker_system.transactor.call { |tx| worker_system.repos[:outcome_totals].add(tx, "webhook_circuit", "paused", 1, @clock.now) }
+    get "/metrics"
+    samples = parse_exposition(last_response.body)
+    value = ->(name, **labels) { samples.find { |s| s[:name] == name && labels.all? { |k, v| s[:labels][k.to_s] == v } }&.fetch(:value) }
+
+    assert_in_delta 1, value.call("locentra_webhook_deliveries_total", outcome: "delivered")
+    assert_in_delta 1, value.call("locentra_webhook_endpoint_pauses_total")
+    assert_operator value.call("locentra_retention_purged_total", kind: "outbox_events"), :>=, 1
+    assert_in_delta 1, value.call("locentra_retention_purged_total", kind: "webhook_deliveries")
+    names = %w[locentra_webhook_deliveries_total locentra_webhook_endpoint_pauses_total locentra_retention_purged_total]
+
+    samples.select { |s| names.include?(s[:name]) }.flat_map { |s| s[:labels].values }.each { |label| refute_match UUID, label }
+    assert_includes last_response.body, "# HELP locentra_retention_purged_total Registros removidos pela retenção, por tipo de registro"
+  end
+
   def test_metrics_endpoint_requires_the_configured_token
     protected_system = Locentra::System.new(Locentra::Config.from_env(TestDatabase.env("METRICS_TOKEN" => "token-de-metricas-0123")),
                                             clock: @clock, logger: @system.logger)

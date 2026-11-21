@@ -85,7 +85,7 @@ module Locentra
 
       # Alteração das configurações, somente por usuário (web ou API com sessão): credenciais, mesmo com o
       # escopo `organization.manage`, não alteram (a troca de fuso exige leitura e confirmação humanas, e a
-      # auditoria liga a alteração a uma pessoa; ADR-028 e ADR-029). attrs: name, timezone, hold_minutes,
+      # auditoria liga a alteração a uma pessoa; ADR-028 e ADR-030). attrs: name, timezone, hold_minutes,
       # cancellation_rows ou cancellation_tiers, confirm_timezone_change. `via` identifica o canal na
       # auditoria (a API informa "api"); com `tx`, roda na transação do chamador.
       class UpdateSettings

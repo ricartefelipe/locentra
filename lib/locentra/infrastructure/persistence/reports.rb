@@ -40,6 +40,11 @@ module Locentra
           tx.query("SELECT queue, kind, outcome, total FROM job_outcome_totals ORDER BY queue, kind, outcome")
         end
 
+        # Totais por desfecho de webhooks, pausas de endpoints e retenção, somados por todos os workers.
+        def worker_outcome_totals(tx)
+          tx.query("SELECT family, outcome, total FROM worker_outcome_totals ORDER BY family, outcome")
+        end
+
         # Executado pelo worker (papel com visão de todas as filas). Cada fila com tarefas em aberto,
         # e sempre a fila padrão, recebe as três situações (zero quando vazias), de modo que uma fila
         # esvaziada aparece com tamanho zero em vez de sumir. A idade considera somente tarefas já

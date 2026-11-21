@@ -175,7 +175,7 @@ indicadores `*_default` por valor) e as filiais com `active` e `deactivated_at`.
 
 `PATCH /api/v1/organization/settings` altera as configurações somente por sessão de usuário com
 `organization.manage` (cookie de sessão e `X-CSRF-Token`, o campo `_csrf` das páginas); credenciais recebem 403,
-mesmo com o escopo `organization.manage` (ADR-029). Regras:
+mesmo com o escopo `organization.manage` (ADR-030). Regras:
 
 - PATCH parcial: chave presente altera o campo (`name`, `time_zone`, `hold_minutes`, `cancellation_policy`) e
   chave ausente mantém o valor atual (sem `cancellation_policy`, a política gravada fica como está, sem ser
@@ -241,7 +241,7 @@ API (`OrganizationSerializers.organization`). `whoami` e a resolução de `--fil
 ## Limitações
 
 - As configurações são alteradas somente por usuário, pela interface web ou pela API v1 com sessão
-  (`PATCH /api/v1/organization/settings`); credenciais e CLI apenas consultam (ADR-029).
+  (`PATCH /api/v1/organization/settings`); credenciais e CLI apenas consultam (ADR-030).
 - Prévia, restauração dos valores padrão e gestão de filiais não estão na API.
 - A lista de fusos oferece somente os fusos do Brasil (o atual é sempre aceito).
 - O CNPJ da organização (`legal_document`), impresso nos contratos, ainda não é editável; a coluna não recebe

@@ -6,7 +6,7 @@ module Locentra
   module Interfaces
     module HTTP
       module API
-        # Alteração das configurações da organização pela API v1 (ADR-029): somente por sessão de usuário com
+        # Alteração das configurações da organização pela API v1 (ADR-030): somente por sessão de usuário com
         # `organization.manage` (cookie de sessão e `X-CSRF-Token`). Credenciais, mesmo com o escopo, recebem 403:
         # a regra de UpdateSettings (ADR-028) vale também aqui.
         #

@@ -79,7 +79,7 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
   - as configurações (nome, fuso horário, validade padrão do bloqueio temporário e política de
     cancelamento) são alteradas somente por usuário com `organization.manage`, pela interface web ou pela API
     com sessão (`PATCH /api/v1/organization/settings`, cookie de sessão e `X-CSRF-Token`); credenciais de
-    integração e da CLI não alteram, mesmo com o escopo `organization.manage` (ADR-029);
+    integração e da CLI não alteram, mesmo com o escopo `organization.manage` (ADR-030);
   - criar, editar, desativar e reativar filiais exigem `organization.manage`;
   - `organization.read` governa a página `/organizacao`, o detalhe de filial (`/organizacao/filiais/:id`),
     `GET /api/v1/organization` e `organization show` na CLI;

@@ -49,7 +49,11 @@ plataforma é separada dos contratos de locação entre a organização e seus c
   aditivo e cancelamento), retirada, devolução, inspeções e alertas, com `Idempotency-Key` em toda mutação,
   escopos por permissão e respostas conferidas contra o contrato OpenAPI nos testes.
   [Módulo](docs/modulos/api-v1.md) · [OpenAPI](docs/openapi.yaml)
-- **Portal do cliente, CLI operacional, worker, e-mails, webhooks assinados, auditoria.**
+- **Webhooks enviados e worker:** entregas assinadas com proteção SSRF, limite de execuções simultâneas por
+  organização na fila de webhooks, pausa automática de endpoints com falhas consecutivas (entregas retidas e
+  reativação pela tela) e retenção do histórico de integrações por organização.
+  [Módulo](docs/modulos/worker-webhooks-retencao.md)
+- **Portal do cliente, CLI operacional, e-mails e auditoria.**
 
 ## Arquitetura
 
@@ -107,7 +111,11 @@ Variáveis em [`.env.example`](.env.example): URLs separadas para aplicação (`
 (`WORKER_DATABASE_URL`), migrations (`MIGRATION_DATABASE_URL`) e backup (`BACKUP_DATABASE_URL`);
 `APP_SECRET_KEY_BASE`, `APP_ENCRYPTION_KEY`, `APP_BASE_URL` (HTTPS obrigatório em produção), dimensionamento
 (`PUMA_THREADS`, `WEB_CONCURRENCY`, `DB_POOL_SIZE`, `DB_POOL_TIMEOUT`, `WORKER_CONCURRENCY`,
-`WEBHOOK_CONCURRENCY`), proxies confiáveis (`TRUSTED_PROXIES`), limite da API (`API_RATE_LIMIT`), SMTP
+`WEBHOOK_CONCURRENCY`), limite de execuções simultâneas por organização na fila de webhooks
+(`WEBHOOK_MAX_PER_ORGANIZATION`), janelas de retenção do histórico de integrações em dias
+(`OUTBOX_RETENTION_DAYS`, `WEBHOOK_DELIVERY_RETENTION_DAYS`, `INBOUND_WEBHOOK_RETENTION_DAYS`, com mínimos
+verificados na partida; ver [`docs/modulos/worker-webhooks-retencao.md`](docs/modulos/worker-webhooks-retencao.md)),
+proxies confiáveis (`TRUSTED_PROXIES`), limite da API (`API_RATE_LIMIT`), SMTP
 (`SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_AUTH`, `MAIL_FROM`; TLS
 obrigatório em produção), rotação da chave de cifragem (`APP_ENCRYPTION_KEY_PREVIOUS`),
 provedores de pagamento habilitados (`PAYMENT_PROVIDERS`; a conta e a chave de cada organização são

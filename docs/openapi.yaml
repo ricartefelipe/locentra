@@ -24,7 +24,7 @@ info:
     `organization.read`. Credenciais criadas antes da versão 1.2 não recebem `organization.read`: é preciso
     criar outra credencial com o escopo. A alteração das configurações é feita por sessão de usuário com
     `organization.manage` (cookie de sessão + `X-CSRF-Token`) em `PATCH /organization/settings`; credenciais
-    recebem 403, mesmo com o escopo (ADR-029). As filiais não são geridas pela API.
+    recebem 403, mesmo com o escopo (ADR-030). As filiais não são geridas pela API.
 
     Orçamentos (`/quotes`, escopos `quotes.read` e `quotes.write`; a conversão exige também
     `reservations.write`), contratos (`/contracts`, escopos `contracts.read` e `contracts.write`; o aditivo exige
@@ -67,7 +67,7 @@ paths:
       description: >-
         Permissão `organization.manage` de um usuário autenticado por sessão (cookie de sessão e `X-CSRF-Token`, o token
         `_csrf` das páginas da interface). Credenciais recebem `403` `forbidden`, mesmo com o escopo
-        `organization.manage` (ADR-029). PATCH parcial: chave presente altera o campo e chave ausente mantém o valor
+        `organization.manage` (ADR-030). PATCH parcial: chave presente altera o campo e chave ausente mantém o valor
         atual; sem `cancellation_policy`, a política gravada é mantida como está, sem revalidação. `lock_version` é obrigatório e precisa ser a versão atual (`409` `stale_organization`). A troca de fuso
         exige `confirm_time_zone_change: true` (`422` em `confirmar_fuso`). A política usa o formato de `GET
         /organization`, com as mesmas regras e mensagens da interface em `faixas_cancelamento`. Chave desconhecida ou

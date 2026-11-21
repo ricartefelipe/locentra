@@ -3,7 +3,7 @@
 API versionada em `/api/v1`, descrita em [`docs/openapi.yaml`](../openapi.yaml) (servida também em
 `GET /api/v1/openapi.yaml`). Este documento resume as regras comuns, a cobertura por grupo e as decisões da
 ampliação com orçamentos, contratos, retirada, devolução, inspeções, alertas e alteração das configurações
-(ADR-029).
+(ADR-030).
 
 ## Visão geral
 
@@ -128,7 +128,7 @@ positivo responde 422 em `versao`.
   oferece todos os escopos, e as credenciais com `organization.manage` foram emitidas sob a regra de que não
   alteram configurações: liberar agora ampliaria em silêncio o poder de tokens existentes. A troca de fuso exige
   leitura humana das consequências, e a auditoria liga a alteração a uma pessoa. Liberar para integrações
-  exigiria permissão nova e dedicada, com credenciais novas (evolução registrada no ADR-029).
+  exigiria permissão nova e dedicada, com credenciais novas (evolução registrada no ADR-030).
 - **PATCH parcial com versão obrigatória (D4).** Chave presente altera o campo e chave ausente mantém o valor
   atual. Sem `cancellation_policy`, a política gravada é mantida como está, mesmo que anterior às regras atuais
   (a 0016 só confere o formato); ela passa pelas regras quando é alterada. `lock_version` (inteiro ≥ 1) é obrigatório: a escrita parcial de configurações que afetam todo o tenant
@@ -153,7 +153,7 @@ positivo responde 422 em `versao`.
 - Avarias (registro, revisão, aprovação de cobrança e descarte), manutenção e transferências sem API v1.
 - Prévia e restauração dos valores padrão das configurações somente na interface web.
 - Gestão de filiais somente na interface web.
-- Alteração das configurações por credencial e pela CLI não existe (ADR-029).
+- Alteração das configurações por credencial e pela CLI não existe (ADR-030).
 - O cliente por sessão obtém o token CSRF da própria interface (campo `_csrf` das páginas); não há endpoint
   dedicado ao token.
 - A resolução de alerta usa o campo de erro `decisao`, o mesmo do domínio e da interface.

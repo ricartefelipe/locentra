@@ -6,7 +6,7 @@ require_relative "../support/portal_support"
 # Alteração das configurações pela API v1 (Rack::Lint), somente por sessão de usuário com
 # `organization.manage` e X-CSRF-Token: PATCH parcial com versão obrigatória, política em pontos-base com as
 # mensagens da interface, confirmação da troca de fuso, chaves desconhecidas recusadas, idempotência,
-# auditoria com o canal e recusa de gerentes e credenciais (ADR-029).
+# auditoria com o canal e recusa de gerentes e credenciais (ADR-030).
 class OrganizationSettingsApiTest < ApiV1TestCase
   include PortalHelpers
 

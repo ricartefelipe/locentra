@@ -255,6 +255,33 @@ class WorkerTest < DatabaseTest
     end
 
     assert_equal [[dead, recent].sort, 0], remaining
+    total = PG.connect(TestDatabase.worker_url).then do |c|
+      c.exec("SELECT total FROM worker_outcome_totals WHERE family = 'retention' AND outcome = 'jobs'").column_values(0).tap { c.close }
+    end
+
+    assert_equal [purged.to_s], total, "o total removido soma em retention/jobs na mesma transação"
+  end
+
+  # Retenção do histórico de integrações: uma tarefa por organização por hora (chave única), separada
+  # da rotina por minuto.
+  def test_organization_tick_schedules_hourly_retention
+    job = Q::Claimed.new(id: SecureRandom.uuid, organization_id: @org[:organization_id], kind: "organization.tick",
+                         payload: { "bucket" => "2026-03-02T12:00:00Z" }, attempts: 1, max_attempts: 10, lease_token: SecureRandom.uuid,
+                         correlation_id: nil)
+    handlers = Locentra::Interfaces::Worker::Handlers.new(worker_system, mailer: @mailer, templates: worker_system.services[:mail_templates])
+
+    assert handlers.call(job)["retention_scheduled"]
+    refute handlers.call(job.with(payload: { "bucket" => "2026-03-02T12:01:00Z" }))["retention_scheduled"], "mesma hora"
+    assert handlers.call(job.with(payload: { "bucket" => "2026-03-02T13:00:00Z" }))["retention_scheduled"], "hora seguinte"
+    scheduled = PG.connect(TestDatabase.worker_url).then do |c|
+      c.exec("SELECT unique_key, priority, queue FROM jobs WHERE kind = 'organization.retention' ORDER BY unique_key").values.tap { c.close }
+    end
+
+    assert_equal [["org-retention:#{@org[:organization_id]}:2026-03-02T12", "95", "default"],
+                  ["org-retention:#{@org[:organization_id]}:2026-03-02T13", "95", "default"]], scheduled
+    drain
+
+    assert(jobs("kind = 'organization.retention'").all? { |row| row["status"] == "succeeded" })
   end
 
   # Encerramento gracioso: o TERM interrompe a espera das threads, mas a tarefa em execução termina e

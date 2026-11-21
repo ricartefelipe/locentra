@@ -21,6 +21,14 @@ module Locentra
       #   totais de todos os workers em /metrics.
       # - Cada reivindicação abre uma linha em `job_attempts`, identificada por `attempt_id`, com
       #   numeração crescente por tarefa (continua após o reprocessamento, que zera `attempts`).
+      # - Limite por organização (`organization_limits`, fila → máximo): nas filas limitadas (webhooks),
+      #   nenhuma organização passa de N execuções com lease válido, somadas entre todos os workers. Os
+      #   candidatos saem de uma varredura por organização (cabeça de cada uma pelo índice
+      #   `jobs_ready_org_idx`), com preferência para quem tem menos execuções em curso. Exatidão sob
+      #   concorrência: `pg_try_advisory_xact_lock` por fila e organização antes da recontagem (comando
+      #   novo, que vê os commits anteriores), seguido do bloqueio da linha com revalidação. O lock
+      #   consultivo nunca espera (uma organização ocupada é pulada) e é liberado no commit da
+      #   reivindicação; tarefas sem organização não têm limite.
       class Queue
         Claimed = Data.define(:id, :organization_id, :kind, :payload, :attempts, :max_attempts, :lease_token, :correlation_id, :attempt_id) do
           def initialize(attempt_id: nil, **)
@@ -28,10 +36,18 @@ module Locentra
           end
         end
 
-        def initialize(clock:, ids:, lease_seconds: 120)
+        # Classe do lock consultivo de dois inteiros (não colide com o lock bigint do Migrator) e número
+        # máximo de candidatos examinados por fila limitada em cada reivindicação.
+        FAIRNESS_LOCK_CLASS = 74_201
+        CANDIDATE_WINDOW = 32
+
+        attr_reader :organization_limits
+
+        def initialize(clock:, ids:, lease_seconds: 120, organization_limits: {})
           @clock = clock
           @ids = ids
           @lease_seconds = lease_seconds
+          @organization_limits = organization_limits.dup.freeze
         end
 
         # Retorna o id gerado (ou nil quando a chave única já existia). Sem RETURNING: tarefas sem
@@ -56,30 +72,18 @@ module Locentra
         def claim(tx, worker:, limit:, queues: ["default"])
           now = @clock.now
           bury_exhausted(tx, now, queues)
-          rows = tx.query(<<~SQL, [now, limit, queues])
-            SELECT id FROM jobs
+          capped, free = queues.partition { |queue| organization_limits[queue] }
+          rows = free.empty? ? [] : tx.query(<<~SQL, [now, limit, free])
+            SELECT id, priority, run_at FROM jobs
              WHERE queue = ANY($3::text[])
                AND ((status = 'pending' AND run_at <= $1) OR (status = 'running' AND lease_expires_at <= $1 AND attempts < max_attempts))
              ORDER BY priority, run_at
              LIMIT $2
                FOR UPDATE SKIP LOCKED
           SQL
-          rows.map do |row|
-            token = @ids.uuid
-            job = tx.query_one(<<~SQL, [row["id"], token, now + @lease_seconds, worker, now])
-              UPDATE jobs SET status = 'running', lease_token = $2, lease_expires_at = $3, locked_by = $4, attempts = attempts + 1, updated_at = $5
-               WHERE id = $1
-              RETURNING id, organization_id, kind, payload, attempts, max_attempts, lease_token, correlation_id
-            SQL
-            close_abandoned(tx, [job["id"]], now, nil)
-            attempt_id = @ids.uuid
-            # A tarefa está bloqueada (FOR UPDATE) nesta transação: o próximo número é único.
-            tx.execute(<<~SQL, [attempt_id, job["id"], job["organization_id"], worker, now])
-              INSERT INTO job_attempts (id, job_id, organization_id, attempt, worker, started_at)
-              VALUES ($1, $2, $3, (SELECT COALESCE(MAX(attempt), 0) + 1 FROM job_attempts WHERE job_id = $2), $4, $5)
-            SQL
-            Claimed.new(**job.transform_keys(&:to_sym), attempt_id: attempt_id)
-          end
+          fair = []
+          capped.each { |queue| fair.concat(fair_candidates(tx, now, queue, organization_limits[queue], limit - fair.size)) }
+          (rows + fair).sort_by { |row| [row["priority"], row["run_at"]] }.first(limit).map { |row| lease(tx, row["id"], worker, now) }
         end
 
         # Renova o lease de uma execução longa. Retorna false se o lease já foi perdido.
@@ -161,6 +165,106 @@ module Locentra
         end
 
         private
+
+        def lease(tx, id, worker, now)
+          token = @ids.uuid
+          job = tx.query_one(<<~SQL, [id, token, now + @lease_seconds, worker, now])
+            UPDATE jobs SET status = 'running', lease_token = $2, lease_expires_at = $3, locked_by = $4, attempts = attempts + 1, updated_at = $5
+             WHERE id = $1
+            RETURNING id, organization_id, kind, payload, attempts, max_attempts, lease_token, correlation_id
+          SQL
+          close_abandoned(tx, [job["id"]], now, nil)
+          attempt_id = @ids.uuid
+          # A tarefa está bloqueada (FOR UPDATE) nesta transação: o próximo número é único.
+          tx.execute(<<~SQL, [attempt_id, job["id"], job["organization_id"], worker, now])
+            INSERT INTO job_attempts (id, job_id, organization_id, attempt, worker, started_at)
+            VALUES ($1, $2, $3, (SELECT COALESCE(MAX(attempt), 0) + 1 FROM job_attempts WHERE job_id = $2), $4, $5)
+          SQL
+          Claimed.new(**job.transform_keys(&:to_sym), attempt_id: attempt_id)
+        end
+
+        # Até `wanted` tarefas da fila limitada, bloqueadas nesta transação, sem deixar organização alguma
+        # com `cap` ou mais execuções de lease válido. A lista de candidatos é só uma sugestão: cada
+        # organização é revalidada sob o lock consultivo, e cada linha, sob o lock da própria linha.
+        def fair_candidates(tx, now, queue, cap, wanted)
+          return [] unless wanted.positive?
+
+          taken = Hash.new(0)
+          picked = []
+          candidates(tx, now, queue, cap).each do |row|
+            break if picked.size >= wanted
+
+            org = row["organization_id"]
+            next if org && !organization_slot?(tx, now, queue, org, cap, taken[org])
+
+            locked = tx.query_one(<<~SQL, [row["id"], queue, now])
+              SELECT id, priority, run_at FROM jobs
+               WHERE id = $1 AND queue = $2
+                 AND ((status = 'pending' AND run_at <= $3) OR (status = 'running' AND lease_expires_at <= $3 AND attempts < max_attempts))
+                 FOR UPDATE SKIP LOCKED
+            SQL
+            next unless locked
+
+            taken[org] += 1 if org
+            picked << locked
+          end
+          picked
+        end
+
+        # Verdadeiro quando esta transação detém o lock consultivo da organização na fila e a recontagem
+        # (somando o que já foi escolhido nesta reivindicação) ainda está abaixo do limite.
+        def organization_slot?(tx, now, queue, org, cap, already_taken)
+          return false unless tx.query_value("SELECT pg_try_advisory_xact_lock($1, hashtext($2))", [FAIRNESS_LOCK_CLASS, "#{queue}:#{org}"])
+
+          running = tx.query_value(<<~SQL, [queue, org, now])
+            SELECT count(*) FROM jobs WHERE queue = $1 AND organization_id = $2 AND status = 'running' AND lease_expires_at > $3
+          SQL
+          running + already_taken < cap
+        end
+
+        # Cabeças de cada organização com pendências (varredura recursiva pelo índice, sem percorrer o
+        # backlog), mais tarefas sem organização e leases vencidos, ordenadas por execuções em curso da
+        # organização, prioridade e horário.
+        def candidates(tx, now, queue, cap)
+          tx.query(<<~SQL, [now, queue, cap, CANDIDATE_WINDOW])
+            WITH RECURSIVE orgs(organization_id) AS (
+              (SELECT organization_id FROM jobs
+                WHERE queue = $2 AND status = 'pending' AND organization_id IS NOT NULL
+                ORDER BY organization_id LIMIT 1)
+              UNION ALL
+              SELECT (SELECT j.organization_id FROM jobs j
+                       WHERE j.queue = $2 AND j.status = 'pending' AND j.organization_id > o.organization_id
+                       ORDER BY j.organization_id LIMIT 1)
+                FROM orgs o WHERE o.organization_id IS NOT NULL
+            ),
+            running AS (
+              SELECT organization_id, count(*) AS n FROM jobs
+               WHERE queue = $2 AND status = 'running' AND lease_expires_at > $1 AND organization_id IS NOT NULL
+               GROUP BY organization_id
+            ),
+            heads AS (
+              SELECT h.id, h.organization_id, h.priority, h.run_at FROM orgs o
+               CROSS JOIN LATERAL (
+                 SELECT j.id, j.organization_id, j.priority, j.run_at FROM jobs j
+                  WHERE j.queue = $2 AND j.status = 'pending' AND j.organization_id = o.organization_id AND j.run_at <= $1
+                  ORDER BY j.priority, j.run_at LIMIT $3) h
+               WHERE o.organization_id IS NOT NULL
+              UNION ALL
+              (SELECT id, organization_id, priority, run_at FROM jobs
+                WHERE queue = $2 AND status = 'pending' AND organization_id IS NULL AND run_at <= $1
+                ORDER BY priority, run_at LIMIT $4)
+              UNION ALL
+              (SELECT id, organization_id, priority, lease_expires_at FROM jobs
+                WHERE queue = $2 AND status = 'running' AND lease_expires_at <= $1 AND attempts < max_attempts
+                ORDER BY lease_expires_at LIMIT $4)
+            )
+            SELECT h.id, h.organization_id, h.priority, h.run_at, COALESCE(r.n, 0) AS running
+              FROM heads h LEFT JOIN running r ON r.organization_id = h.organization_id
+             WHERE COALESCE(r.n, 0) < $3
+             ORDER BY COALESCE(r.n, 0), h.priority, h.run_at
+             LIMIT $4
+          SQL
+        end
 
         # Tarefas cujo worker sumiu durante a última tentativa permitida: encerradas como mortas,
         # com a tentativa aberta registrada como `lease_lost` e o total por fila e tipo atualizado.

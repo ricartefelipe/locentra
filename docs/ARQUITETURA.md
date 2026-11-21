@@ -76,7 +76,7 @@ adaptadores de infraestrutura (cifragem, armazenamento, HTTP seguro, Asaas) no m
 | Retirada, devolução, manutenção | `fulfillment.rb`, `maintenance.rb`, `transfers.rb`, `alerts.rb` | `fulfillment.rb`, `returns.rb`, `inspections.rb`, `maintenance.rb`, `transfers.rb`, `overdue.rb` | [Módulo](modulos/retirada-devolucao-manutencao.md) |
 | Financeiro e cauções | `finance/*` | `finance/*` | [Módulo](modulos/financeiro.md), [Caução](CAUCAO.md) |
 | Portal do cliente | `portal.rb` | `portal.rb` | [Módulo](modulos/portal-cliente.md) |
-| Notificações e integrações | — | `notifications.rb`, `webhooks.rb`, `attachments.rb`, `external_calls.rb` | ADR-020 a ADR-022 |
+| Notificações e integrações | `webhooks.rb` (`Circuit`) | `notifications.rb`, `webhooks.rb`, `retention.rb`, `attachments.rb`, `external_calls.rb` | ADR-020 a ADR-022, ADR-029, [Módulo](modulos/worker-webhooks-retencao.md) |
 | CLI operacional | — | `integrations.rb`, `jobs.rb` | [Módulo](modulos/cli-operacional.md) |
 | Observabilidade e navegador | — | métricas e correlação | [Módulo](modulos/navegador-observabilidade.md) |
 | Auditoria | — | `AuditTrail` em `base.rb` | — |
@@ -109,10 +109,16 @@ rede nunca ocorrem com transação aberta.
 - **Web:** Puma com `PUMA_THREADS` threads por processo e `WEB_CONCURRENCY` processos; sem `preload_app`,
   de modo que cada processo monta o próprio `System` depois do fork. `DB_POOL_SIZE` ≥ `PUMA_THREADS`.
 - **Worker:** `WORKER_CONCURRENCY` threads de execução da fila `default` + `WEBHOOK_CONCURRENCY` threads
-  (padrão 1) da fila `webhooks` + thread de heartbeat + thread de agendamento; pool com
-  `WORKER_CONCURRENCY + WEBHOOK_CONCURRENCY + 2` conexões; encerramento gracioso em TERM/INT. As entregas
-  de webhook vão para fila própria: um destino lento ocupa somente as threads dessa fila, nunca as de
-  e-mails, pagamentos e varreduras. Cada entrega tem prazo total de 15 s e lê no máximo 4 KiB da resposta.
+  (padrão 4) da fila `webhooks` + thread de heartbeat + thread de agendamento; pool com
+  `WORKER_CONCURRENCY + WEBHOOK_CONCURRENCY + 2` conexões (10 com os padrões); encerramento gracioso em
+  TERM/INT. As entregas de webhook vão para fila própria: um destino lento ocupa somente as threads dessa
+  fila, nunca as de e-mails, pagamentos e varreduras. Nessa fila, cada organização tem no máximo
+  `WEBHOOK_MAX_PER_ORGANIZATION` (padrão 2) execuções simultâneas somadas entre todos os workers, aplicado na
+  reivindicação com lock consultivo por organização; endpoints com falhas consecutivas são pausados e as
+  entregas ficam retidas até a reativação pela tela. A retenção do histórico de integrações roda por
+  organização, no contexto do tenant, nas threads da fila `default`
+  ([`modulos/worker-webhooks-retencao.md`](modulos/worker-webhooks-retencao.md)). Cada entrega tem prazo total
+  de 15 s e lê no máximo 4 KiB da resposta.
   Banco indisponível faz os laços esperarem com backoff exponencial limitado a 30 s. Sinal de vida próprio:
   a thread de heartbeat atualiza `WORKER_HEALTH_FILE`, conferido por `bin/worker --check` (healthcheck do
   serviço no Compose).

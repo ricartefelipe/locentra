@@ -64,7 +64,7 @@ module Locentra
           end
 
           # Organização do token (escopo `organization.read`): configurações e filiais. A alteração é feita em
-          # `PATCH /organization/settings`, somente por sessão de usuário (OrganizationV1Controller, ADR-029).
+          # `PATCH /organization/settings`, somente por sessão de usuário (OrganizationV1Controller, ADR-030).
           def organization(ctx)
             data = uc(:read_organization).call(ctx.actor)
             json(200, OrganizationSerializers.organization(data[:organization], data[:branches]))

@@ -19,9 +19,31 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
   alertas (com resolução).
 - **API v1 — configurações da organização:** `PATCH /organization/settings` somente por sessão de usuário com
   `organization.manage` (cookie de sessão e `X-CSRF-Token`), parcial, com `lock_version` obrigatório,
-  confirmação da troca de fuso e política em pontos-base; credenciais recebem 403 (ADR-029).
+  confirmação da troca de fuso e política em pontos-base; credenciais recebem 403 (ADR-030).
 - OpenAPI com schemas de resposta fechados, esquema de segurança de sessão e o parâmetro `X-CSRF-Token`; testes
   que conferem as respostas reais contra o contrato.
+- **Limite por organização na fila de webhooks:** no máximo `WEBHOOK_MAX_PER_ORGANIZATION` (padrão 2)
+  entregas de uma mesma organização em execução ao mesmo tempo, somadas entre todos os workers; organizações
+  sem entregas em curso têm preferência, e os destinos lentos de uma organização não ocupam as vagas das
+  demais.
+- **Pausa automática de endpoints e reativação:** endpoint com pelo menos 20 falhas consecutivas e pelo menos
+  1 hora desde a primeira é pausado (auditoria "Endpoint de webhook pausado automaticamente"); as entregas
+  ficam retidas sem chamada de rede e sem gastar tentativas. A tela **Integrações** mostra o endpoint pausado,
+  as falhas e as entregas retidas, e o botão **Reativar** (proprietário e administrador, auditado) libera as
+  retidas em segundo plano, em lotes.
+- **Retenção do histórico de integrações:** por organização, uma vez por hora e em lotes, saem as entregas
+  concluídas antigas, as entregas de endpoints desativados, os eventos da outbox sem entrega restante e os
+  webhooks recebidos já processados ou ignorados, conforme `OUTBOX_RETENTION_DAYS` e
+  `WEBHOOK_DELIVERY_RETENTION_DAYS` (padrão 30, mínimo 7) e `INBOUND_WEBHOOK_RETENTION_DAYS` (padrão 90,
+  mínimo 45).
+- **Métricas:** `locentra_webhook_deliveries_total{outcome}`, `locentra_webhook_endpoint_pauses_total` e
+  `locentra_retention_purged_total{kind}`, somadas entre todos os workers e expostas em `/metrics`.
+- **Migration 0017:** circuito por endpoint, entregas retidas, índice da reivindicação por organização,
+  índices da retenção, tabela `worker_outcome_totals` e gatilho que encerra a retenção quando a entrega volta
+  a pendente ou é concluída, compatível com a 1.2.0 em execução e no retorno, inclusive no reenvio manual de
+  uma entrega retida. Os quatro índices que não dependem das colunas novas podem ser construídos antes com
+  `CONCURRENTLY`, e o runbook descreve os locks mantidos até o commit e como estimar a duração
+  (`docs/RUNBOOKS.md`, seção 16).
 
 ### Alterado
 
@@ -31,6 +53,10 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 - A auditoria `organization.settings_updated` registra o canal (`via: api`) quando a alteração vem da API.
 - Os casos de uso de orçamentos, contratos, retirada, devolução, inspeções, alertas e configurações aceitam a
   transação do chamador (`tx:`), sem mudança na interface web e na CLI.
+- O padrão de `WEBHOOK_CONCURRENCY` passou de 1 para 4 (o worker usa 10 conexões com os padrões).
+- O `platform.housekeeping` soma as tarefas removidas em `locentra_retention_purged_total{kind="jobs"}`; eventos
+  da outbox, entregas de webhook e webhooks recebidos deixaram de ser mantidos indefinidamente e passam pela
+  retenção por organização.
 
 ### Corrigido
 

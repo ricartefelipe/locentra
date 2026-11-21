@@ -129,6 +129,7 @@ module Locentra
           r.get "/integracoes", integrations, :index
           r.post "/integracoes", integrations, :create
           r.post "/integracoes/:id/desativar", integrations, :disable
+          r.post "/integracoes/:id/reativar", integrations, :resume
           r.post "/integracoes/entregas/:id/reenviar", integrations, :redeliver
 
           attachments = w::AttachmentsController.new(deps)
@@ -355,7 +356,7 @@ module Locentra
           r.post "/api/v1/alerts/:id/resolve", api, :resolve_alert, auth: :api
         end
 
-        # A alteração das configurações aceita somente sessão de usuário (ADR-029): a credencial recebe 403 no
+        # A alteração das configurações aceita somente sessão de usuário (ADR-030): a credencial recebe 403 no
         # caso de uso, e a sessão exige X-CSRF-Token.
         def draw_api(router, deps)
           r = router

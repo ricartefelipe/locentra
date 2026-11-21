@@ -31,8 +31,15 @@ class LayerIsolationTest < UnitTest
     bundle = { "status" => "pending", "active" => true, "event_id" => "e1", "event_type" => "reservation.confirmed", "url" => "https://destino.example/x",
                "occurred_at" => Time.utc(2026, 3, 2), "payload" => {}, "secret_ciphertext" => "cifrado" }
     recorded = []
+    circuit = { "consecutive_failures" => 1, "failing_since" => Time.utc(2026, 3, 2, 12), "paused_at" => nil, "active" => true }
     webhooks = Port.new(lambda do |name, args, _k, _b|
-      name == :delivery_bundle ? bundle : recorded << args[2]
+      case name
+      when :delivery_bundle then bundle
+      when :register_endpoint_result then circuit
+      when :record_attempt
+        recorded << args[2]
+        1
+      end
     end)
     http = Port.new(->(*) { raise A::Integrations::UnsafeDestination, "destino em rede interna" })
     box = Port.new(->(_n, args, *) { "segredo-de-#{args.first}" })
@@ -40,7 +47,9 @@ class LayerIsolationTest < UnitTest
     logs = []
     calls = A::ExternalCalls.new(logger: Port.new(->(_n, args, *) { logs << args.first }), metrics: Port.new(->(*) {}))
     clock = Port.new(->(*) { Time.utc(2026, 3, 2, 12) })
-    deliver = A::Webhooks::Deliver.new(transactor: transactor, webhooks: webhooks, http: http, box: box, signer: signer, clock: clock, calls: calls)
+    noop = Port.new(->(*) {})
+    deliver = A::Webhooks::Deliver.new(transactor: transactor, webhooks: webhooks, http: http, box: box, signer: signer, clock: clock, calls: calls,
+                                       totals: noop, audit: noop)
     delivery = begin
       deliver.call("org-1", "d1")
     rescue A::Webhooks::Deliver::DeliveryFailed => e
