@@ -52,9 +52,10 @@ arredondamentos (inclusive propriedades); caução e reembolso (inclusive concor
 provedor; recuperação de tarefas e worker com lease vencido; downloads não autorizados; XSS e CSRF;
 contrato Rack (`Rack::Lint`); roteiro de demonstração de 15 passos; condições comerciais: dois resgates do
 último uso de um cupom, uso liberado por cancelamento e por expiração (inclusive bloqueio vencido ainda não
-varrido), criação com cupom concorrente com o alocador sem impasse, condições negociadas sobrepostas
-simultâneas, ajuste de tarifa sem permissão ou acima do limite do papel e atualização do esquema da 0014
-para a 0015.
+varrido), confirmação de bloqueio em andamento no vencimento contra o último uso, criação com cupom
+concorrente com o alocador sem impasse, condições negociadas sobrepostas simultâneas, ajuste de tarifa sem
+permissão ou acima do limite do papel, repetição de tarifa mantida na nova versão do orçamento e
+atualização do esquema da 0014 para a 0015 (inclusive cupons legados fora dos limites novos).
 
 ## Limitações conhecidas
 
