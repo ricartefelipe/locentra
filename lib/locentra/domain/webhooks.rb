@@ -8,7 +8,8 @@ module Locentra
       #
       # As duas condições são exigidas: uma queda curta de um destino com muito tráfego não pausa o
       # endpoint, e um destino pouco usado que falha há horas (uma entrega faz até 10 tentativas em cerca
-      # de 3 h) é pausado. Qualquer sucesso zera a sequência.
+      # de 3 h) é pausado. Qualquer sucesso zera a sequência, exceto com o endpoint já pausado, quando só a
+      # reativação a zera.
       module Circuit
         FAILURE_THRESHOLD = 20
         MIN_FAILING_SECONDS = 3600

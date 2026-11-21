@@ -7,8 +7,9 @@ require_relative "../support/portal_support"
 
 # Circuito por endpoint de ponta a ponta: pausa automática só com 20 falhas consecutivas e 1 h desde a
 # primeira, auditada como ação do sistema; entregas seguintes e novos despachos retidos sem rede e sem
-# tarefa; sucesso zera a sequência; reativação autorizada, auditada e com liberação em lotes; reenvio de
-# entrega retida com o endpoint ainda pausado volta a reter.
+# tarefa; sucesso zera a sequência, exceto o sucesso em voo depois da pausa, que a conserva até a
+# reativação; reativação autorizada, auditada e com liberação em lotes; reenvio de entrega retida com o
+# endpoint ainda pausado volta a reter.
 class WebhookCircuitTest < DatabaseTest
   include WorkerHelpers
   include WebhookHelpers
@@ -89,6 +90,46 @@ class WebhookCircuitTest < DatabaseTest
 
     assert_equal ["0", nil, nil], state.values_at("consecutive_failures", "failing_since", "paused_at")
     assert_equal(3, deliveries_of(@org).count { |row| row["status"] == "delivered" })
+  end
+
+  # Destino que, durante a chamada, vê o endpoint ser pausado por outra tentativa (a falha que fechou o
+  # circuito) e responde com sucesso.
+  class PausedInFlightHttp
+    def initialize(http, &on_post)
+      @http = http
+      @on_post = on_post
+    end
+
+    def post(...)
+      @on_post.call
+      @http.post(...)
+    end
+  end
+
+  def test_in_flight_success_after_the_pause_keeps_the_failure_streak_until_resume
+    @server.status = 200
+    dispatch_events(@org)
+    delivery = deliveries_of(@org).first["id"]
+    since = @clock.now - 3600
+    s = worker_system.services
+    http = PausedInFlightHttp.new(s[:http]) { pause_endpoint!(@org, @endpoint, failures: 21, since: since) }
+    deliver = A::Webhooks::Deliver.new(transactor: worker_system.transactor, webhooks: worker_system.repos[:webhooks], http: http, box: s[:box],
+                                       signer: Locentra::Infrastructure::WebhookSignature, clock: @clock, calls: s[:external_calls],
+                                       totals: worker_system.repos[:outcome_totals], audit: s[:audit])
+
+    assert_equal :delivered, deliver.call(@org[:organization_id], delivery)
+    row = endpoint_row(@org, @endpoint)
+    times = row.values_at("failing_since", "paused_at").map { |value| value && Time.parse(value) }
+
+    assert_equal ["21", since, @clock.now], [row["consecutive_failures"], *times], "a pausa conserva a sequência que a causou"
+    listed = uc(:list_webhooks).call(@org[:actor])[:endpoints].first
+
+    assert_equal [21, since], listed.values_at("consecutive_failures", "failing_since")
+    uc(:resume_webhook).call(@org[:actor], @endpoint)
+    audit = owner_query("SELECT details FROM audit_events WHERE action = 'webhook.endpoint_resumed'").first
+
+    assert_equal 21, JSON.parse(audit["details"])["consecutive_failures"]
+    assert_equal ["0", nil, nil], endpoint_row(@org, @endpoint).values_at("consecutive_failures", "failing_since", "paused_at")
   end
 
   def test_resume_rules_permission_conflicts_and_isolation

@@ -89,12 +89,15 @@ module Locentra
 
         # Atualiza a sequência de falhas do endpoint e devolve o estado do circuito. Sucesso com a
         # sequência já zerada não grava nada (nil): o caminho feliz não disputa a linha do endpoint.
+        # Sucesso com o endpoint pausado (tentativa em voo quando outra fechou o circuito) também não
+        # grava: a sequência que causou a pausa fica para a tela e para a auditoria da reativação, que a
+        # zera (resume_endpoint).
         def register_endpoint_result(tx, endpoint_id, success, now)
           tx.query_one(<<~SQL, [tx.tenant_id!, endpoint_id, success, now])
             UPDATE webhook_endpoints
                SET consecutive_failures = CASE WHEN $3::boolean THEN 0 ELSE consecutive_failures + 1 END,
                    failing_since = CASE WHEN $3::boolean THEN NULL ELSE COALESCE(failing_since, $4::timestamptz) END
-             WHERE organization_id = $1 AND id = $2 AND (NOT $3::boolean OR consecutive_failures > 0)
+             WHERE organization_id = $1 AND id = $2 AND (NOT $3::boolean OR (consecutive_failures > 0 AND paused_at IS NULL))
             RETURNING consecutive_failures, failing_since, paused_at, active
           SQL
         end

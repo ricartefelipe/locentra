@@ -175,9 +175,10 @@ module Locentra
       #
       # Circuito por endpoint: cada tentativa com falha (status fora de 2xx, rede, tempo, destino
       # bloqueado) soma uma falha consecutiva, e um sucesso zera a sequência, na mesma transação que
-      # grava a tentativa. Com Domain::Webhooks::Circuit.trip? o endpoint é pausado uma única vez e a
-      # pausa é auditada como ação do sistema (sem a URL). Endpoint pausado: a entrega é retida sem
-      # chamada de rede e sem gastar tentativa, e a tarefa conclui com `:endpoint_paused`.
+      # grava a tentativa; com o endpoint já pausado, o sucesso em voo não zera (a reativação zera).
+      # Com Domain::Webhooks::Circuit.trip? o endpoint é pausado uma única vez e a pausa é auditada
+      # como ação do sistema (sem a URL). Endpoint pausado: a entrega é retida sem chamada de rede e
+      # sem gastar tentativa, e a tarefa conclui com `:endpoint_paused`.
       class Deliver
         HTTP_OUTCOME = ->(response) { response.status.between?(200, 299) ? "ok" : "http_#{response.status / 100}xx" }
         AUDIT_ERROR_LENGTH = 200

@@ -78,6 +78,8 @@ fica aberto durante a execução da tarefa.
 - Cada tentativa com falha (HTTP fora de 2xx, erro de rede, tempo esgotado, destino bloqueado) soma 1 em
   `webhook_endpoints.consecutive_failures`, e a primeira da sequência grava `failing_since`. Um sucesso zera os
   dois. Sucesso com a sequência já zerada não grava nada: o caminho comum não disputa a linha do endpoint.
+  Sucesso com o endpoint já pausado (tentativa em voo quando outra fechou o circuito) também não zera: a
+  sequência que causou a pausa continua na tela e na auditoria da reativação, que é quem a zera.
 - O endpoint é pausado (`paused_at`) quando há **pelo menos 20 falhas consecutivas e pelo menos 1 hora desde a
   primeira** (`Domain::Webhooks::Circuit`, constantes `FAILURE_THRESHOLD` e `MIN_FAILING_SECONDS`, sem variável
   de ambiente). As duas condições evitam pausar por uma queda curta de um destino com muito tráfego e ainda
@@ -223,7 +225,7 @@ alteram o status; o gatilho `webhook_deliveries_release_hold` limpa `held_at` ne
 | `test/repository/migration_0017_test.rb` | Atualização da 1.2.0: colunas, índices, CHECKs, RLS, inserções no formato antigo, reenvio e tentativas da 1.2.0 sobre entregas retidas e índices construídos antes com `CONCURRENTLY` |
 | `test/repository/observability_tables_test.rb` | `worker_outcome_totals` sem dados de tenant, só gravável pelo worker |
 | `test/integration/webhook_fairness_test.rb` | Ordem justa, limite, lease vencido com fencing, tarefas sem organização, fila `default` sem limite, prioridade entre filas, `run_at` futuro e tarefas esgotadas |
-| `test/integration/webhook_circuit_test.rb` | Pausa só depois de 1 h, auditoria, totais, retenção, despacho retido, sucesso que zera, regras e lotes da reativação, reenvio retido de novo |
+| `test/integration/webhook_circuit_test.rb` | Pausa só depois de 1 h, auditoria, totais, retenção, despacho retido, sucesso que zera, sucesso em voo depois da pausa que conserva a sequência, regras e lotes da reativação, reenvio retido de novo |
 | `test/integration/retention_test.rb` | O que sai e o que fica, outra organização intocada, exigência do tenant, lotes, totais, reenvio e tarefa de entrega removida, deduplicação dentro da janela e idempotência fora dela, tarefa pelo worker |
 | `test/integration/worker_test.rb` | Agendamento horário da retenção e total do housekeeping |
 | `test/concurrency/webhook_fairness_race_test.rb` | 20 rodadas de 6 reivindicações simultâneas sem passar do limite, controle com o lock consultivo, endpoints lentos sem monopolizar as threads (`HoldingServer`), reativação contra retenção nas duas ordens e retenção contra reenvio concorrente |
