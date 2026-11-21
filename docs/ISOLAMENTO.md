@@ -33,7 +33,8 @@ dados de outra organização.
   (descrição, vigência, máximo de usos, subtotal mínimo, ativação e controle de versão) e de
   `additional_fees` (nome, descrição, valor padrão, ativação e controle de versão), e somente as colunas de
   encerramento de `customer_price_agreements`. `coupon_redemptions` é somente inserção. `locentra_worker`
-  não grava em nenhuma dessas tabelas.
+  não tem `UPDATE` nem `DELETE` em nenhuma dessas tabelas: o worker não altera condições comerciais, porque a
+  liberação de um uso de cupom não grava nada.
 - **`NO FORCE` pontual na migration 0015:** com a RLS forçada, nem o proprietário das tabelas enxerga linhas
   sem contexto de organização, e a migration precisa preencher colunas novas em todas as organizações
   (`coupons.updated_at` e `customer_price_agreements.valid_from`) e verificar sobreposições de vigência.
