@@ -127,6 +127,7 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/Product" } }
                   pagination: { $ref: "#/components/schemas/Pagination" }
+        "422": { $ref: "#/components/responses/Error" }
   /reservations:
     get:
       summary: Lista reservas
@@ -147,6 +148,7 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/Reservation" } }
                   pagination: { $ref: "#/components/schemas/Pagination" }
+        "422": { $ref: "#/components/responses/Error" }
     post:
       summary: Cria reserva (solicitação, bloqueio temporário ou confirmação imediata)
       description: >-
@@ -457,6 +459,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CouponRedemptionPage" }
         "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /fees:
     get:
       summary: Lista as tarifas adicionais do catálogo
@@ -577,6 +580,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PriceAgreementPage" }
         "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
     post:
       summary: Cadastra condição negociada para o cliente
       description: >-

@@ -207,6 +207,26 @@ class ApiTest < HttpTest
     assert_empty unknown
   end
 
+  # Operações paginadas validam limit e offset e respondem 422 fora da faixa.
+  def test_openapi_paginated_operations_document_the_validation_error
+    spec = YAML.safe_load_file(File.expand_path("../../docs/openapi.yaml", __dir__))
+    paginated = spec["paths"].flat_map do |path, operations|
+      operations.filter_map do |verb, operation|
+        ["#{verb.upcase} #{path}", operation] if Array(operation["parameters"]).include?({ "$ref" => "#/components/parameters/Limit" })
+      end
+    end
+    missing = paginated.filter_map { |name, operation| name unless operation["responses"].key?("422") }
+
+    refute_empty paginated
+    assert_empty missing
+    token = uc(:create_credential).call(@actor, name: "Leitura", scopes: %w[catalog.read reservations.read], expires_in_days: 30)["token"]
+    %w[/products /reservations].each do |path|
+      get "/api/v1#{path}", { "limit" => "0" }, auth(token)
+
+      assert_equal 422, last_response.status, path
+    end
+  end
+
   def find_schemas(node, path, unknown)
     case node
     when Hash
