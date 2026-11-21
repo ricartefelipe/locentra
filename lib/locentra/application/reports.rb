@@ -47,14 +47,24 @@ module Locentra
       # - tamanho e idade da fila por fila e situação (`queue_stats`, gravado pelo worker), e há
       #   quanto tempo esses agregados foram atualizados (worker parado aparece como idade crescente);
       # - totais de retentativas e de falhas permanentes somados por todos os workers
-      #   (`job_outcome_totals`), publicados como contadores.
+      #   (`job_outcome_totals`), publicados como contadores;
+      # - totais por desfecho gravados pelo worker (`worker_outcome_totals`): entregas de webhook
+      #   (entregue, falha, retida, liberada), pausas automáticas de endpoints e registros removidos pela
+      #   retenção, por tipo.
       #
-      # Nenhum rótulo carrega organização ou identificador: somente fila, situação e tipo de tarefa.
+      # Nenhum rótulo carrega organização ou identificador: somente fila, situação, tipo de tarefa,
+      # desfecho e tipo de registro. Famílias desconhecidas são ignoradas.
       #
       # Falha na coleta não derruba o /metrics: a série `metrics_collect_success` vai a 0 e o motivo é
       # registrado no log (`metrics.collect_failed`); as séries derivadas mantêm o último valor coletado.
       class CollectMetrics
         OUTCOME_COUNTERS = { "retry" => "jobs_retries_total", "dead" => "jobs_dead_total" }.freeze
+        # Família gravada pelo worker → métrica e rótulo que recebe o desfecho (nil: série sem rótulo).
+        WORKER_COUNTERS = {
+          "webhook_delivery" => ["webhook_deliveries_total", :outcome],
+          "webhook_circuit" => ["webhook_endpoint_pauses_total", nil],
+          "retention" => ["retention_purged_total", :kind]
+        }.freeze
 
         def initialize(transactor:, reports:, metrics:, clock:, logger: nil)
           @transactor = transactor
@@ -66,12 +76,15 @@ module Locentra
 
         def call
           now = @clock.now
-          stats, totals = @transactor.call { |tx| [@reports.queue_stats(tx, now), @reports.job_outcome_totals(tx)] }
+          stats, totals, outcomes = @transactor.call do |tx|
+            [@reports.queue_stats(tx, now), @reports.job_outcome_totals(tx), @reports.worker_outcome_totals(tx)]
+          end
           publish_queue(stats, now)
           totals.each do |row|
             name = OUTCOME_COUNTERS[row["outcome"]]
             @metrics.set_counter(name, row["total"].to_i, queue: row["queue"], kind: row["kind"]) if name
           end
+          publish_worker_outcomes(outcomes)
           @metrics.gauge("metrics_collect_success", 1)
           true
         rescue StandardError => e
@@ -81,6 +94,15 @@ module Locentra
         end
 
         private
+
+        def publish_worker_outcomes(rows)
+          rows.each do |row|
+            name, label = WORKER_COUNTERS[row["family"]]
+            next unless name
+
+            @metrics.set_counter(name, row["total"].to_i, **(label ? { label => row["outcome"] } : {}))
+          end
+        end
 
         def publish_queue(stats, now)
           labels = ->(row) { { queue: row["queue"], status: row["status"] } }

@@ -89,7 +89,11 @@ module Locentra
           "jobs_dead_total" => "Tarefas encerradas sem novas tentativas (falha permanente), somadas entre todos os workers",
           "job_duration_seconds" => "Duração da execução de tarefas no processo do worker",
           "external_calls_total" => "Chamadas a sistemas externos por provedor, operação e desfecho",
-          "external_call_duration_seconds" => "Duração das chamadas a sistemas externos por provedor e operação"
+          "external_call_duration_seconds" => "Duração das chamadas a sistemas externos por provedor e operação",
+          "webhook_deliveries_total" =>
+            "Entregas de webhook por desfecho (entregue, falha, retida por pausa, liberada), somadas entre todos os workers",
+          "webhook_endpoint_pauses_total" => "Pausas automáticas de endpoints de webhook por falhas consecutivas",
+          "retention_purged_total" => "Registros removidos pela retenção, por tipo de registro"
         }.freeze
 
         def initialize

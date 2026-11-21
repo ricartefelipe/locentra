@@ -33,6 +33,21 @@ class MetricsTest < UnitTest
     lines.grep_v(/\A#/).each { |line| assert_match SAMPLE, line }
   end
 
+  def test_worker_outcome_families_have_help_text
+    metrics.set_counter("webhook_deliveries_total", 4, outcome: "released")
+    metrics.set_counter("webhook_endpoint_pauses_total", 1)
+    metrics.set_counter("retention_purged_total", 12, kind: "inbound_webhooks")
+    lines = metrics.render.lines(chomp: true)
+
+    assert_includes lines, "# HELP locentra_webhook_deliveries_total Entregas de webhook por desfecho (entregue, falha, retida por pausa, liberada), " \
+                           "somadas entre todos os workers"
+    assert_includes lines, "# HELP locentra_webhook_endpoint_pauses_total Pausas automáticas de endpoints de webhook por falhas consecutivas"
+    assert_includes lines, "# HELP locentra_retention_purged_total Registros removidos pela retenção, por tipo de registro"
+    assert_includes lines, 'locentra_webhook_deliveries_total{outcome="released"} 4'
+    assert_includes lines, "locentra_webhook_endpoint_pauses_total 1"
+    assert_includes lines, 'locentra_retention_purged_total{kind="inbound_webhooks"} 12'
+  end
+
   def test_histogram_buckets_are_cumulative_and_end_with_inf
     [0.004, 0.2, 3.0].each { |value| metrics.observe("job_duration_seconds", value, kind: "events.dispatch") }
     lines = metrics.render.lines(chomp: true)
