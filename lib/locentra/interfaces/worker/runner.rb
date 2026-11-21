@@ -18,7 +18,12 @@ module Locentra
       #   workers) e expostas no /metrics do processo web; o log `job.finished` traz o correlation_id
       #   da requisição que originou a tarefa.
       # - Entregas de webhooks (destinos escolhidos pelos clientes) têm fila e threads próprias: um
-      #   destino lento ocupa somente essas threads, nunca as de e-mails, pagamentos e varreduras.
+      #   destino lento ocupa somente essas threads, nunca as de e-mails, pagamentos e varreduras. Na
+      #   fila de webhooks, cada organização tem no máximo WEBHOOK_MAX_PER_ORGANIZATION execuções
+      #   simultâneas, somadas entre todos os workers (aplicado na reivindicação): com mais threads do que
+      #   o limite, os destinos lentos de uma organização não ocupam as vagas das demais.
+      # - A retenção do histórico de integrações (organization.retention) e a limpeza da plataforma
+      #   rodam nas threads da fila `default`, em lotes curtos.
       # - Falha de infraestrutura (banco indisponível) nos laços espera com backoff exponencial
       #   limitado antes de tentar de novo, com log a cada potência de 2 de falhas seguidas.
       # - Sinal de vida próprio (o worker não serve HTTP): a thread de heartbeat atualiza
@@ -56,7 +61,8 @@ module Locentra
         def run
           reader, writer = IO.pipe
           %w[TERM INT].each { |signal| Signal.trap(signal) { writer.write_nonblock(".", exception: false) } }
-          @logger.info(event: "worker.started", worker: @name, concurrency: @concurrency, lanes: @lanes.to_h { |q, n| [q.join(","), n] })
+          @logger.info(event: "worker.started", worker: @name, concurrency: @concurrency, lanes: @lanes.to_h { |q, n| [q.join(","), n] },
+                       webhook_max_per_organization: @system.queue.organization_limits[WEBHOOK_QUEUE])
           threads = start_threads
           reader.wait_readable
           stop(threads)

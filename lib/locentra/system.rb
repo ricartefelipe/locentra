@@ -48,7 +48,9 @@ module Locentra
     private
 
     def build_repositories
-      @queue = I::Jobs::Queue.new(clock: clock, ids: ids)
+      # Limite de execuções simultâneas por organização somente na fila de webhooks (destinos dos clientes).
+      @queue = I::Jobs::Queue.new(clock: clock, ids: ids,
+                                  organization_limits: { A::Webhooks::DELIVERY_QUEUE => config.webhook_max_per_organization }.freeze)
       @repos = {
         users: P::UserRepository.new, sessions: P::SessionRepository.new, user_tokens: P::UserTokenRepository.new,
         access: P::AccessRepository.new, organizations: P::OrganizationRepository.new, subscriptions: P::SubscriptionRepository.new,
@@ -65,7 +67,8 @@ module Locentra
         inspections: P::InspectionRepository.new, maintenance_orders: P::MaintenanceOrderRepository.new,
         damage_reports: P::DamageReportRepository.new, transfers: P::TransferRepository.new, alerts: P::AlertRepository.new,
         operations: P::OperationsRepository.new,
-        quotes: P::QuoteRepository.new, contracts: P::ContractRepository.new, portal: P::PortalRepository.new
+        quotes: P::QuoteRepository.new, contracts: P::ContractRepository.new, portal: P::PortalRepository.new,
+        outcome_totals: P::OutcomeTotalsRepository.new, retention: P::RetentionRepository.new
       }
     end
 
@@ -96,10 +99,19 @@ module Locentra
       @services[:notifications] = A::Notifications::EventNotifications.new(queue: queue, reservations: repos[:reservations], customers: repos[:customers],
                                                                            quotes: repos[:quotes], contracts: repos[:contracts])
       @services[:finance_subscriber] = A::Finance::ReservationChargesSubscriber.new(queue: queue)
+      totals = repos[:outcome_totals]
       @services[:dispatch_event] = A::Webhooks::DispatchEvent.new(webhooks: repos[:webhooks], queue: queue, notifications: @services[:notifications],
-                                                                  clock: clock, ids: ids, subscribers: [@services[:finance_subscriber]])
+                                                                  clock: clock, ids: ids, totals: totals, subscribers: [@services[:finance_subscriber]])
       @services[:deliver_webhook] = A::Webhooks::Deliver.new(transactor: transactor, webhooks: repos[:webhooks], http: @http, box: @services[:box],
-                                                             signer: I::WebhookSignature, clock: clock, calls: @services[:external_calls])
+                                                             signer: I::WebhookSignature, clock: clock, calls: @services[:external_calls],
+                                                             totals: totals, audit: @services[:audit])
+      @services[:release_held_webhooks] = A::Webhooks::ReleaseHeld.new(transactor: transactor, webhooks: repos[:webhooks], queue: queue,
+                                                                       totals: totals, clock: clock)
+      windows = A::Retention::Windows.new(outbox_seconds: config.outbox_retention_days * 86_400,
+                                          deliveries_seconds: config.webhook_delivery_retention_days * 86_400,
+                                          inbound_seconds: config.inbound_webhook_retention_days * 86_400)
+      @services[:purge_history] = A::Retention::PurgeHistory.new(transactor: transactor, retention: repos[:retention], totals: totals, clock: clock,
+                                                                 windows: windows)
     end
 
     def common = { uow: uow, clock: clock }
@@ -225,6 +237,7 @@ module Locentra
       uc[:disable_webhook] = A::Webhooks::DisableEndpoint.new(**common, webhooks: r[:webhooks], audit: audit)
       uc[:list_webhooks] = A::Webhooks::ListEndpoints.new(uow: uow, webhooks: r[:webhooks])
       uc[:redeliver_webhook] = A::Webhooks::Redeliver.new(uow: uow, webhooks: r[:webhooks], queue: queue, audit: audit)
+      uc[:resume_webhook] = A::Webhooks::ResumeEndpoint.new(uow: uow, webhooks: r[:webhooks], queue: queue, audit: audit)
       # Evidências de avaria decidida não podem ser anexadas nem removidas.
       guards = { "damage_report" => A::Inspections::EvidenceGuard.new(damage_reports: r[:damage_reports]) }
       uc[:upload_attachment] = A::Attachments::Upload.new(**common, attachments: r[:attachments], storage: s[:storage], audit: audit, ids: ids,

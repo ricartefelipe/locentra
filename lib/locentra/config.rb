@@ -9,12 +9,24 @@ module Locentra
   PAYMENT_PROVIDER_NAMES = %w[simulator asaas].freeze
   SMTP_TLS_MODES = %w[none starttls tls].freeze
   SMTP_AUTH_METHODS = %w[plain login cram_md5].freeze
+  # Janelas de retenção do histórico de integrações (dias): mínimo seguro e variável de ambiente. Entregas
+  # e eventos superam com folga a janela de retentativas (cerca de 3 h); webhooks recebidos cobrem a
+  # conciliação (30 dias), a janela de reenvio do provedor (14 dias) e 1 dia de margem, para que um
+  # reenvio continue sendo reconhecido como duplicado (docs/modulos/worker-webhooks-retencao.md).
+  RETENTION_LIMITS = {
+    outbox_retention_days: [7, "OUTBOX_RETENTION_DAYS"],
+    webhook_delivery_retention_days: [7, "WEBHOOK_DELIVERY_RETENTION_DAYS"],
+    inbound_webhook_retention_days: [45, "INBOUND_WEBHOOK_RETENTION_DAYS"]
+  }.freeze
+  MAX_RETENTION_DAYS = 3650
+  WEBHOOK_MAX_PER_ORGANIZATION_RANGE = (1..100)
 
   # Configuração lida do ambiente somente quando o sistema é montado (nunca ao carregar o domínio).
   Config = Data.define(:env, :base_url, :secret_key_base, :encryption_key, :previous_encryption_keys, :database_url, :worker_database_url,
-                       :migration_database_url, :pool_size, :pool_timeout, :worker_concurrency, :webhook_concurrency, :log_level, :smtp,
-                       :payment_providers, :asaas_base_url, :storage_root, :max_upload_bytes, :bcrypt_cost,
-                       :metrics_token, :trusted_proxies, :api_rate_limit, :worker_health_file) do
+                       :migration_database_url, :pool_size, :pool_timeout, :worker_concurrency, :webhook_concurrency,
+                       :webhook_max_per_organization, :log_level, :smtp, :payment_providers, :asaas_base_url, :storage_root,
+                       :max_upload_bytes, :bcrypt_cost, :metrics_token, :trusted_proxies, :api_rate_limit, :worker_health_file,
+                       :outbox_retention_days, :webhook_delivery_retention_days, :inbound_webhook_retention_days) do
     def self.from_env(env = ENV, overrides = {})
       app_env = env.fetch("APP_ENV", "development")
       values = {
@@ -28,8 +40,6 @@ module Locentra
         migration_database_url: env["MIGRATION_DATABASE_URL"],
         pool_size: Integer(env.fetch("DB_POOL_SIZE", env.fetch("PUMA_THREADS", "5"))),
         pool_timeout: Integer(env.fetch("DB_POOL_TIMEOUT", "5")),
-        worker_concurrency: Integer(env.fetch("WORKER_CONCURRENCY", "4")),
-        webhook_concurrency: Integer(env.fetch("WEBHOOK_CONCURRENCY", "1")),
         log_level: env.fetch("LOG_LEVEL", "info"),
         smtp: smtp(env, app_env),
         payment_providers: payment_providers(env["PAYMENT_PROVIDERS"], app_env),
@@ -41,13 +51,26 @@ module Locentra
         trusted_proxies: trusted_proxies(env["TRUSTED_PROXIES"]),
         api_rate_limit: Integer(env.fetch("API_RATE_LIMIT", "1200")),
         worker_health_file: env.fetch("WORKER_HEALTH_FILE", File.expand_path("../../tmp/worker.alive", __dir__))
-      }.merge(overrides)
+      }.merge(worker(env), overrides)
       new(**values).tap(&:validate!)
     rescue ArgumentError => e
       raise ConfigError, "configuração inválida: #{e.message}"
     end
 
     def self.optional(env, key) = env[key].to_s.empty? ? nil : env[key]
+
+    # Threads do worker, limite de execuções simultâneas por organização na fila de webhooks e janelas de
+    # retenção do histórico de integrações (dias).
+    def self.worker(env)
+      {
+        worker_concurrency: Integer(env.fetch("WORKER_CONCURRENCY", "4")),
+        webhook_concurrency: Integer(env.fetch("WEBHOOK_CONCURRENCY", "4")),
+        webhook_max_per_organization: Integer(env.fetch("WEBHOOK_MAX_PER_ORGANIZATION", "2")),
+        outbox_retention_days: Integer(env.fetch("OUTBOX_RETENTION_DAYS", "30")),
+        webhook_delivery_retention_days: Integer(env.fetch("WEBHOOK_DELIVERY_RETENTION_DAYS", "30")),
+        inbound_webhook_retention_days: Integer(env.fetch("INBOUND_WEBHOOK_RETENTION_DAYS", "90"))
+      }
+    end
 
     # Envio de e-mail: servidor, remetente, TLS (none, starttls obrigatório ou tls implícito na conexão)
     # e autenticação. Em produção o padrão é starttls e `none` é recusado: links de recuperação de senha,
@@ -94,8 +117,22 @@ module Locentra
       raise ConfigError, "API_RATE_LIMIT deve ser positivo" unless api_rate_limit.positive?
 
       validate_smtp!
+      validate_worker!
 
       true
+    end
+
+    # Fila de webhooks (threads e limite por organização) e janelas de retenção com o mínimo seguro.
+    def validate_worker!
+      limit = WEBHOOK_MAX_PER_ORGANIZATION_RANGE
+      raise ConfigError, "WEBHOOK_MAX_PER_ORGANIZATION deve estar entre 1 e 100" unless limit.cover?(webhook_max_per_organization)
+      raise ConfigError, "WEBHOOK_CONCURRENCY não pode ser negativo" if webhook_concurrency.negative?
+
+      RETENTION_LIMITS.each do |field, (min, var)|
+        unless public_send(field).between?(min, MAX_RETENTION_DAYS)
+          raise ConfigError, "#{var} deve estar entre #{min} e #{MAX_RETENTION_DAYS} dias (mínimo seguro: #{min})"
+        end
+      end
     end
 
     def validate_smtp!

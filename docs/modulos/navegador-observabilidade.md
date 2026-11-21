@@ -84,6 +84,9 @@ como `metrics.collect_failed`).
 | `locentra_metrics_collect_success` | gauge | — | 1 se a coleta das métricas derivadas do banco funcionou na última leitura |
 | `locentra_jobs_retries_total` | counter | `queue`, `kind` | `job_outcome_totals` (todos os workers) |
 | `locentra_jobs_dead_total` | counter | `queue`, `kind` | `job_outcome_totals` (todos os workers) |
+| `locentra_webhook_deliveries_total` | counter | `outcome` (`delivered`, `failed`, `held`, `released`) | `worker_outcome_totals` (todos os workers) |
+| `locentra_webhook_endpoint_pauses_total` | counter | — | `worker_outcome_totals`: pausas automáticas de endpoints (circuito) |
+| `locentra_retention_purged_total` | counter | `kind` (`jobs`, `outbox_events`, `webhook_deliveries`, `inbound_webhooks`) | `worker_outcome_totals`: registros removidos pela retenção |
 
 ### Cardinalidade
 

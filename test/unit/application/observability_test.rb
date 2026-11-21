@@ -155,6 +155,7 @@ class ApplicationObservabilityTest < UnitTest
     reports = Object.new
     reports.define_singleton_method(:queue_stats) { |_tx, _now| stats }
     reports.define_singleton_method(:job_outcome_totals) { |_tx| totals }
+    reports.define_singleton_method(:worker_outcome_totals) { |_tx| [] }
     collect = A::Reports::CollectMetrics.new(transactor: FakeTransactor.new, reports: reports, metrics: metrics, clock: clock)
 
     assert collect.call
@@ -172,5 +173,24 @@ class ApplicationObservabilityTest < UnitTest
                                           clock: clock, logger: logger).call
     assert_equal [[0, {}]], metrics.gauges["metrics_collect_success"], "falha visível na própria série"
     assert_equal "metrics.collect_failed", logger.entries.last[1][:event]
+  end
+
+  # Totais gravados pelo worker: entregas de webhook por desfecho, pausas de endpoints (sem rótulo) e
+  # registros removidos pela retenção por tipo. Família desconhecida é ignorada.
+  def test_collect_metrics_publishes_worker_outcome_totals_with_their_labels
+    outcomes = [{ "family" => "retention", "outcome" => "jobs", "total" => 7 }, { "family" => "retention", "outcome" => "outbox_events", "total" => 3 },
+                { "family" => "webhook_circuit", "outcome" => "paused", "total" => 1 },
+                { "family" => "webhook_delivery", "outcome" => "delivered", "total" => 40 },
+                { "family" => "webhook_delivery", "outcome" => "held", "total" => 2 },
+                { "family" => "desconhecida", "outcome" => "x", "total" => 9 }]
+    reports = Object.new
+    reports.define_singleton_method(:queue_stats) { |_tx, _now| [] }
+    reports.define_singleton_method(:job_outcome_totals) { |_tx| [] }
+    reports.define_singleton_method(:worker_outcome_totals) { |_tx| outcomes }
+
+    assert A::Reports::CollectMetrics.new(transactor: FakeTransactor.new, reports: reports, metrics: metrics, clock: TestClock.new).call
+    assert_equal({ ["retention_purged_total", { kind: "jobs" }] => 7, ["retention_purged_total", { kind: "outbox_events" }] => 3,
+                   ["webhook_endpoint_pauses_total", {}] => 1, ["webhook_deliveries_total", { outcome: "delivered" }] => 40,
+                   ["webhook_deliveries_total", { outcome: "held" }] => 2 }, metrics.totals)
   end
 end
