@@ -130,7 +130,8 @@ positivo responde 422 em `versao`.
   leitura humana das consequências, e a auditoria liga a alteração a uma pessoa. Liberar para integrações
   exigiria permissão nova e dedicada, com credenciais novas (evolução registrada no ADR-029).
 - **PATCH parcial com versão obrigatória (D4).** Chave presente altera o campo e chave ausente mantém o valor
-  atual. `lock_version` (inteiro ≥ 1) é obrigatório: a escrita parcial de configurações que afetam todo o tenant
+  atual. Sem `cancellation_policy`, a política gravada é mantida como está, mesmo que anterior às regras atuais
+  (a 0016 só confere o formato); ela passa pelas regras quando é alterada. `lock_version` (inteiro ≥ 1) é obrigatório: a escrita parcial de configurações que afetam todo o tenant
   não pode sobrescrever às cegas uma alteração concorrente (diverge do "opcional na API" das condições
   comerciais, ADR-027). Divergência responde 409 `stale_organization`. A troca de fuso exige
   `confirm_time_zone_change: true` (422 em `confirmar_fuso`). Chaves desconhecidas ou não editáveis (`slug`,

@@ -178,7 +178,8 @@ indicadores `*_default` por valor) e as filiais com `active` e `deactivated_at`.
 mesmo com o escopo `organization.manage` (ADR-029). Regras:
 
 - PATCH parcial: chave presente altera o campo (`name`, `time_zone`, `hold_minutes`, `cancellation_policy`) e
-  chave ausente mantém o valor atual; `lock_version` é obrigatório e divergente responde 409
+  chave ausente mantém o valor atual (sem `cancellation_policy`, a política gravada fica como está, sem ser
+  revalidada pelas regras atuais); `lock_version` é obrigatório e divergente responde 409
   `stale_organization`;
 - a troca de fuso exige `confirm_time_zone_change: true` (422 em `confirmar_fuso`, a mensagem da tela);
 - a política usa o formato de `GET /organization` (`{"tiers": [{"min_hours_before": 48, "fee_bps": 1000}]}`),

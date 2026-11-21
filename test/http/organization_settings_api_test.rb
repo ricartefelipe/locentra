@@ -61,6 +61,20 @@ class OrganizationSettingsApiTest < ApiV1TestCase
     assert_equal 2, current["lock_version"].to_i
   end
 
+  # Política gravada antes das regras atuais (a 0016 só confere o formato): o PATCH sem
+  # `cancellation_policy` a mantém como está, sem revalidá-la.
+  def test_partial_update_keeps_a_stored_policy_outside_the_current_rules
+    legacy = { "tiers" => [tier(24, 3000), tier(0, 1000)] }
+    owner_query("UPDATE organizations SET settings = jsonb_set(settings, '{cancellation_policy}', $2::jsonb) WHERE id = $1",
+                [@org[:organization_id], JSON.generate(legacy)], tenant: @org[:organization_id])
+    body = settings_patch!(200, { "hold_minutes" => 45, "lock_version" => 1 })
+
+    assert_equal [true, 45, legacy], [body["changed"], body.dig("organization", "settings", "hold_minutes"),
+                                      body.dig("organization", "settings", "cancellation_policy")]
+    assert_equal [{ "changes" => { "hold_minutes" => [30, 45] }, "lock_version" => 2, "via" => "api" }], audit_details("organization.settings_updated")
+    assert_equal legacy, JSON.parse(current["settings"])["cancellation_policy"]
+  end
+
   def test_unchanged_values_answer_changed_false_without_audit
     body = settings_patch!(200, { "hold_minutes" => 30, "name" => "Locadora Alfa", "lock_version" => 1 })
 

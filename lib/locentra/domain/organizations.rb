@@ -116,8 +116,14 @@ module Locentra
 
         private
 
+        # Faixas iguais às gravadas (a base de `revision_attrs`, quando a revisão parcial não informa a
+        # política) mantêm a política como está, sem revalidá-la: a política gravada antes das regras atuais
+        # continua valendo até ser alterada. Faixas diferentes passam pelas regras atuais.
         def revised_policy(rows, tiers)
-          rows.nil? ? CancellationPolicy.from_tiers(tiers) : CancellationPolicy.from_form(rows)
+          return CancellationPolicy.from_form(rows) unless rows.nil?
+          return CancellationPolicy.canonical(cancellation_policy) if tiers == revision_attrs[:cancellation_tiers]
+
+          CancellationPolicy.from_tiers(tiers)
         end
 
         def confirm_timezone!(chosen, confirmed)

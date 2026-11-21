@@ -400,7 +400,8 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   troca de fuso exige leitura humana das consequências, e a auditoria liga a alteração a uma pessoa. A
   liberação para integrações fica como evolução futura, com permissão nova e dedicada e credenciais novas.
 - **PATCH parcial com versão obrigatória (D4):** chave presente altera o campo e chave ausente mantém o valor
-  (`Organization#revision_attrs` é a base da revisão). `lock_version` é obrigatório, ao contrário do "opcional
+  (`Organization#revision_attrs` é a base da revisão). As faixas iguais às gravadas mantêm a política como está,
+  sem revalidá-la: uma política gravada antes das regras atuais não impede a alteração de outro campo. `lock_version` é obrigatório, ao contrário do "opcional
   na API" das condições comerciais (ADR-027): a escrita parcial de configurações que afetam todo o tenant não
   pode sobrescrever às cegas uma alteração concorrente. A troca de fuso exige `confirm_time_zone_change: true`.
   Chaves desconhecidas ou não editáveis respondem 422 no nome da chave, em vez de serem ignoradas. Sem mudança

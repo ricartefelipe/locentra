@@ -40,6 +40,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 - A segunda resolução de um alerta operacional responde `409 alert_resolved` ("alerta já resolvido"), como os
   alertas financeiros, em vez de `invalid_transition`; vale para a API, a interface web e a resolução
   concorrente.
+- `PATCH /organization/settings` sem `cancellation_policy` mantém a política gravada como está: uma política
+  anterior às regras atuais deixa de impedir a alteração de outro campo (422 em `faixas_cancelamento`).
 
 ## [1.2.0] — 2026-11-21
 

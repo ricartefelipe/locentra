@@ -247,6 +247,19 @@ class OrganizationSettingsDomainTest < UnitTest
     assert_equal [60, "America/Manaus", policy([48, 1000], [0, 5000])], [partial.hold_minutes, partial.timezone, partial.cancellation_policy]
   end
 
+  # Política gravada antes das regras atuais: a revisão parcial que não a altera a mantém como está; faixas
+  # novas continuam validadas.
+  def test_partial_revision_keeps_a_stored_policy_outside_the_current_rules
+    legacy = policy([24, 3000], [0, 1000])
+    org = organization(settings: { "cancellation_policy" => legacy })
+    partial = org.revise(**org.revision_attrs, hold_minutes: 45)
+
+    assert_equal [45, legacy, 2], [partial.hold_minutes, partial.cancellation_policy, partial.lock_version]
+    assert_same org, org.revise(**org.revision_attrs), "sem alteração, a revisão não muda nada"
+    assert_equal(["a multa não pode diminuir à medida que o início se aproxima (24 h: 30%; 0 h: 20%)"],
+                 messages { org.revise(**org.revision_attrs, cancellation_tiers: [tier(24, 3000), tier(0, 2000)]) })
+  end
+
   # Filiais -------------------------------------------------------------------------------------------
 
   def test_branch_revision_and_changes
