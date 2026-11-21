@@ -122,6 +122,7 @@ module Locentra
           r.get "/integracoes", integrations, :index
           r.post "/integracoes", integrations, :create
           r.post "/integracoes/:id/desativar", integrations, :disable
+          r.post "/integracoes/:id/reativar", integrations, :resume
           r.post "/integracoes/entregas/:id/reenviar", integrations, :redeliver
 
           attachments = w::AttachmentsController.new(deps)

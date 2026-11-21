@@ -3,12 +3,15 @@
 require_relative "concurrency_helper"
 require_relative "../support/barrier"
 require_relative "../support/worker_support"
+require_relative "../support/webhook_support"
 
 # Fila de webhooks sob concorrência real: reivindicações simultâneas em transações abertas ao mesmo
-# tempo nunca deixam uma organização acima do limite nem reivindicam a mesma tarefa duas vezes, e as
-# threads de webhooks de um worker não são monopolizadas pelos destinos lentos de uma organização.
+# tempo nunca deixam uma organização acima do limite nem reivindicam a mesma tarefa duas vezes, as
+# threads de webhooks de um worker não são monopolizadas pelos destinos lentos de uma organização e a
+# reativação de um endpoint disputando com a retenção de uma entrega nunca deixa a entrega parada.
 class WebhookFairnessRaceTest < DatabaseTest
   include WorkerHelpers
+  include WebhookHelpers
 
   Q = Locentra::Infrastructure::Jobs::Queue
   CAP = 2
@@ -204,5 +207,75 @@ class WebhookFairnessRaceTest < DatabaseTest
     delivered = owner_query("SELECT count(*) AS n FROM webhook_deliveries WHERE status = 'delivered'", tenant: @alfa[:organization_id])
 
     assert_equal 6, delivered.first["n"].to_i
+  end
+
+  # Entrega pendente com tarefa já atendida (o caso de uso é chamado diretamente pelo teste).
+  def pending_delivery(org, endpoint)
+    worker_system.transactor.call(tenant_id: org[:organization_id]) do |tx|
+      repo = worker_system.repos[:webhooks]
+      event = worker_system.services[:events].publish(tx, "reservation.confirmed", "reservation", SecureRandom.uuid, {})
+      id = SecureRandom.uuid
+      repo.insert_delivery(tx, "id" => id, "endpoint_id" => endpoint, "event_id" => event, "event_type" => "reservation.confirmed",
+                               "created_at" => @clock.now)
+      repo.mark_dispatched(tx, event, @clock.now)
+      id
+    end
+  end
+
+  def gated_deliver(gate, after:)
+    s = worker_system.services
+    webhooks = PausingProxy.new(worker_system.repos[:webhooks], :hold_delivery, gate, after: after)
+    A::Webhooks::Deliver.new(transactor: worker_system.transactor, webhooks: webhooks, http: s[:http], box: s[:box],
+                             signer: Locentra::Infrastructure::WebhookSignature, clock: @clock, calls: s[:external_calls],
+                             totals: worker_system.repos[:outcome_totals], audit: s[:audit])
+  end
+
+  def resume_race_setup
+    @servers = [CaptureServer.new]
+    endpoint = uc(:create_webhook).call(@alfa[:actor], url: @servers.first.url, events: ["*"])["id"]
+    delivery = pending_delivery(@alfa, endpoint)
+    pause_endpoint!(@alfa, endpoint)
+    [endpoint, delivery]
+  end
+
+  def final_delivery(delivery)
+    owner_query("SELECT status, held_at FROM webhook_deliveries WHERE id = $1", [delivery], tenant: @alfa[:organization_id]).first
+  end
+
+  # Ordem 1: a entrega lê o endpoint pausado e para antes de reter; a reativação faz commit; a retenção
+  # não acontece (0 linhas) e a entrega é feita na mesma execução.
+  def test_resume_racing_with_a_hold_never_strands_a_delivery
+    endpoint, delivery = resume_race_setup
+    gate = Gate.new
+    worker = Thread.new { gated_deliver(gate, after: false).call(@alfa[:organization_id], delivery) }
+    gate.reached
+
+    assert_equal 0, uc(:resume_webhook).call(@alfa[:actor], endpoint)["held_deliveries"]
+    gate.resume
+
+    assert_equal :delivered, worker.value
+    assert_equal({ "status" => "delivered", "held_at" => nil }, final_delivery(delivery))
+    assert_equal 1, @servers.first.requests.size
+  end
+
+  # Ordem 2: a retenção grava e segura o commit; a reativação espera no FOR UPDATE do endpoint, vê a
+  # entrega retida depois do commit e a liberação a entrega.
+  def test_resume_waiting_for_a_committed_hold_releases_the_delivery
+    endpoint, delivery = resume_race_setup
+    gate = Gate.new
+    worker = Thread.new { gated_deliver(gate, after: true).call(@alfa[:organization_id], delivery) }
+    gate.reached
+    resume = Thread.new { uc(:resume_webhook).call(@alfa[:actor], endpoint) }
+    sleep 0.3
+
+    assert_predicate resume, :alive?, "a reativação espera a transação da retenção (FOR KEY SHARE)"
+    gate.resume
+
+    assert_equal :endpoint_paused, worker.value
+    assert_equal 1, resume.value["held_deliveries"]
+    drain
+
+    assert_equal({ "status" => "delivered", "held_at" => nil }, final_delivery(delivery))
+    assert_equal 1, @servers.first.requests.size
   end
 end

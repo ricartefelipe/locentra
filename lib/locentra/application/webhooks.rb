@@ -13,6 +13,12 @@ module Locentra
       ].freeze
       # Fila própria das entregas, atendida por threads dedicadas do worker (WEBHOOK_CONCURRENCY).
       DELIVERY_QUEUE = "webhooks"
+      # Liberação das entregas retidas depois da reativação de um endpoint pausado: tarefa da fila
+      # `default`, em lotes, reagendada até não restar entrega retida.
+      RELEASE_BATCH = 500
+      RELEASE_KIND = "webhooks.release_held"
+      DELIVERY_PRIORITY = 40
+      RELEASE_PRIORITY = 45
 
       class CreateEndpoint
         def initialize(uow:, webhooks:, limits:, http:, box:, audit:, clock:, ids:)
@@ -92,7 +98,8 @@ module Locentra
         end
       end
 
-      # Reenvio manual de uma entrega que falhou, reutilizando o mesmo identificador de entrega.
+      # Reenvio manual de uma entrega que falhou, reutilizando o mesmo identificador de entrega. A
+      # entrega volta a `pending` sem retenção; com o endpoint ainda pausado, a tarefa a retém de novo.
       class Redeliver
         def initialize(uow:, webhooks:, queue:, audit:)
           @uow = uow
@@ -108,7 +115,7 @@ module Locentra
 
             @webhooks.reset_delivery(tx, delivery["id"])
             @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => delivery["id"] },
-                           priority: 40, correlation_id: current.request_id, queue: DELIVERY_QUEUE)
+                           priority: DELIVERY_PRIORITY, correlation_id: current.request_id, queue: DELIVERY_QUEUE)
             @audit.record(tx, current, "webhook.redelivery_requested", "webhook_delivery", delivery["id"])
             true
           end
@@ -119,13 +126,18 @@ module Locentra
       # cria uma entrega por endpoint inscrito, enfileira notificações por e-mail e chama os
       # assinantes internos (objetos com `call(tx, event)`, ex.: sincronização financeira), na mesma
       # transação que marca o evento como despachado.
+      #
+      # Endpoint pausado: a entrega já nasce retida (`held_at`), sem tarefa; sai depois da reativação
+      # (ReleaseHeld). Os endpoints são lidos com FOR KEY SHARE, e a reativação (FOR UPDATE) espera este
+      # commit: nenhuma entrega fica retida depois de o endpoint voltar.
       class DispatchEvent
-        def initialize(webhooks:, queue:, notifications:, clock:, ids:, subscribers: [])
+        def initialize(webhooks:, queue:, notifications:, clock:, ids:, totals:, subscribers: [])
           @webhooks = webhooks
           @queue = queue
           @notifications = notifications
           @clock = clock
           @ids = ids
+          @totals = totals
           @subscribers = subscribers.freeze
         end
 
@@ -134,17 +146,23 @@ module Locentra
           return :missing unless event
           return :already_dispatched if event["dispatched_at"]
 
+          now = @clock.now
           @webhooks.endpoints_for(tx, event["event_type"]).each do |endpoint|
             delivery_id = @ids.uuid
+            held = endpoint["paused_at"] ? now : nil
             next unless @webhooks.insert_delivery(tx, "id" => delivery_id, "endpoint_id" => endpoint["id"], "event_id" => event["id"],
-                                                      "event_type" => event["event_type"], "created_at" => @clock.now)
+                                                      "event_type" => event["event_type"], "created_at" => now, "held_at" => held)
 
-            @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => delivery_id },
-                           priority: 40, correlation_id: event["correlation_id"], queue: DELIVERY_QUEUE)
+            if held
+              @totals.add(tx, "webhook_delivery", "held", 1, now)
+            else
+              @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => delivery_id },
+                             priority: DELIVERY_PRIORITY, correlation_id: event["correlation_id"], queue: DELIVERY_QUEUE)
+            end
           end
           @notifications.for_event(tx, event)
           @subscribers.each { |subscriber| subscriber.call(tx, event) }
-          @webhooks.mark_dispatched(tx, event["id"], @clock.now)
+          @webhooks.mark_dispatched(tx, event["id"], now)
           :dispatched
         end
       end
@@ -154,10 +172,17 @@ module Locentra
       # (`external.call`, serviço "webhook") com a organização e o correlation_id da tarefa, que é o
       # request_id da operação que gerou o evento. Portas: `http.post(url, body, headers)`,
       # `box.decrypt(texto)` e `signer.header(segredo, timestamp, corpo)`.
+      #
+      # Circuito por endpoint: cada tentativa com falha (status fora de 2xx, rede, tempo, destino
+      # bloqueado) soma uma falha consecutiva, e um sucesso zera a sequência, na mesma transação que
+      # grava a tentativa. Com Domain::Webhooks::Circuit.trip? o endpoint é pausado uma única vez e a
+      # pausa é auditada como ação do sistema (sem a URL). Endpoint pausado: a entrega é retida sem
+      # chamada de rede e sem gastar tentativa, e a tarefa conclui com `:endpoint_paused`.
       class Deliver
         HTTP_OUTCOME = ->(response) { response.status.between?(200, 299) ? "ok" : "http_#{response.status / 100}xx" }
+        AUDIT_ERROR_LENGTH = 200
 
-        def initialize(transactor:, webhooks:, http:, box:, signer:, clock:, calls:)
+        def initialize(transactor:, webhooks:, http:, box:, signer:, clock:, calls:, totals:, audit:)
           @transactor = transactor
           @webhooks = webhooks
           @http = http
@@ -165,6 +190,8 @@ module Locentra
           @signer = signer
           @clock = clock
           @calls = calls
+          @totals = totals
+          @audit = audit
         end
 
         def call(organization_id, delivery_id, correlation_id: nil)
@@ -172,16 +199,16 @@ module Locentra
           return :missing unless data
           return :already_delivered if data["status"] == "delivered"
           return :endpoint_disabled unless data["active"]
+          return :endpoint_paused if data["paused_at"] && hold(organization_id, data)
 
-          body = JSON.generate("id" => data["event_id"], "type" => data["event_type"], "occurred_at" => data["occurred_at"].utc.iso8601,
-                               "organization_id" => organization_id, "data" => data["payload"])
-          timestamp = @clock.now.to_i
-          headers = { "x-locentra-event-id" => data["event_id"], "x-locentra-delivery-id" => delivery_id, "x-locentra-event" => data["event_type"],
-                      "x-locentra-signature" => @signer.header(@box.decrypt(data["secret_ciphertext"]), timestamp, body) }
-          context = { organization_id: organization_id, correlation_id: correlation_id,
-                      details: { delivery_id: delivery_id, event_type: data["event_type"] } }
-          outcome = attempt(data["url"], body, headers, context)
-          @transactor.call(tenant_id: organization_id) { |tx| @webhooks.record_attempt(tx, delivery_id, outcome, @clock.now) }
+          outcome = attempt(data["url"], *request(organization_id, delivery_id, data), context(organization_id, delivery_id, data, correlation_id))
+          @transactor.call(tenant_id: organization_id) do |tx|
+            now = @clock.now
+            if @webhooks.record_attempt(tx, delivery_id, outcome, now) == 1
+              @totals.add(tx, "webhook_delivery", outcome[:success] ? "delivered" : "failed", 1, now)
+              track_circuit(tx, data["endpoint_id"], outcome, correlation_id, now)
+            end
+          end
           raise DeliveryFailed, outcome[:error] || "status #{outcome[:status]}" unless outcome[:success]
 
           :delivered
@@ -190,6 +217,46 @@ module Locentra
         class DeliveryFailed < StandardError; end
 
         private
+
+        # Verdadeiro quando a entrega ficou retida. Falso quando o endpoint foi reativado entre a leitura
+        # e a retenção: a entrega segue normalmente.
+        def hold(organization_id, data)
+          @transactor.call(tenant_id: organization_id) do |tx|
+            now = @clock.now
+            next false unless @webhooks.hold_delivery(tx, data["id"], data["endpoint_id"], now) == 1
+
+            @totals.add(tx, "webhook_delivery", "held", 1, now)
+            true
+          end
+        end
+
+        def request(organization_id, delivery_id, data)
+          body = JSON.generate("id" => data["event_id"], "type" => data["event_type"], "occurred_at" => data["occurred_at"].utc.iso8601,
+                               "organization_id" => organization_id, "data" => data["payload"])
+          timestamp = @clock.now.to_i
+          headers = { "x-locentra-event-id" => data["event_id"], "x-locentra-delivery-id" => delivery_id, "x-locentra-event" => data["event_type"],
+                      "x-locentra-signature" => @signer.header(@box.decrypt(data["secret_ciphertext"]), timestamp, body) }
+          [body, headers]
+        end
+
+        def context(organization_id, delivery_id, data, correlation_id)
+          { organization_id: organization_id, correlation_id: correlation_id, details: { delivery_id: delivery_id, event_type: data["event_type"] } }
+        end
+
+        def track_circuit(tx, endpoint_id, outcome, correlation_id, now)
+          state = @webhooks.register_endpoint_result(tx, endpoint_id, outcome[:success], now)
+          return if outcome[:success] || state.nil? || !state["active"] || state["paused_at"]
+
+          failures = state["consecutive_failures"]
+          return unless Domain::Webhooks::Circuit.trip?(consecutive_failures: failures, failing_since: state["failing_since"], now: now)
+          return unless @webhooks.pause_endpoint(tx, endpoint_id, now) == 1
+
+          @totals.add(tx, "webhook_circuit", "paused", 1, now)
+          actor = Actor.system(organization_id: tx.tenant_id!, request_id: correlation_id)
+          @audit.record(tx, actor, "webhook.endpoint_paused", "webhook_endpoint", endpoint_id,
+                        "consecutive_failures" => failures, "failing_since" => state["failing_since"].utc.iso8601,
+                        "last_status_code" => outcome[:status], "last_error" => Jobs::ErrorText.redact(outcome[:error])&.slice(0, AUDIT_ERROR_LENGTH))
+        end
 
         def attempt(url, body, headers, context)
           blocked = { Integrations::UnsafeDestination => "blocked" }
@@ -202,6 +269,70 @@ module Locentra
           { success: false, status: nil, error: "destino bloqueado: #{e.message}" }
         rescue StandardError => e
           { success: false, status: nil, error: "#{e.class.name}: #{e.message}"[0, 300] }
+        end
+      end
+
+      # Reativação de um endpoint pausado pelo circuito, somente pela interface web e com
+      # `integrations.manage`. O FOR UPDATE no endpoint espera despachos e retenções em andamento (FOR
+      # KEY SHARE): depois do commit, nenhuma entrega nova é retida. O circuito é zerado e uma única
+      # tarefa de liberação é enfileirada quando há entregas retidas.
+      class ResumeEndpoint
+        def initialize(uow:, webhooks:, queue:, audit:)
+          @uow = uow
+          @webhooks = webhooks
+          @queue = queue
+          @audit = audit
+        end
+
+        def call(actor, endpoint_id)
+          @uow.run(actor, "integrations.manage") do |tx, current|
+            id = Domain::Identifier.parse(endpoint_id, "endpoint")
+            endpoint = @webhooks.lock_endpoint(tx, id) || raise(Domain::NotFound, "endpoint")
+            raise Domain::Conflict.new("endpoint desativado não pode ser reativado", code: "endpoint_disabled") unless endpoint["active"]
+            raise Domain::Conflict.new("endpoint não está pausado", code: "endpoint_not_paused") unless endpoint["paused_at"]
+
+            held = @webhooks.held_count(tx, id)
+            @webhooks.resume_endpoint(tx, id)
+            @queue.enqueue(tx, RELEASE_KIND, { "endpoint_id" => id }, priority: RELEASE_PRIORITY, correlation_id: current.request_id) if held.positive?
+            @audit.record(tx, current, "webhook.endpoint_resumed", "webhook_endpoint", id,
+                          "paused_at" => endpoint["paused_at"].utc.iso8601, "consecutive_failures" => endpoint["consecutive_failures"],
+                          "held_deliveries" => held)
+            { "id" => id, "held_deliveries" => held }
+          end
+        end
+      end
+
+      # Liberação de um lote de entregas retidas (worker, contexto do tenant): devolve-as a `pending`,
+      # enfileira uma entrega por item (sujeita ao limite por organização da fila de webhooks) e se
+      # reagenda enquanto o lote vier cheio. Endpoint pausado de novo ou desativado interrompe a
+      # liberação; as entregas restantes continuam retidas.
+      class ReleaseHeld
+        def initialize(transactor:, webhooks:, queue:, totals:, clock:, batch_size: RELEASE_BATCH)
+          @transactor = transactor
+          @webhooks = webhooks
+          @queue = queue
+          @totals = totals
+          @clock = clock
+          @batch_size = batch_size
+        end
+
+        def call(organization_id, endpoint_id, correlation_id: nil)
+          @transactor.call(tenant_id: organization_id) do |tx|
+            endpoint = @webhooks.lock_endpoint_for_release(tx, endpoint_id)
+            next :missing unless endpoint
+            next :endpoint_paused if !endpoint["active"] || endpoint["paused_at"]
+
+            ids = @webhooks.release_held(tx, endpoint_id, @batch_size)
+            ids.each do |id|
+              @queue.enqueue(tx, "webhooks.deliver", { "delivery_id" => id }, priority: DELIVERY_PRIORITY, correlation_id: correlation_id,
+                                                                              queue: DELIVERY_QUEUE)
+            end
+            @totals.add(tx, "webhook_delivery", "released", ids.size, @clock.now)
+            if ids.size == @batch_size
+              @queue.enqueue(tx, RELEASE_KIND, { "endpoint_id" => endpoint_id }, priority: RELEASE_PRIORITY, correlation_id: correlation_id)
+            end
+            ids.size
+          end
         end
       end
     end

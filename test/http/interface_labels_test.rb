@@ -73,6 +73,15 @@ class InterfaceLabelsTest < HttpTest
     fields.each { |field, text| assert_equal text, labels.label(:field, field) }
   end
 
+  def test_webhook_audit_actions_have_portuguese_labels
+    labels = Locentra::Interfaces::HTTP::Labels
+    actions = { "webhook.endpoint_created" => "Endpoint de webhook criado", "webhook.endpoint_disabled" => "Endpoint de webhook desativado",
+                "webhook.endpoint_paused" => "Endpoint de webhook pausado automaticamente",
+                "webhook.endpoint_resumed" => "Endpoint de webhook reativado", "webhook.redelivery_requested" => "Reenvio de webhook solicitado" }
+
+    actions.each { |action, text| assert_equal text, labels.label(:audit_action, action) }
+  end
+
   def test_error_summary_shows_field_names_and_transition_errors_use_status_labels
     get "/produtos/novo"
     post_form "/produtos", { "sku" => "X-1", "nome" => "Produto", "rastreamento" => "bulk", "preco_diaria" => "10,00", "caucao" => "-5" }

@@ -22,6 +22,7 @@ module Locentra
           @map = {
             "events.dispatch" => method(:dispatch_event),
             "webhooks.deliver" => method(:deliver_webhook),
+            "webhooks.release_held" => method(:release_held_webhooks),
             "email.confirmation" => method(:email_confirmation),
             "email.password_reset" => method(:email_password_reset),
             "email.invitation" => method(:email_invitation),
@@ -57,6 +58,11 @@ module Locentra
 
         def deliver_webhook(job)
           @system.services[:deliver_webhook].call(job.organization_id, job.payload.fetch("delivery_id"), correlation_id: job.correlation_id)
+        end
+
+        # Lote de entregas retidas de um endpoint reativado (a tarefa se reagenda até terminar).
+        def release_held_webhooks(job)
+          @system.services[:release_held_webhooks].call(job.organization_id, job.payload.fetch("endpoint_id"), correlation_id: job.correlation_id)
         end
 
         def email_confirmation(job)

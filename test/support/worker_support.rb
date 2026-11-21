@@ -24,6 +24,7 @@ end
 # Servidor HTTP mínimo que registra requisições recebidas (destino de webhooks em testes).
 class CaptureServer
   attr_reader :port, :requests
+  attr_writer :status
 
   def initialize(status: 200)
     @server = TCPServer.new("127.0.0.1", 0)
