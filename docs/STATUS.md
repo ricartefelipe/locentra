@@ -63,6 +63,7 @@ restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprova
 | #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 |
 | #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 (ver acima) |
 | — | Configurações da organização (nome, fuso, validade padrão do bloqueio, política de cancelamento), política congelada na reserva e na versão do orçamento, fuso de referência da reserva, gestão de filiais, `organization.read`, API, CLI e migration 0016 (branch `feature/configuracoes-organizacao`) | Testado na branch; não integrado |
+| — | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (branch `feature/api-v1-ampliada`, ADR-030) | Testado na branch; não integrado. `rake test:all` com `COVERAGE_CHECK=1`: 1015 testes, 0 falhas; cobertura de domínio + aplicação 99,30% de linhas e 93,64% de branches; `rake test:browser`: 14 testes, 0 falhas; `rubocop`: 320 arquivos, sem ofensas |
 | — | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (branch `feature/webhooks-por-organizacao`) | Testado na branch; não integrado |
 
 ## Casos obrigatórios cobertos por testes
@@ -88,7 +89,10 @@ desativação simultânea das duas últimas filiais (inclusive sem assinatura), 
 congelada na reserva, na versão do orçamento e no contrato depois de uma troca, fuso de referência da reserva
 em extensão, multa por atraso, vencimento da cobrança, contrato e aditivo depois de uma troca de fuso,
 formulário aberto antes da troca de fuso recusado sem gravar e atualização do esquema da 0015 para a 0016
-(inclusive aborto por `settings` fora do formato); fila de webhooks e retenção: reivindicações simultâneas
+(inclusive aborto por `settings` fora do formato); API v1 ampliada: duas conversões simultâneas do mesmo
+orçamento com a mesma chave e com chaves diferentes, duas entregas simultâneas da mesma retirada, casos de uso
+compostos desfeitos com a transação da chave (inclusive o arquivo do PDF), aprovação vencida sem aprovar e
+respostas reais conferidas contra o OpenAPI; fila de webhooks e retenção: reivindicações simultâneas
 com as transações abertas ao mesmo tempo sem passar do limite por organização, endpoints lentos de uma
 organização sem monopolizar as threads de webhooks, reativação disputando com a retenção de uma entrega (nas
 duas ordens), limpeza do histórico contra reenvio concorrente e atualização do esquema da 0016 para a 0017.
@@ -106,16 +110,18 @@ duas ordens), limpeza do histórico contra reenvio concorrente e atualização d
   coleta é atendida por um processo arbitrário, as séries não têm rótulo de processo e o coletor vê quedas
   de contadores como reinício. As métricas derivadas do banco (fila, desfechos de tarefas) são as mesmas em
   qualquer processo.
-- Sem API v1 para orçamentos, contratos, operação e portal (disponíveis pela interface e casos de uso).
+- Portal do cliente sem API v1.
+- Aceite e encerramento de contrato, avarias, manutenção e transferências sem API v1 (interface web).
 - A confirmação de e-mail (RF-05) é emitida e registrada, mas não restringe funcionalidades: conta não
   confirmada entra, convida, cria credenciais e envia orçamentos e contratos. O cadastro é limitado por IP e
   por e-mail (ADR-026); uma política de bloqueio até a confirmação fica para versão futura.
-- Configurações da organização são alteradas somente pela interface web, por usuário com `organization.manage`;
-  a API v1 e a CLI apenas consultam. A lista de fusos oferece os fusos do Brasil. O CNPJ da organização,
-  impresso nos contratos, ainda não é editável.
+- Configurações da organização são alteradas somente por usuário com `organization.manage`, pela interface web
+  ou por `PATCH /api/v1/organization/settings` com sessão; credenciais e CLI apenas consultam (ADR-030). Prévia,
+  restauração dos padrões e gestão de filiais ficam na interface web. A lista de fusos oferece os fusos do
+  Brasil. O CNPJ da organização, impresso nos contratos, ainda não é editável.
 - Cupons não se aplicam a orçamentos nem a solicitações do portal: valem somente na criação de reserva pela
   equipe ou pela API. A reserva convertida de um orçamento copia os preços do orçamento, sem cupom.
-- Tarifas adicionais pela API somente na criação de reserva (sem API de orçamentos). A CLI cadastra cupons e
+- A API aplica tarifas adicionais na criação de reserva e nas versões de orçamento. A CLI cadastra cupons e
   condições negociadas, mas não edita cupons nem gerencia tarifas (ficam na interface web e na API).
 - Os usos de cupom anteriores à migration 0015 não são reconstruídos no livro de usos: aparecem somente no
   contador legado do cupom. O retorno à versão 1.0.0 depois de usar cupons com limite ou de encerrar

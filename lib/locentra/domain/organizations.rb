@@ -75,16 +75,18 @@ module Locentra
         def default_hold_minutes? = hold_minutes == Settings::DEFAULT_HOLD_MINUTES
         def default_cancellation_policy? = CancellationPolicy.default?(cancellation_policy)
 
-        # Revisão das configurações a partir dos campos do formulário, com todos os erros reunidos. A troca
-        # do fuso exige `confirm_timezone_change`. Sem diferença nos valores efetivos, devolve `self` (quem
-        # chama compara com `equal?`); com diferença, a nova versão.
-        def revise(name:, timezone:, hold_minutes:, cancellation_rows:, confirm_timezone_change: false)
+        # Revisão das configurações, com todos os erros reunidos. A política vem das linhas do formulário
+        # (`cancellation_rows`, texto com percentual) ou, sem elas, das faixas em pontos-base
+        # (`cancellation_tiers`, formato da API); as linhas do formulário têm precedência. A troca do fuso
+        # exige `confirm_timezone_change`. Sem diferença nos valores efetivos, devolve `self` (quem chama
+        # compara com `equal?`); com diferença, a nova versão.
+        def revise(name:, timezone:, hold_minutes:, cancellation_rows: nil, cancellation_tiers: nil, confirm_timezone_change: false)
           values = Pricing::Input.collect do |check|
             {
               name: check.call("nome") { Text.required(name, "nome", min: 2, max: 120) },
               timezone: check.call("fuso_horario") { Settings.timezone!(timezone, current: self.timezone) },
               hold_minutes: check.call("validade_bloqueio") { Settings.hold_minutes!(hold_minutes) },
-              policy: check.call(CancellationPolicy::FIELD) { CancellationPolicy.from_form(cancellation_rows) }
+              policy: check.call(CancellationPolicy::FIELD) { revised_policy(cancellation_rows, cancellation_tiers) }
             }.tap { |data| check.call("confirmar_fuso") { confirm_timezone!(data[:timezone], confirm_timezone_change) } }
           end
           return self if effective == [values[:name], values[:timezone], values[:hold_minutes], values[:policy]]
@@ -105,7 +107,24 @@ module Locentra
         # Nome, fuso, validade do bloqueio e política canônica, na ordem de Settings::TRACKED.
         def effective = [name, timezone, hold_minutes, CancellationPolicy.canonical(cancellation_policy)]
 
+        # Valores atuais no formato aceito por `revise` (política em faixas com pontos-base): base de uma
+        # revisão parcial, em que só os campos informados mudam.
+        def revision_attrs
+          { name: name, timezone: timezone, hold_minutes: hold_minutes,
+            cancellation_tiers: CancellationPolicy.sorted(CancellationPolicy.canonical(cancellation_policy)) }
+        end
+
         private
+
+        # Faixas iguais às gravadas (a base de `revision_attrs`, quando a revisão parcial não informa a
+        # política) mantêm a política como está, sem revalidá-la: a política gravada antes das regras atuais
+        # continua valendo até ser alterada. Faixas diferentes passam pelas regras atuais.
+        def revised_policy(rows, tiers)
+          return CancellationPolicy.from_form(rows) unless rows.nil?
+          return CancellationPolicy.canonical(cancellation_policy) if tiers == revision_attrs[:cancellation_tiers]
+
+          CancellationPolicy.from_tiers(tiers)
+        end
 
         def confirm_timezone!(chosen, confirmed)
           return if chosen.nil? || chosen == timezone || confirmed

@@ -65,6 +65,23 @@ module Locentra
           SQL
         end
 
+        # Lista paginada da API: situação, tipo opcional e reserva opcional (a própria ou a relacionada),
+        # com o total do filtro. Atendida pelos índices reservation_alerts_open_idx, _reservation_idx e
+        # _related_idx.
+        def search(tx, status:, kind:, reservation_id:, limit:, offset:)
+          params = [tx.tenant_id!, status, kind, reservation_id]
+          where = <<~SQL
+            organization_id = $1 AND status = $2 AND ($3::text IS NULL OR kind = $3)
+              AND ($4::uuid IS NULL OR reservation_id = $4::uuid OR related_reservation_id = $4::uuid)
+          SQL
+          total = tx.query_value("SELECT count(*) FROM reservation_alerts WHERE #{where}", params)
+          rows = tx.query(<<~SQL, params + [limit, offset])
+            SELECT #{COLUMNS} FROM reservation_alerts WHERE #{where}
+             ORDER BY created_at DESC, id LIMIT $5 OFFSET $6
+          SQL
+          [rows.map { |row| map(row) }, total]
+        end
+
         private
 
         def map(row)

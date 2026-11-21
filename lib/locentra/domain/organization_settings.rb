@@ -94,6 +94,17 @@ module Locentra
           evaluate(entries)
         end
 
+        # Faixas em pontos-base (formato da API e de `GET /organization`): lista de objetos com
+        # `min_hours_before` e `fee_bps` inteiros. Os limites e as mensagens são os de `build`; outro formato
+        # é recusado antes da avaliação das faixas.
+        def from_tiers(tiers)
+          unless tiers.is_a?(Array) && tiers.all?(Hash)
+            raise ValidationError.new({ FIELD => ["informe as faixas como uma lista de objetos com min_hours_before e fee_bps"] })
+          end
+
+          build(tiers)
+        end
+
         # Linhas do formulário ([antecedência, multa] em texto, alinhadas). Linhas vazias são descartadas; a
         # posição N das mensagens é a da lista compactada, a mesma das linhas reexibidas com erro.
         def from_form(rows)

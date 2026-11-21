@@ -148,30 +148,33 @@ module Locentra
         end
 
         # input: customer_id, branch_id, period, lines, valid_until, terms, manual_discount_bps,
-        # hold_policy ('none' | 'hold_on_send'), hold_minutes.
-        def call(actor, input)
-          @uow.run(actor, "quotes.write") do |tx, current|
-            now = @clock.now
-            customer = active_customer!(tx, input.fetch(:customer_id))
-            org = @organizations.find(tx, tx.tenant_id!)
-            policy = Q::Rules.hold_policy!(input[:hold_policy])
-            hold_minutes = Q::Rules.hold_minutes!(policy, input[:hold_minutes] || org.hold_minutes)
-            id = @ids.uuid
-            version, overrides = @builder.build(tx, current, quote_id: id, number: 1, customer_id: customer.id, input: input, org: org, now: now)
-            quote = Q::Quote.draft(id: id, organization_id: tx.tenant_id!, customer_id: customer.id, branch_id: version.branch_id,
-                                   hold_policy: policy, hold_minutes: hold_minutes)
-            @quotes.insert(tx, quote, current.audit_actor_id, now)
-            @quotes.insert_version(tx, version, current.audit_actor_id)
-            quote = quote.with(code: @organizations.next_code(tx, "quote", "Q"))
-            @quotes.assign_code(tx, quote.id, quote.code)
-            @audit.record(tx, current, "quote.created", "quote", quote.id,
-                          FeeAudit.details(version, overrides, "code" => quote.code, "version" => 1, "total_cents" => version.total.cents,
-                                                               "hold_policy" => policy))
-            quote
-          end
+        # hold_policy ('none' | 'hold_on_send'), hold_minutes. Com `tx`, roda na transação do chamador
+        # (por exemplo, a da chave de idempotência da API).
+        def call(actor, input, tx: nil)
+          Composition.run(@uow, actor, "quotes.write", tx) { |t, current| execute(t, current, input) }
         end
 
         private
+
+        def execute(tx, current, input)
+          now = @clock.now
+          customer = active_customer!(tx, input.fetch(:customer_id))
+          org = @organizations.find(tx, tx.tenant_id!)
+          policy = Q::Rules.hold_policy!(input[:hold_policy])
+          hold_minutes = Q::Rules.hold_minutes!(policy, input[:hold_minutes] || org.hold_minutes)
+          id = @ids.uuid
+          version, overrides = @builder.build(tx, current, quote_id: id, number: 1, customer_id: customer.id, input: input, org: org, now: now)
+          quote = Q::Quote.draft(id: id, organization_id: tx.tenant_id!, customer_id: customer.id, branch_id: version.branch_id,
+                                 hold_policy: policy, hold_minutes: hold_minutes)
+          @quotes.insert(tx, quote, current.audit_actor_id, now)
+          @quotes.insert_version(tx, version, current.audit_actor_id)
+          quote = quote.with(code: @organizations.next_code(tx, "quote", "Q"))
+          @quotes.assign_code(tx, quote.id, quote.code)
+          @audit.record(tx, current, "quote.created", "quote", quote.id,
+                        FeeAudit.details(version, overrides, "code" => quote.code, "version" => 1, "total_cents" => version.total.cents,
+                                                             "hold_policy" => policy))
+          quote
+        end
 
         def active_customer!(tx, customer_id)
           customer = @customers.find(tx, Domain::Identifier.parse(customer_id, "cliente")) || raise(Domain::NotFound, "cliente")
@@ -195,35 +198,37 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, quote_id, input)
-          @uow.run(actor, "quotes.write") do |tx, current|
-            now = @clock.now
-            quote = Scope.lock!(@quotes, tx, current, quote_id)
-            raise Domain::InvalidTransition.new("orçamento", quote.status, "nova versão") unless quote.revisable?
-
-            customer = @customers.find(tx, quote.customer_id)
-            raise Domain::ValidationError.field("cliente", "cliente bloqueado ou inativo") unless customer&.status == "active"
-
-            org = @organizations.find(tx, tx.tenant_id!)
-            policy = Q::Rules.hold_policy!(input[:hold_policy] || quote.hold_policy)
-            hold_minutes = Q::Rules.hold_minutes!(policy, input[:hold_minutes] || quote.hold_minutes || org.hold_minutes)
-            previous = @quotes.find_version(tx, quote.id, quote.current_version)
-            version, overrides = @builder.build(tx, current, quote_id: quote.id, number: quote.current_version + 1, customer_id: quote.customer_id,
-                                                             input: input, org: org, now: now, previous_fees: previous.pricing.fetch("fees", []))
-            ensure_changed!(quote, previous, version, policy, hold_minutes)
-            revised = quote.revise(branch_id: version.branch_id, hold_policy: policy, hold_minutes: hold_minutes)
-            @hold_release.call(tx, current, quote, "Nova versão do orçamento")
-            @quotes.insert_version(tx, version, current.audit_actor_id)
-            @quotes.update(tx, revised, now)
-            @audit.record(tx, current, "quote.revised", "quote", quote.id,
-                          FeeAudit.details(version, overrides, "code" => quote.code, "from_version" => previous.number,
-                                                               "to_version" => version.number, "previous_status" => quote.status,
-                                                               "total_cents" => version.total.cents))
-            revised
-          end
+        def call(actor, quote_id, input, tx: nil)
+          Composition.run(@uow, actor, "quotes.write", tx) { |t, current| execute(t, current, quote_id, input) }
         end
 
         private
+
+        def execute(tx, current, quote_id, input)
+          now = @clock.now
+          quote = Scope.lock!(@quotes, tx, current, quote_id)
+          raise Domain::InvalidTransition.new("orçamento", quote.status, "nova versão") unless quote.revisable?
+
+          customer = @customers.find(tx, quote.customer_id)
+          raise Domain::ValidationError.field("cliente", "cliente bloqueado ou inativo") unless customer&.status == "active"
+
+          org = @organizations.find(tx, tx.tenant_id!)
+          policy = Q::Rules.hold_policy!(input[:hold_policy] || quote.hold_policy)
+          hold_minutes = Q::Rules.hold_minutes!(policy, input[:hold_minutes] || quote.hold_minutes || org.hold_minutes)
+          previous = @quotes.find_version(tx, quote.id, quote.current_version)
+          version, overrides = @builder.build(tx, current, quote_id: quote.id, number: quote.current_version + 1, customer_id: quote.customer_id,
+                                                           input: input, org: org, now: now, previous_fees: previous.pricing.fetch("fees", []))
+          ensure_changed!(quote, previous, version, policy, hold_minutes)
+          revised = quote.revise(branch_id: version.branch_id, hold_policy: policy, hold_minutes: hold_minutes)
+          @hold_release.call(tx, current, quote, "Nova versão do orçamento")
+          @quotes.insert_version(tx, version, current.audit_actor_id)
+          @quotes.update(tx, revised, now)
+          @audit.record(tx, current, "quote.revised", "quote", quote.id,
+                        FeeAudit.details(version, overrides, "code" => quote.code, "from_version" => previous.number,
+                                                             "to_version" => version.number, "previous_status" => quote.status,
+                                                             "total_cents" => version.total.cents))
+          revised
+        end
 
         def ensure_changed!(quote, previous, version, policy, hold_minutes)
           unchanged = version.fingerprint == previous.fingerprint && policy == quote.hold_policy && hold_minutes == quote.hold_minutes
@@ -246,27 +251,29 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, quote_id)
-          @uow.run(actor, "quotes.write") do |tx, current|
-            now = @clock.now
-            quote = Scope.lock!(@quotes, tx, current, quote_id)
-            version = @quotes.find_version(tx, quote.id, quote.current_version)
-            Organizations::BranchGuard.active!(@organizations, tx, version.branch_id, field: "filial")
-            sent = quote.send_version(version, now)
-            hold = create_hold(tx, current, sent, version) if sent.hold_on_send?
-            sent = sent.with_hold(hold.id) if hold
-            @quotes.update(tx, sent, now)
-            @quotes.mark_version_sent(tx, version.mark_sent(now))
-            @audit.record(tx, current, "quote.sent", "quote", quote.id, "code" => quote.code, "version" => version.number,
-                                                                        "hold_policy" => quote.hold_policy, "hold_reservation" => hold&.code)
-            @events.publish(tx, "quote.sent", "quote", quote.id, "code" => quote.code, "version" => version.number,
-                                                                 "total_cents" => version.total.cents, "valid_until" => version.valid_until.iso8601,
-                                                                 "hold_policy" => quote.hold_policy)
-            sent
-          end
+        def call(actor, quote_id, tx: nil)
+          Composition.run(@uow, actor, "quotes.write", tx) { |t, current| execute(t, current, quote_id) }
         end
 
         private
+
+        def execute(tx, current, quote_id)
+          now = @clock.now
+          quote = Scope.lock!(@quotes, tx, current, quote_id)
+          version = @quotes.find_version(tx, quote.id, quote.current_version)
+          Organizations::BranchGuard.active!(@organizations, tx, version.branch_id, field: "filial")
+          sent = quote.send_version(version, now)
+          hold = create_hold(tx, current, sent, version) if sent.hold_on_send?
+          sent = sent.with_hold(hold.id) if hold
+          @quotes.update(tx, sent, now)
+          @quotes.mark_version_sent(tx, version.mark_sent(now))
+          @audit.record(tx, current, "quote.sent", "quote", quote.id, "code" => quote.code, "version" => version.number,
+                                                                      "hold_policy" => quote.hold_policy, "hold_reservation" => hold&.code)
+          @events.publish(tx, "quote.sent", "quote", quote.id, "code" => quote.code, "version" => version.number,
+                                                               "total_cents" => version.total.cents, "valid_until" => version.valid_until.iso8601,
+                                                               "hold_policy" => quote.hold_policy)
+          sent
+        end
 
         def create_hold(tx, current, quote, version)
           Authorizer.authorize!(current, "reservations.write")
@@ -284,6 +291,10 @@ module Locentra
 
       # Aprovação da versão atual por alguém da equipe (em nome do cliente) ou pelo próprio cliente
       # (ator `customer`, restrito ao próprio cadastro). Orçamento vencido é marcado como expirado.
+      #
+      # Composta com outra transação (`tx`), a expiração gravada pela tentativa é desfeita junto com a
+      # transação do chamador quando ele propaga o `quote_expired`; o chamador registra a expiração com
+      # `record_expiration`, em transação própria, que só expira e nunca aprova.
       class ApproveQuote
         def initialize(uow:, quotes:, expirer:, audit:, events:, clock:)
           @uow = uow
@@ -294,22 +305,35 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, quote_id, version:, approver_name:)
+        def call(actor, quote_id, version:, approver_name:, tx: nil)
           number = parse_version(version)
-          result = @uow.run(actor, Scope.decision_permission(actor)) do |tx, current|
+          result = Composition.run(@uow, actor, Scope.decision_permission(actor), tx) do |t, current|
             now = @clock.now
-            quote = Scope.lock!(@quotes, tx, current, quote_id)
-            current_version = @quotes.find_version(tx, quote.id, quote.current_version)
+            quote = Scope.lock!(@quotes, t, current, quote_id)
+            current_version = @quotes.find_version(t, quote.id, quote.current_version)
             if quote.status == "sent" && current_version.expired?(now)
-              @expirer.call(tx, current, quote, now, "approval_attempt")
+              @expirer.call(t, current, quote, now, "approval_attempt")
               next :expired
             end
 
-            approve(tx, current, quote, number, current_version, approver_name, now)
+            approve(t, current, quote, number, current_version, approver_name, now)
           end
           raise Domain::Conflict.new("Orçamento expirado: crie uma nova versão com nova validade", code: "quote_expired") if result == :expired
 
           result
+        end
+
+        # Grava a expiração do orçamento enviado cuja versão atual venceu, em transação própria. Devolve
+        # verdadeiro quando expirou agora e falso quando não havia o que expirar; nunca aprova.
+        def record_expiration(actor, quote_id)
+          @uow.run(actor, Scope.decision_permission(actor)) do |tx, current|
+            now = @clock.now
+            quote = Scope.lock!(@quotes, tx, current, quote_id)
+            next false unless quote.status == "sent" && @quotes.find_version(tx, quote.id, quote.current_version).expired?(now)
+
+            @expirer.call(tx, current, quote, now, "approval_attempt")
+            true
+          end
         end
 
         private
@@ -346,17 +370,17 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, quote_id, reason:, version: nil)
+        def call(actor, quote_id, reason:, version: nil, tx: nil)
           number = parse_version(version, required: actor.customer?)
-          @uow.run(actor, Scope.decision_permission(actor)) do |tx, current|
+          Composition.run(@uow, actor, Scope.decision_permission(actor), tx) do |t, current|
             now = @clock.now
-            quote = Scope.lock!(@quotes, tx, current, quote_id)
+            quote = Scope.lock!(@quotes, t, current, quote_id)
             rejected = quote.reject(reason, now, version: number)
-            @quotes.update(tx, rejected, now)
-            @hold_release.call(tx, current, quote, "Orçamento rejeitado")
-            @audit.record(tx, current, "quote.rejected", "quote", quote.id, "code" => quote.code, "version" => quote.current_version,
-                                                                            "reason" => rejected.rejection_reason)
-            @events.publish(tx, "quote.rejected", "quote", quote.id, "code" => quote.code, "version" => quote.current_version)
+            @quotes.update(t, rejected, now)
+            @hold_release.call(t, current, quote, "Orçamento rejeitado")
+            @audit.record(t, current, "quote.rejected", "quote", quote.id, "code" => quote.code, "version" => quote.current_version,
+                                                                           "reason" => rejected.rejection_reason)
+            @events.publish(t, "quote.rejected", "quote", quote.id, "code" => quote.code, "version" => quote.current_version)
             rejected
           end
         end
@@ -412,14 +436,14 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, quote_id)
-          @uow.run(actor, "quotes.write") do |tx, current|
+        def call(actor, quote_id, tx: nil)
+          Composition.run(@uow, actor, "quotes.write", tx) do |t, current|
             Authorizer.authorize!(current, "reservations.write")
-            quote = Scope.lock!(@quotes, tx, current, quote_id)
-            existing = quote.reservation_id ? @reservations.find(tx, quote.reservation_id) : @reservations.find_by_quote(tx, quote.id)
+            quote = Scope.lock!(@quotes, t, current, quote_id)
+            existing = quote.reservation_id ? @reservations.find(t, quote.reservation_id) : @reservations.find_by_quote(t, quote.id)
             next Result.new(quote: quote, reservation: existing, created: false) if existing && quote.status == "converted"
 
-            convert(tx, current, quote, existing)
+            convert(t, current, quote, existing)
           end
         end
 
@@ -531,16 +555,18 @@ module Locentra
           @reservations = reservations
         end
 
-        def call(actor, quote_id)
-          @uow.run(actor, Scope.read_permission(actor)) do |tx, current|
-            quote = Scope.find!(@quotes, tx, current, quote_id)
-            versions = @quotes.versions(tx, quote.id)
+        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada);
+        # `permission` é então a permissão da mutação, conferida no lugar da de leitura.
+        def call(actor, quote_id, tx: nil, permission: nil)
+          Composition.run(@uow, actor, Composition.detail_permission(tx, Scope.read_permission(actor), permission), tx) do |t, current|
+            quote = Scope.find!(@quotes, t, current, quote_id)
+            versions = @quotes.versions(t, quote.id)
             # O cliente vê somente as versões que lhe foram enviadas.
             versions = versions.select(&:sent?) if current.customer?
             { quote: quote, versions: versions, current: versions.find { |v| v.number == quote.current_version },
-              customer: @customers.find(tx, quote.customer_id),
-              hold: quote.hold_reservation_id && @reservations.find(tx, quote.hold_reservation_id),
-              reservation: quote.reservation_id && @reservations.find(tx, quote.reservation_id) }
+              customer: @customers.find(t, quote.customer_id),
+              hold: quote.hold_reservation_id && @reservations.find(t, quote.hold_reservation_id),
+              reservation: quote.reservation_id && @reservations.find(t, quote.reservation_id) }
           end
         end
       end

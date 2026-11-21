@@ -83,10 +83,11 @@ module Locentra
         end
       end
 
-      # Alteração das configurações, somente por usuário: credenciais, mesmo com o escopo
-      # `organization.manage`, não alteram (a troca de fuso exige leitura e confirmação humanas, e a
-      # auditoria liga a alteração a uma pessoa). attrs: name, timezone, hold_minutes, cancellation_rows,
-      # confirm_timezone_change.
+      # Alteração das configurações, somente por usuário (web ou API com sessão): credenciais, mesmo com o
+      # escopo `organization.manage`, não alteram (a troca de fuso exige leitura e confirmação humanas, e a
+      # auditoria liga a alteração a uma pessoa; ADR-028 e ADR-030). attrs: name, timezone, hold_minutes,
+      # cancellation_rows ou cancellation_tiers, confirm_timezone_change. `via` identifica o canal na
+      # auditoria (a API informa "api"); com `tx`, roda na transação do chamador.
       class UpdateSettings
         include OptimisticLock
 
@@ -97,24 +98,32 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, attrs, lock_version: nil)
-          @uow.run(actor, "organization.manage") do |tx, current|
+        def call(actor, attrs, lock_version: nil, via: nil, tx: nil)
+          Composition.run(@uow, actor, "organization.manage", tx) do |t, current|
             raise Domain::AccessDenied, "as configurações da organização são alteradas somente por usuários" unless current.user?
 
-            org = @organizations.lock(tx, tx.tenant_id!) || raise(Domain::NotFound.new("organização", feminine: true))
+            org = @organizations.lock(t, t.tenant_id!) || raise(Domain::NotFound.new("organização", feminine: true))
             stale!(org, lock_version, "stale_organization", STALE_ORGANIZATION)
-            revised = org.revise(**attrs)
+            # Campos ausentes mantêm o valor atual (a API envia só os alterados; a web envia todos).
+            revised = org.revise(**org.revision_attrs, **attrs)
             next Result.new(record: org, changed: false) if revised.equal?(org)
 
-            if @organizations.update_settings(tx, revised, org.lock_version, @clock.now).zero?
+            if @organizations.update_settings(t, revised, org.lock_version, @clock.now).zero?
               raise Domain::Conflict.new(STALE_ORGANIZATION, code: "stale_organization")
             end
 
-            details = { "changes" => org.changes(revised), "lock_version" => revised.lock_version }
-            details["timezone_confirmed"] = true if org.timezone_changed?(revised)
-            @audit.record(tx, current, "organization.settings_updated", "organization", org.id, details)
+            @audit.record(t, current, "organization.settings_updated", "organization", org.id, audit_details(org, revised, via))
             Result.new(record: revised, changed: true)
           end
+        end
+
+        private
+
+        def audit_details(org, revised, via)
+          details = { "changes" => org.changes(revised), "lock_version" => revised.lock_version }
+          details["timezone_confirmed"] = true if org.timezone_changed?(revised)
+          details["via"] = via if via
+          details
         end
       end
 

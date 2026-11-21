@@ -22,7 +22,8 @@ plataforma é separada dos contratos de locação entre a organização e seus c
   validade padrão do bloqueio temporário e política de cancelamento editáveis pela interface web, com
   pré-visualização e histórico; a política fica congelada na reserva, na versão do orçamento e no contrato.
   Filiais com edição, desativação (recusada com compromissos em aberto) e reativação dentro do limite do plano.
-  Consulta pela API (`GET /api/v1/organization`) e pela CLI (`organization show`).
+  Consulta pela API (`GET /api/v1/organization`) e pela CLI (`organization show`); alteração também pela API
+  com sessão de usuário (`PATCH /api/v1/organization/settings`).
   [Módulo](docs/modulos/configuracoes-organizacao.md)
 - **Clientes:** pessoa física e jurídica (CPF/CNPJ validados), contatos, pessoas autorizadas a retirar,
   endereços, anexos.
@@ -43,11 +44,16 @@ plataforma é separada dos contratos de locação entre a organização e seus c
 - **Financeiro:** cobranças, pagamentos parciais, reembolsos, cauções separadas da receita, diário contábil
   balanceado, simulador e adaptador Asaas (sandbox), webhooks recebidos deduplicados, conciliação.
   [Caução](docs/CAUCAO.md)
+- **API v1 com OpenAPI:** clientes, catálogo, disponibilidade, reservas, financeiro, condições comerciais,
+  organização, orçamentos (criação, versões, envio, aprovação, rejeição e conversão), contratos (emissão, PDF,
+  aditivo e cancelamento), retirada, devolução, inspeções e alertas, com `Idempotency-Key` em toda mutação,
+  escopos por permissão e respostas conferidas contra o contrato OpenAPI nos testes.
+  [Módulo](docs/modulos/api-v1.md) · [OpenAPI](docs/openapi.yaml)
 - **Webhooks enviados e worker:** entregas assinadas com proteção SSRF, limite de execuções simultâneas por
   organização na fila de webhooks, pausa automática de endpoints com falhas consecutivas (entregas retidas e
   reativação pela tela) e retenção do histórico de integrações por organização.
   [Módulo](docs/modulos/worker-webhooks-retencao.md)
-- **Portal do cliente, API v1 com OpenAPI, CLI operacional, worker, e-mails, webhooks assinados, auditoria.**
+- **Portal do cliente, CLI operacional, e-mails e auditoria.**
 
 ## Arquitetura
 

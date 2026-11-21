@@ -7,6 +7,21 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 
 ### Adicionado
 
+- **API v1 — orçamentos:** lista paginada com filtros, detalhe com versões, criação, nova versão, envio (com ou
+  sem bloqueio temporário), aprovação em nome do cliente, rejeição e conversão em reserva (`201` quando cria,
+  `200` quando já convertido, com `Location` da reserva). Tarifas nas versões com as regras da reserva.
+- **API v1 — contratos:** lista paginada, detalhe com documentos, aditivos e prévia de cancelamento, emissão a
+  partir da reserva (`201`/`200`), aditivo de extensão e cancelamento com a política do contrato.
+- **API v1 — PDF do contrato:** `GET /contracts/{id}/documents/{version}` como anexo, sem cache, com
+  `Repr-Digest` (SHA-256 gravado na geração).
+- **API v1 — operação:** separação (`201`/`200`), conferência, entrega e cancelamento da retirada; itens a
+  devolver, registro e detalhe da devolução; listas paginadas de inspeções (com aprovação e reprovação) e de
+  alertas (com resolução).
+- **API v1 — configurações da organização:** `PATCH /organization/settings` somente por sessão de usuário com
+  `organization.manage` (cookie de sessão e `X-CSRF-Token`), parcial, com `lock_version` obrigatório,
+  confirmação da troca de fuso e política em pontos-base; credenciais recebem 403 (ADR-030).
+- OpenAPI com schemas de resposta fechados, esquema de segurança de sessão e o parâmetro `X-CSRF-Token`; testes
+  que conferem as respostas reais contra o contrato.
 - **Limite por organização na fila de webhooks:** no máximo `WEBHOOK_MAX_PER_ORGANIZATION` (padrão 2)
   entregas de uma mesma organização em execução ao mesmo tempo, somadas entre todos os workers; organizações
   sem entregas em curso têm preferência, e os destinos lentos de uma organização não ocupam as vagas das
@@ -32,10 +47,27 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 
 ### Alterado
 
+- `GET /contracts` e o caso de uso de lista de contratos aceitam o filtro `customer_id` para a equipe.
+- `Organization#revise` aceita a política em faixas com pontos-base (`cancellation_tiers`), além das linhas do
+  formulário, e a alteração das configurações aplica somente os campos informados.
+- A auditoria `organization.settings_updated` registra o canal (`via: api`) quando a alteração vem da API.
+- Os casos de uso de orçamentos, contratos, retirada, devolução, inspeções, alertas e configurações aceitam a
+  transação do chamador (`tx:`), sem mudança na interface web e na CLI.
 - O padrão de `WEBHOOK_CONCURRENCY` passou de 1 para 4 (o worker usa 10 conexões com os padrões).
 - O `platform.housekeeping` soma as tarefas removidas em `locentra_retention_purged_total{kind="jobs"}`; eventos
   da outbox, entregas de webhook e webhooks recebidos deixaram de ser mantidos indefinidamente e passam pela
   retenção por organização.
+
+### Corrigido
+
+- As mutações da API v1 de orçamentos, contratos, retirada e devolução exigem somente o escopo de escrita: o
+  detalhe devolvido é lido na transação da mutação com a permissão dela, e a credencial sem o escopo de leitura
+  deixa de receber 403 depois de a operação ser desfeita.
+- A segunda resolução de um alerta operacional responde `409 alert_resolved` ("alerta já resolvido"), como os
+  alertas financeiros, em vez de `invalid_transition`; vale para a API, a interface web e a resolução
+  concorrente.
+- `PATCH /organization/settings` sem `cancellation_policy` mantém a política gravada como está: uma política
+  anterior às regras atuais deixa de impedir a alteração de outro campo (422 em `faixas_cancelamento`).
 
 ## [1.2.0] — 2026-11-21
 
