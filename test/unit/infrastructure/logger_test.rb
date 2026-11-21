@@ -81,4 +81,13 @@ class StructuredLoggerTest < UnitTest
     assert_equal 2, io.flushes
     assert_equal 2, io.string.lines.size
   end
+
+  def test_a_destination_with_only_puts_still_receives_each_line
+    lines = []
+    destination = Object.new
+    destination.define_singleton_method(:puts) { |line| lines << line }
+    L.new(io: destination).info("event" => "cli.command")
+
+    assert_equal "cli.command", JSON.parse(lines.fetch(0))["event"]
+  end
 end

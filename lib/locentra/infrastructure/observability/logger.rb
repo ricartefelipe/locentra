@@ -61,11 +61,12 @@ module Locentra
         end
 
         # Cada linha é descarregada na hora: fora de um terminal (contêiner, pipe, arquivo) o Ruby acumula a saída
-        # em buffer, e o log do worker só apareceria quando o buffer enchesse ou o processo terminasse.
+        # em buffer, e o log do worker só apareceria quando o buffer enchesse ou o processo terminasse. O destino
+        # só precisa responder a `puts` (adaptadores como o da CLI não têm `flush`).
         def write(line)
           @mutex.synchronize do
             @io.puts(line)
-            @io.flush
+            @io.flush if @io.respond_to?(:flush)
           end
         end
       end
