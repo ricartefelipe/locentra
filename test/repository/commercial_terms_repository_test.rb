@@ -246,6 +246,27 @@ class CommercialTermsRepositoryTest < DatabaseTest
     true
   end
 
+  # Desativar e reativar gravam o instante da desativação e o da atualização (cupom e tarifa), relidos
+  # do banco.
+  def test_activation_instants_are_stored_for_coupons_and_fees
+    coupon = create_coupon("PAUSA")
+    fee = create_fee("ENTREGA", "Entrega", 15_000)
+    stored = lambda do
+      tenant_tx { |tx| [@coupons.find(tx, coupon.id, now: @clock.now), @system.repos[:fees].find(tx, fee.id)] }
+        .map { |record| [record.active, record.deactivated_at, record.updated_at] }
+    end
+    @clock.advance(60)
+    uc(:set_coupon_active).call(@actor, coupon.id, active: false)
+    uc(:set_fee_active).call(@actor, fee.id, active: false)
+
+    assert_equal [[false, @clock.now, @clock.now]] * 2, stored.call
+    @clock.advance(60)
+    uc(:set_coupon_active).call(@actor, coupon.id, active: true)
+    uc(:set_fee_active).call(@actor, fee.id, active: true)
+
+    assert_equal [[true, nil, @clock.now]] * 2, stored.call
+  end
+
   def test_redemption_listing_respects_actor_scopes_and_orders_by_instant
     coupon = create_coupon("LISTA")
     first = book(coupon_code: "LISTA")

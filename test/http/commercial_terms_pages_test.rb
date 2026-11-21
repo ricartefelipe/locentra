@@ -199,6 +199,8 @@ class CommercialTermsPagesTest < CommercialTermsHttpTest
 
     assert_includes last_response.body, "Cupom desativado. Reservas já registradas não mudam."
     assert_includes last_response.body, ">Desativado</span>"
+    assert_includes last_response.body, "<dt>Desativado em</dt><dd>02/03/2026 09:00</dd>"
+    assert_includes last_response.body, "<dt>Atualizado em</dt><dd>02/03/2026 09:00</dd>"
     assert_includes last_response.body, "<strong>Cupom desativado</strong>"
     assert_includes last_response.body, "Reativar cupom"
     post_form "/cupons/#{coupon.id}/desativar", {}

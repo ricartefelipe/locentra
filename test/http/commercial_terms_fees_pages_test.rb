@@ -115,6 +115,7 @@ class CommercialTermsFeesPagesTest < CommercialTermsHttpTest
 
     assert_includes last_response.body, "Tarifa desativada."
     assert_includes last_response.body, ">Inativa</span>"
+    assert_includes last_response.body, "<dt>Desativada em</dt><dd>02/03/2026 09:01</dd>"
     assert_includes last_response.body, "<strong>Tarifa desativada</strong>"
     post_form "/tarifas/#{fee.id}/desativar", {}
     follow_redirect!
@@ -130,6 +131,7 @@ class CommercialTermsFeesPagesTest < CommercialTermsHttpTest
 
     assert_includes last_response.body, "Tarifa reativada."
     assert_includes last_response.body, ">Ativa</span>"
+    refute_includes last_response.body, "Desativada em"
     assert_equal 1, audit_events("fee.deactivated").size
   end
 
