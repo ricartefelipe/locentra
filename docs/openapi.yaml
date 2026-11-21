@@ -963,7 +963,7 @@ paths:
       description: >-
         Escopo `fulfillment.write`. Nenhuma reserva é cancelada automaticamente: a decisão fica registrada em
         `resolution` (de 3 a 1000 caracteres; erro em `decisao`). Alerta já resolvido responde `409`
-        `invalid_transition` ou `alert_resolved`.
+        `alert_resolved`, também na resolução concorrente.
       operationId: resolveAlert
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:

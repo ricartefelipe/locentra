@@ -314,7 +314,8 @@ class OperationsApiTest < ApiV1TestCase
     assert_equal ["resolved", "Cliente avisado; devolve amanhã"], resolved.values_at("status", "resolution")
     post!(409, "/alerts/#{overdue.first["id"]}/resolve", { "resolution" => "Outra decisão" })
 
-    assert_error "invalid_transition"
+    assert_error "alert_resolved"
+    assert_equal "alerta já resolvido", error_message
     assert_equal([overdue.first["id"]], get!(200, "/alerts", { "status" => "resolved" })["data"].map { |row| row["id"] })
     post!(403, "/alerts/#{page["data"].first["id"]}/resolve", { "resolution" => "Sem escopo" }, token: token(%w[reservations.read]))
   end

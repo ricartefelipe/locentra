@@ -37,6 +37,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 - As mutações da API v1 de orçamentos, contratos, retirada e devolução exigem somente o escopo de escrita: o
   detalhe devolvido é lido na transação da mutação com a permissão dela, e a credencial sem o escopo de leitura
   deixa de receber 403 depois de a operação ser desfeita.
+- A segunda resolução de um alerta operacional responde `409 alert_resolved` ("alerta já resolvido"), como os
+  alertas financeiros, em vez de `invalid_transition`; vale para a API, a interface web e a resolução
+  concorrente.
 
 ## [1.2.0] — 2026-11-21
 

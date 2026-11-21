@@ -75,7 +75,7 @@ ampliação com orçamentos, contratos, retirada, devolução, inspeções, aler
 | `GET /inspections` | `reservations.read` | `SearchInspections` | — |
 | `POST /inspections/{id}/approve`, `/reject` | `inspections.write` | `ApproveInspection`, `RejectInspection` | `invalid_transition`, `stale_inspection` |
 | `GET /alerts` | `reservations.read` | `ListAlerts` | — |
-| `POST /alerts/{id}/resolve` | `fulfillment.write` | `ResolveAlert` | `invalid_transition`, `alert_resolved` |
+| `POST /alerts/{id}/resolve` | `fulfillment.write` | `ResolveAlert` | `alert_resolved` |
 | `PATCH /organization/settings` | sessão de usuário com `organization.manage` | `UpdateSettings` e `GetOrganization` | `stale_organization` |
 
 Os escopos são as permissões da matriz (`Domain::Identity::PERMISSIONS`), sem permissão nova. As permissões

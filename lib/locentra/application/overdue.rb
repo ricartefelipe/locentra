@@ -128,7 +128,8 @@ module Locentra
         end
       end
 
-      # Resolução do alerta com registro da decisão tomada.
+      # Resolução do alerta com registro da decisão tomada. O alerta é travado antes da decisão: a segunda
+      # resolução, sequencial ou concorrente, encontra o alerta resolvido e responde 409 `alert_resolved`.
       class ResolveAlert
         def initialize(uow:, alerts:, audit:, clock:)
           @uow = uow
@@ -140,6 +141,8 @@ module Locentra
         def call(actor, alert_id, resolution:, tx: nil)
           Composition.run(@uow, actor, "fulfillment.write", tx) do |t, current|
             alert = @alerts.lock(t, Domain::Identifier.parse(alert_id)) || raise(Domain::NotFound, "alerta")
+            raise Domain::Conflict.new("alerta já resolvido", code: "alert_resolved") unless alert.open?
+
             resolved = alert.resolve(resolution, @clock.now)
             @alerts.resolve(t, resolved, current.audit_actor_id)
             @audit.record(t, current, "alert.resolved", "reservation", alert.reservation_id,
