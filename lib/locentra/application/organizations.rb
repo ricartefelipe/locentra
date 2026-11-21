@@ -264,10 +264,11 @@ module Locentra
           @permission = permission
         end
 
-        def call(actor)
-          @uow.run(actor, @permission) do |tx, current|
-            org = @organizations.find(tx, tx.tenant_id!) || raise(Domain::NotFound.new("organização", feminine: true))
-            { organization: org, branches: @organizations.branches(tx), subscription: @organizations.subscription(tx), actor: current }
+        # Com `tx`, lê na transação do chamador (resposta de uma alteração das configurações).
+        def call(actor, tx: nil)
+          Composition.run(@uow, actor, @permission, tx) do |t, current|
+            org = @organizations.find(t, t.tenant_id!) || raise(Domain::NotFound.new("organização", feminine: true))
+            { organization: org, branches: @organizations.branches(t), subscription: @organizations.subscription(t), actor: current }
           end
         end
       end

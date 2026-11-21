@@ -137,14 +137,34 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, alert_id, resolution:)
-          @uow.run(actor, "fulfillment.write") do |tx, current|
-            alert = @alerts.lock(tx, Domain::Identifier.parse(alert_id)) || raise(Domain::NotFound, "alerta")
+        def call(actor, alert_id, resolution:, tx: nil)
+          Composition.run(@uow, actor, "fulfillment.write", tx) do |t, current|
+            alert = @alerts.lock(t, Domain::Identifier.parse(alert_id)) || raise(Domain::NotFound, "alerta")
             resolved = alert.resolve(resolution, @clock.now)
-            @alerts.resolve(tx, resolved, current.audit_actor_id)
-            @audit.record(tx, current, "alert.resolved", "reservation", alert.reservation_id,
+            @alerts.resolve(t, resolved, current.audit_actor_id)
+            @audit.record(t, current, "alert.resolved", "reservation", alert.reservation_id,
                           "alert_id" => alert.id, "kind" => alert.kind, "resolution" => resolved.resolution)
             resolved
+          end
+        end
+      end
+
+      # Lista paginada de alertas (API), por situação, tipo e reserva (a própria ou a relacionada).
+      class ListAlerts
+        def initialize(uow:, alerts:)
+          @uow = uow
+          @alerts = alerts
+        end
+
+        def call(actor, status: "open", kind: nil, reservation_id: nil, limit: nil, offset: nil)
+          lim, off = Page.params(limit: limit, offset: offset)
+          raise Domain::ValidationError.field("situacao", "use open ou resolved") unless Domain::Alerts::STATUSES.key?(status)
+          raise Domain::ValidationError.field("tipo", "use #{Domain::Alerts::KINDS.keys.join(", ")}") if kind && !Domain::Alerts::KINDS.key?(kind)
+
+          reservation = reservation_id && Domain::Identifier.parse(reservation_id, "reserva")
+          @uow.run(actor, "reservations.read") do |tx, _|
+            items, total = @alerts.search(tx, status: status, kind: kind, reservation_id: reservation, limit: lim, offset: off)
+            Page.new(items: items, limit: lim, offset: off, total: total)
           end
         end
       end

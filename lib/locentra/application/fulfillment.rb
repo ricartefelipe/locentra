@@ -28,8 +28,11 @@ module Locentra
       end
 
       # Separação: uma linha por alocação ativa da reserva confirmada. Repetir a operação devolve a
-      # retirada em andamento.
+      # retirada em andamento: `open` informa se a separação foi criada agora (`created`); `call` devolve
+      # só a retirada.
       class StartPickup
+        Result = Data.define(:pickup, :created)
+
         def initialize(uow:, reservations:, fulfillment:, audit:, clock:, ids:)
           @uow = uow
           @reservations = reservations
@@ -39,10 +42,13 @@ module Locentra
           @ids = ids
         end
 
-        def call(actor, reservation_id)
-          @uow.run(actor, "fulfillment.write") do |tx, current|
-            reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
-            @fulfillment.open_pickup_for(tx, reservation.id) || start(tx, current, reservation)
+        def call(actor, reservation_id) = self.open(actor, reservation_id).pickup
+
+        def open(actor, reservation_id, tx: nil)
+          Composition.run(@uow, actor, "fulfillment.write", tx) do |t, current|
+            reservation = @reservations.lock(t, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
+            existing = @fulfillment.open_pickup_for(t, reservation.id)
+            existing ? Result.new(pickup: existing, created: false) : Result.new(pickup: start(t, current, reservation), created: true)
           end
         end
 
@@ -80,17 +86,17 @@ module Locentra
         end
 
         # entries: [{ line_id:, tag: }] para ativos e [{ line_id:, quantity: }] para estoque.
-        def call(actor, pickup_id, entries)
+        def call(actor, pickup_id, entries, tx: nil)
           raise Domain::ValidationError.field("itens", "informe ao menos um item conferido") if entries.empty?
 
-          @uow.run(actor, "fulfillment.write") do |tx, current|
-            reservation, pickup = lock_pickup!(tx, pickup_id)
+          Composition.run(@uow, actor, "fulfillment.write", tx) do |t, current|
+            reservation, pickup = lock_pickup!(t, pickup_id)
             ensure_picking!(reservation, pickup)
-            lines = @fulfillment.pickup_lines(tx, pickup.id, lock: true).to_h { |line| [line.id, line] }
-            swaps = check_all(tx, current, pickup, lines, entries)
-            @audit.record(tx, current, "pickup.checked", "reservation", reservation.id, "pickup_id" => pickup.id, "entries" => entries.size,
-                                                                                        "swaps" => swaps)
-            @fulfillment.pickup_lines(tx, pickup.id)
+            lines = @fulfillment.pickup_lines(t, pickup.id, lock: true).to_h { |line| [line.id, line] }
+            swaps = check_all(t, current, pickup, lines, entries)
+            @audit.record(t, current, "pickup.checked", "reservation", reservation.id, "pickup_id" => pickup.id, "entries" => entries.size,
+                                                                                       "swaps" => swaps)
+            @fulfillment.pickup_lines(t, pickup.id)
           end
         end
 
@@ -181,26 +187,28 @@ module Locentra
         end
 
         # picker: { kind: "customer" } ou { kind: "contact", contact_id: }
-        def call(actor, pickup_id, picker:, notes: nil)
-          @uow.run(actor, "fulfillment.write") do |tx, current|
-            reservation, pickup = lock_pickup!(tx, pickup_id)
-            ensure_picking!(reservation, pickup)
-            lines = @fulfillment.pickup_lines(tx, pickup.id, lock: true)
-            raise Domain::ValidationError.field("itens", "confira ao menos um item antes da entrega") if lines.none?(&:checked?)
-
-            who = picker_for(tx, reservation, picker)
-            now = @clock.now
-            pools = @allocations.lock_pools_in_order(tx, lines.select(&:checked?).filter_map(&:stock_pool_id))
-            delivered_lines = lines.map { |line| deliver_line(tx, current, pickup, line, now, pools) }
-            @reservations.update_status(tx, reservation.start, now)
-            delivered = pickup.deliver(who, now, notes: notes)
-            @fulfillment.update_pickup(tx, delivered, current.audit_actor_id)
-            record(tx, current, reservation, delivered, delivered_lines)
-            delivered
-          end
+        def call(actor, pickup_id, picker:, notes: nil, tx: nil)
+          Composition.run(@uow, actor, "fulfillment.write", tx) { |t, current| execute(t, current, pickup_id, picker, notes) }
         end
 
         private
+
+        def execute(tx, current, pickup_id, picker, notes)
+          reservation, pickup = lock_pickup!(tx, pickup_id)
+          ensure_picking!(reservation, pickup)
+          lines = @fulfillment.pickup_lines(tx, pickup.id, lock: true)
+          raise Domain::ValidationError.field("itens", "confira ao menos um item antes da entrega") if lines.none?(&:checked?)
+
+          who = picker_for(tx, reservation, picker)
+          now = @clock.now
+          pools = @allocations.lock_pools_in_order(tx, lines.select(&:checked?).filter_map(&:stock_pool_id))
+          delivered_lines = lines.map { |line| deliver_line(tx, current, pickup, line, now, pools) }
+          @reservations.update_status(tx, reservation.start, now)
+          delivered = pickup.deliver(who, now, notes: notes)
+          @fulfillment.update_pickup(tx, delivered, current.audit_actor_id)
+          record(tx, current, reservation, delivered, delivered_lines)
+          delivered
+        end
 
         def picker_for(tx, reservation, picker)
           customer = @customers.find(tx, reservation.customer_id)
@@ -305,18 +313,18 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, pickup_id, reason:)
-          @uow.run(actor, "fulfillment.write") do |tx, current|
-            reservation, pickup = lock_pickup!(tx, pickup_id)
+        def call(actor, pickup_id, reason:, tx: nil)
+          Composition.run(@uow, actor, "fulfillment.write", tx) do |t, current|
+            reservation, pickup = lock_pickup!(t, pickup_id)
             raise Domain::Conflict.new("retirada já registrada para esta reserva", code: "already_picked_up") if pickup.delivered?
 
             text = Domain::Organizations::Text.required(reason, "motivo", max: 500)
             cancelled = pickup.cancel(@clock.now).with(notes: text)
-            @fulfillment.pickup_lines(tx, pickup.id, lock: true).each do |line|
-              @fulfillment.update_pickup_line(tx, line.cancel, release_reason: text)
+            @fulfillment.pickup_lines(t, pickup.id, lock: true).each do |line|
+              @fulfillment.update_pickup_line(t, line.cancel, release_reason: text)
             end
-            @fulfillment.update_pickup(tx, cancelled, current.audit_actor_id)
-            @audit.record(tx, current, "pickup.cancelled", "reservation", reservation.id, "pickup_id" => pickup.id, "reason" => text)
+            @fulfillment.update_pickup(t, cancelled, current.audit_actor_id)
+            @audit.record(t, current, "pickup.cancelled", "reservation", reservation.id, "pickup_id" => pickup.id, "reason" => text)
             cancelled
           end
         end
@@ -330,13 +338,14 @@ module Locentra
           @customers = customers
         end
 
-        def call(actor, pickup_id)
-          @uow.run(actor, "reservations.read") do |tx, _|
-            pickup = @fulfillment.find_pickup(tx, Domain::Identifier.parse(pickup_id)) || raise(Domain::NotFound, "retirada")
-            reservation = @reservations.find(tx, pickup.reservation_id)
-            customer = @customers.find(tx, reservation.customer_id)
-            { pickup: pickup, reservation: reservation, customer: customer, lines: @fulfillment.line_details(tx, pickup.id),
-              pickers: @customers.authorized_pickups(tx, customer.id) }
+        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada).
+        def call(actor, pickup_id, tx: nil)
+          Composition.run(@uow, actor, "reservations.read", tx) do |t, _|
+            pickup = @fulfillment.find_pickup(t, Domain::Identifier.parse(pickup_id)) || raise(Domain::NotFound, "retirada")
+            reservation = @reservations.find(t, pickup.reservation_id)
+            customer = @customers.find(t, reservation.customer_id)
+            { pickup: pickup, reservation: reservation, customer: customer, lines: @fulfillment.line_details(t, pickup.id),
+              pickers: @customers.authorized_pickups(t, customer.id) }
           end
         end
       end

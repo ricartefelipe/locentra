@@ -38,13 +38,13 @@ module Locentra
         end
 
         # entries: [{ pickup_line_id:, outcome:, quantity:, requires_inspection:, notes: }]
-        def call(actor, reservation_id, entries:, notes: nil)
+        def call(actor, reservation_id, entries:, notes: nil, tx: nil)
           parsed = entries.map { |entry| F::ReturnEntry.build(**entry) }.sort_by(&:pickup_line_id)
-          @uow.run(actor, "fulfillment.write") do |tx, current|
-            reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
+          Composition.run(@uow, actor, "fulfillment.write", tx) do |t, current|
+            reservation = @reservations.lock(t, Domain::Identifier.parse(reservation_id)) || raise(Domain::NotFound, "reserva")
             raise Domain::InvalidTransition.new("reserva", reservation.status, "devolução") unless reservation.status == "in_progress"
 
-            execute(tx, current, reservation, parsed, notes)
+            execute(t, current, reservation, parsed, notes)
           end
         end
 
@@ -248,11 +248,12 @@ module Locentra
           @fulfillment = fulfillment
         end
 
-        def call(actor, return_id)
-          @uow.run(actor, "reservations.read") do |tx, _|
-            row = @fulfillment.find_return(tx, Domain::Identifier.parse(return_id)) || raise(Domain::NotFound, "devolução")
-            fees = @reservations.adjustments(tx, row["reservation_id"]).select { |a| a["kind"] == "late_fee" && a["details"]["return_id"] == row["id"] }
-            { return: row, lines: @fulfillment.return_lines(tx, row["id"]), late_fees: fees }
+        # Com `tx`, lê na transação do chamador (detalhe devolvido pelo registro da devolução).
+        def call(actor, return_id, tx: nil)
+          Composition.run(@uow, actor, "reservations.read", tx) do |t, _|
+            row = @fulfillment.find_return(t, Domain::Identifier.parse(return_id)) || raise(Domain::NotFound, "devolução")
+            fees = @reservations.adjustments(t, row["reservation_id"]).select { |a| a["kind"] == "late_fee" && a["details"]["return_id"] == row["id"] }
+            { return: row, lines: @fulfillment.return_lines(t, row["id"]), late_fees: fees }
           end
         end
       end

@@ -138,6 +138,20 @@ module Locentra
       end
     end
 
+    # Execução com transação própria ou composta: com `tx`, o chamador já abriu a transação e revalidou o
+    # ator; a permissão é conferida de novo sobre o ator recebido. Sem `tx`, a unidade de trabalho abre a
+    # transação, revalida o ator e confere a permissão (caminho da interface web e da CLI).
+    module Composition
+      module_function
+
+      def run(uow, actor, permission, tx, &)
+        return uow.run(actor, permission, &) unless tx
+
+        Authorizer.authorize!(actor, permission) if permission
+        yield tx, actor
+      end
+    end
+
     # Trilha de auditoria gravada na mesma transação da operação.
     class AuditTrail
       def initialize(repository:, clock:, ids:)
