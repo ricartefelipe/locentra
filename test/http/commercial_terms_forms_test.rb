@@ -49,6 +49,12 @@ class CommercialTermsFormsTest < CommercialTermsHttpTest
     assert_includes page, "<td>−8% (−R$ 72,00)</td>"
     refute_includes page, "valor ajustado"
     assert_equal "1 (sem limite)", usage("TESTE10")
+    reservation_path = last_request.path
+    sign_in_as("stock_operator")
+    operator = get_ok(reservation_path)
+
+    assert_includes operator, "<dt>Cupom TESTE10 (10%)</dt>", "sem coupons.read, o código aparece sem ligação"
+    refute_includes operator, "/cupons/"
   end
 
   def test_attendant_applies_the_default_value_and_cannot_adjust_it

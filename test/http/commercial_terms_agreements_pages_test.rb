@@ -153,6 +153,18 @@ class CommercialTermsAgreementsPagesTest < CommercialTermsHttpTest
     assert_nil agreements.first[:agreement].ended_at
   end
 
+  # A condição expirada não oferece o encerramento, que o domínio recusaria.
+  def test_expired_agreement_has_no_end_action
+    create_agreement(@customer, 800, valid_until: @clock.now + 3_600)
+
+    assert_includes get_ok(customer_path), "Encerrar condição"
+    @clock.advance(3_600)
+    page = get_ok(customer_path)
+
+    assert_includes page, ">Expirada</span>"
+    refute_includes page, "Encerrar condição"
+  end
+
   def test_long_history_shows_the_first_hundred_with_a_notice
     owner_query(<<~SQL, [@org[:organization_id], @customer.id, t("2026-01-10T12:00:00Z")])
       INSERT INTO customer_price_agreements (id, organization_id, customer_id, discount_bps, valid_from, created_at, ended_at, end_reason)
