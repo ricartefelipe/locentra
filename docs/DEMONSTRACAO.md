@@ -27,8 +27,12 @@ criada para o cliente que nunca teve nenhuma. Na Alfa: tarifas **ENTREGA** (R$ 1
 (R$ 50,00 em locações a partir de R$ 300,00, uso único), válidos por 365 dias a partir do seed; condição
 geral de **8%** para Produtora Horizonte Ltda. e de **10%** na Lente 24-70mm f/2.8 (LEN-2470) para Marina
 Souza. Na Beta: tarifas ENTREGA e MONTAGEM, cupom **PRIMAVERA15** e condição de 5% para Casamentos
-Primavera ME. Se algum desses itens foi alterado, desativado ou encerrado depois do seed, cadastre os
-equivalentes nas telas **Cupons**, **Tarifas adicionais** e **Clientes** antes do passo 15.
+Primavera ME. Se algum desses itens mudou depois do seed, ajuste-o antes do passo 15: o código de cupom e
+o de tarifa são únicos na organização, inclusive entre os desativados, então um item desativado é
+**reativado** ("Reativar cupom" em **Cupons** ou "Reativar tarifa" em **Tarifas adicionais**), e um item
+alterado volta aos valores do roteiro pela edição na própria página. Somente a condição negociada encerrada
+exige novo cadastro, em **Clientes → Produtora Horizonte Ltda. → Nova condição negociada** (8%, todos os
+produtos).
 
 | Endereço | Uso |
 |---|---|
