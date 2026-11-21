@@ -61,14 +61,22 @@ devolução.
 ### Versões e validade
 
 - Toda alteração cria uma versão nova e imutável (`ReviseQuote`); a revisão sem nenhuma diferença
-  (filial, período, validade, itens, totais, condições, desconto e política de bloqueio) é recusada.
+  (filial, período, validade, itens, totais, condições, desconto, tarifas e política de bloqueio) é
+  recusada. As tarifas fazem parte da impressão digital da versão: uma versão que só muda tarifas é uma
+  versão nova.
 - Revisar um orçamento enviado o devolve a rascunho e exige novo envio; o bloqueio temporário do envio
   anterior é cancelado. Orçamentos aprovados ou convertidos não aceitam nova versão.
 - A validade (`valid_until`) é obrigatória, futura, de no máximo 90 dias e termina até o início da
   locação. O instante final pertence ao período vencido (`now >= valid_until` é expirado).
-- Preços de cada versão são calculados pelo `Application::Reservations::Pricer` com `redeem: false`
-  (tabela vigente, faixas por quantidade, condição negociada do cliente e desconto manual limitado
-  pelo papel). Cupons não se aplicam a orçamentos.
+- Preços de cada versão são calculados pelo `Application::Reservations::Pricer` com `lock_coupon: false`
+  e sem código de cupom (tabela vigente, faixas por quantidade, condição negociada do cliente, desconto
+  manual limitado pelo papel e tarifas adicionais). Cupons não se aplicam a orçamentos.
+- Tarifas adicionais: tarifa do catálogo pelo valor padrão faz parte de `quotes.write`; valor diferente do
+  padrão e tarifa avulsa exigem `fees.override`. Na nova versão, a tarifa idêntica a uma da versão
+  anterior (mesma tarifa e valor, ou avulsa com a mesma descrição e valor) é mantida sem nova autorização,
+  mesmo inativa; cada entrada anterior autoriza uma única entrada. Os ajustes vão para a auditoria
+  (`quote.created` e `quote.revised`, em `fee_overrides`) e nunca para o snapshot da versão. Regras em
+  [`condicoes-comerciais.md`](condicoes-comerciais.md).
 
 ### Política de bloqueio
 
