@@ -259,6 +259,32 @@ module Locentra
         def submission_field = raw(%(<input type="hidden" name="envio" value="#{SecureRandom.uuid}">))
 
         def selected(current, value) = raw(current.to_s == value.to_s ? " selected" : "")
+
+        # Opções de filial. Formulários que criam vínculo com a filial listam só as ativas (`active_only`);
+        # os demais listam todas, com " (inativa)" nas desativadas. `code` acrescenta o código ao nome.
+        def branch_options(branches, selected_id, active_only:, code: false)
+          list = active_only ? branches.select(&:active) : branches
+          raw(list.map do |branch|
+            text = code ? "#{branch.name} (#{branch.code})" : branch.name
+            text = "#{text} (inativa)" unless branch.active
+            %(<option value="#{h(branch.id)}"#{selected(selected_id, branch.id)}>#{h(text)}</option>)
+          end.join)
+        end
+
+        # Fuso da organização no momento em que o formulário foi exibido: se mudar antes do envio, os
+        # horários digitados são recusados (Controller#local_time) em vez de interpretados no fuso novo.
+        def time_zone_field = raw(%(<input type="hidden" name="fuso" value="#{h(time_zone.identifier)}">))
+
+        # Deslocamento de um fuso em relação ao UTC num instante ("UTC−03:00"), com o sinal de menos tipográfico.
+        def utc_offset_label(zone, instant)
+          seconds = zone.utc_offset(instant)
+          hours, rest = seconds.abs.divmod(3600)
+          format("UTC%<sign>s%<hours>02d:%<minutes>02d", sign: seconds.negative? ? "−" : "+", hours: hours, minutes: rest / 60)
+        end
+
+        # Quantidade com o substantivo no singular ou no plural ("1 reserva em aberto", "2 reservas em aberto").
+        def count_text(count, singular, plural) = "#{Domain::Pricing.count_label(count.to_i)} #{count.to_i == 1 ? singular : plural}"
+
         def checked(flag) = raw(flag ? " checked" : "")
 
         def can?(permission) = request.can?(permission)
@@ -280,7 +306,7 @@ module Locentra
           ["Manutenção", "/manutencao", "maintenance.write"],
           ["Usuários e permissões", "/usuarios", "members.read"],
           ["Integrações", "/integracoes", "integrations.manage"],
-          ["Organização", "/organizacao", "organization.manage"],
+          ["Organização", "/organizacao", "organization.read"],
           ["Auditoria", "/auditoria", "audit.read"]
         ].freeze
 

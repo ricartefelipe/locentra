@@ -69,7 +69,7 @@ module Locentra
             # Somente reserva, itens e resumo de valores chegam à tela: alocações de ativos e estoques são
             # dados internos, e a tela não mostra a origem das tarifas nem o valor padrão.
             render(ctx, "portal/reservation", title: "Reserva #{data[:reservation].code}", reservation: data[:reservation], items: data[:items],
-                                              pricing: data[:pricing][:summary])
+                                              pricing: data[:pricing][:summary], cancellation_policy: data[:cancellation_policy])
           end
 
           private

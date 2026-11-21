@@ -144,7 +144,7 @@ module Locentra
         class AvailabilityController < Controller
           def calendar(ctx)
             org = uc(:get_organization).call(ctx.actor)
-            branch = org[:branches].find { |b| b.id == ctx.query("filial") } || org[:branches].first
+            branch = org[:branches].find { |b| b.id == ctx.query("filial") } || org[:branches].find(&:active) || org[:branches].first
             start = parse_date(ctx.query("inicio")) || ctx.time_zone.local_date(@system.clock.now)
             days = (ctx.query("dias") || "7").to_s
             data = uc(:calendar).call(ctx.actor, branch_id: branch.id, start_date: start, days: days)

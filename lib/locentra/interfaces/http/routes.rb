@@ -2,6 +2,7 @@
 
 require_relative "web/auth_controller"
 require_relative "web/main_controllers"
+require_relative "web/organization_controller"
 require_relative "web/operations_controllers"
 require_relative "web/integrations_controller"
 require_relative "web/finance_controllers"
@@ -113,9 +114,7 @@ module Locentra
           r.post "/credenciais", members, :create_credential
           r.post "/credenciais/:id/revogar", members, :revoke_credential
 
-          organization = w::OrganizationController.new(deps)
-          r.get "/organizacao", organization, :show
-          r.post "/organizacao/filiais", organization, :create_branch
+          draw_organization(r, deps, w)
 
           r.get "/auditoria", w::AuditController.new(deps), :index
 
@@ -227,6 +226,20 @@ module Locentra
           r.post "/transferencias/:id/saida", transfers, :dispatch_transfer
           r.post "/transferencias/:id/recebimento", transfers, :receive
           r.post "/transferencias/:id/cancelar", transfers, :cancel
+        end
+
+        # Organização: configurações e filiais. Rotas literais antes das parametrizadas.
+        def draw_organization(router, deps, web)
+          r = router
+          organization = web::OrganizationController.new(deps)
+          r.get "/organizacao", organization, :show
+          r.get "/organizacao/configuracoes", organization, :settings
+          r.post "/organizacao/configuracoes", organization, :update_settings
+          r.post "/organizacao/filiais", organization, :create_branch
+          r.get "/organizacao/filiais/:id", organization, :branch
+          r.post "/organizacao/filiais/:id", organization, :update_branch
+          r.post "/organizacao/filiais/:id/desativar", organization, :deactivate_branch
+          r.post "/organizacao/filiais/:id/reativar", organization, :reactivate_branch
         end
 
         def draw_quotes(router, deps, web)

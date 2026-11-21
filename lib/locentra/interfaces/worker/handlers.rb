@@ -126,6 +126,7 @@ module Locentra
             %w[starts_at ends_at valid_until].each do |key|
               vars["#{key}_local"] = zone.format_local(Time.iso8601(vars[key])) if vars[key]
             end
+            vars["time_zone"] = zone.identifier
           end
           send_template(job.payload.fetch("template"), job.payload.fetch("to"), vars)
         end

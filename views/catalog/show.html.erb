@@ -27,7 +27,7 @@
             <label for="patrimonio">Patrimônio</label><input id="patrimonio" name="patrimonio" required>
             <label for="numero_serie">Número de série</label><input id="numero_serie" name="numero_serie">
             <label for="filial_id">Filial</label>
-            <select id="filial_id" name="filial_id"><% @branches.each do |b| %><option value="<%= b.id %>"><%= b.name %></option><% end %></select>
+            <select id="filial_id" name="filial_id"><%= branch_options(@branches, nil, active_only: true) %></select>
             <label for="condicao">Condição</label>
             <select id="condicao" name="condicao"><% Locentra::Domain::Catalog::CONDITIONS.each do |k, l| %><option value="<%= k %>"<%= selected("good", k) %>><%= l %></option><% end %></select>
             <label for="custo_aquisicao">Custo de aquisição (R$)</label><input id="custo_aquisicao" name="custo_aquisicao" inputmode="decimal"<%= invalid(@errors, "custo_aquisicao") %>><%= field_errors(@errors, "custo_aquisicao") %>
@@ -47,7 +47,8 @@
         <form method="post" action="/produtos/<%= p.id %>/estoque" class="stack">
           <%= csrf_field %>
           <label for="filial_id">Filial</label>
-          <select id="filial_id" name="filial_id"><% @branches.each do |b| %><option value="<%= b.id %>"><%= b.name %></option><% end %></select>
+          <select id="filial_id" name="filial_id" aria-describedby="ajuda-estoque-filial"><%= branch_options(@branches, nil, active_only: false) %></select>
+          <p class="muted" id="ajuda-estoque-filial">Filiais inativas aceitam somente baixa e perda.</p>
           <label for="movimento">Movimento</label>
           <select id="movimento" name="movimento"><option value="acquisition">Entrada</option><option value="write_off">Baixa</option><option value="loss">Perda</option></select>
           <label for="quantidade">Quantidade</label><input id="quantidade" name="quantidade" type="number" min="1" required>
