@@ -9,8 +9,8 @@ require_relative "repository_helper"
 # e recusa de condições negociadas sobrepostas. O esquema completo é recriado ao final.
 #
 # O "banco da 1.0.0" é montado com todas as migrations exceto a 0015, inclusive as posteriores: a 0016
-# (configurações da organização) é aplicada antes da 0015, que não depende dela, e os casos de uso
-# atuais montam os dados. A ordem registrada em schema_migrations documenta essa independência.
+# (configurações da organização) e a 0017 (webhooks por organização e retenção) são aplicadas antes da
+# 0015, que não depende delas, e os casos de uso atuais montam os dados. A ordem registrada em schema_migrations documenta essa independência.
 class Migration0015Test < Minitest::Test
   include TimeHelpers
 
@@ -104,7 +104,7 @@ class Migration0015Test < Minitest::Test
     inverted_id = legacy_agreement(900, valid_until: "2026-01-01T00:00:00Z")
 
     assert_equal ["0015"], migrator(MIGRATIONS).migrate
-    assert_equal %w[0016 0015], applied_order.last(2), "a 0016 foi aplicada antes da 0015, que não depende dela"
+    assert_equal %w[0016 0017 0015], applied_order.last(3), "as posteriores foram aplicadas antes da 0015, que não depende delas"
     assert_equal(%w[t t t t], %w[coupons customer_price_agreements coupon_redemptions additional_fees].map { |table| forced_rls(table) })
     coupon = owner_query("SELECT updated_at = created_at AS filled, lock_version, redemptions FROM coupons WHERE id = $1", [coupon_id]).first
 
