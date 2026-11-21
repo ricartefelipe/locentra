@@ -175,4 +175,28 @@ class ContractsDomainTest < UnitTest
     assert_equal [30_000, "C-000001", "13/03/2026 05:00"], [snapshot["current_total_cents"], snapshot["contract_code"],
                                                             snapshot["current_period"]["ends_at_local"]]
   end
+
+  # Cupom, condições negociadas e tarifas do snapshot de preços são copiados para os termos; snapshots
+  # anteriores, sem essas chaves, continuam aceitos (descontos negociados valem zero).
+  def test_terms_copy_commercial_terms_and_accept_older_snapshots
+    item = { "product_id" => "p1", "sku" => "CAM-1", "name" => "Câmera", "quantity" => 1, "total_cents" => 82_800,
+             "pricing" => { "description" => "2 diárias (24 h)", "unit_amount_cents" => 90_000, "deposit_unit_cents" => 300_000,
+                            "negotiated_discount_bps" => 800, "negotiated_discount_cents" => 7_200, "negotiated_agreement_id" => "a1" } }
+    coupon = { "id" => "c1", "code" => "BEMVINDO10", "kind" => "percent", "value" => 1000 }
+    agreements = [{ "id" => "a1", "scope" => "general", "product_id" => nil, "discount_bps" => 800 }]
+    fees = [{ "fee_id" => "f1", "code" => "ENTREGA", "description" => "Entrega", "amount_cents" => 15_000, "source" => "catalog" }]
+    pricing = { "subtotal_cents" => 82_800, "coupon_code" => "BEMVINDO10", "coupon" => coupon, "coupon_discount_cents" => 8_280,
+                "agreements" => agreements, "fees" => fees, "fees_cents" => 15_000, "total_cents" => 89_520, "timezone" => "America/Sao_Paulo" }
+
+    assert_equal [800, 7_200], C::Terms.item_snapshot(item).values_at("negotiated_discount_bps", "negotiated_discount_cents")
+    snapshot = C::Terms.pricing_snapshot(pricing)
+
+    assert_equal [coupon, agreements, fees], snapshot.values_at("coupon", "agreements", "fees")
+    refute snapshot.key?("timezone"), "somente as chaves de valores entram nos termos"
+    older = C::Terms.item_snapshot(item.merge("pricing" => { "description" => "2 diárias (24 h)", "unit_amount_cents" => 90_000 }))
+
+    assert_equal [0, 0], older.values_at("negotiated_discount_bps", "negotiated_discount_cents")
+    assert_equal({ "subtotal_cents" => 90_000, "total_cents" => 90_000 },
+                 C::Terms.pricing_snapshot("subtotal_cents" => 90_000, "total_cents" => 90_000, "period" => {}))
+  end
 end

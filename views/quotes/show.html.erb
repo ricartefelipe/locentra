@@ -38,17 +38,16 @@
     </dl>
     <table class="table">
       <caption class="sr-only">Itens da versão <%= v.number %></caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col" class="num">Total</th></tr></thead>
+      <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th></tr></thead>
       <tbody>
         <% v.items.each do |item| %>
-          <tr><td><%= item["name"] %> <span class="muted"><%= item["sku"] %></span></td><td><%= item["quantity"] %></td><td><%= item["description"] %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
+          <tr><td><%= item["name"] %> <span class="muted"><%= item["sku"] %></span></td><td><%= item["quantity"] %></td><td><%= item["description"] %></td>
+            <td><%= negotiated_discount(item) %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
         <% end %>
       </tbody>
     </table>
     <dl class="details">
-      <dt>Subtotal</dt><dd><%= money(v.pricing["subtotal_cents"].to_i) %></dd>
-      <% if v.pricing["manual_discount_cents"].to_i.positive? %><dt>Desconto manual</dt><dd>−<%= money(v.pricing["manual_discount_cents"]) %></dd><% end %>
-      <dt>Total</dt><dd><strong><%= money(v.total) %></strong></dd>
+      <%= partial("shared/pricing_summary", pricing: v.pricing, items: v.items, audience: :staff, total: v.total) %>
       <dt>Caução prevista</dt><dd><%= money(v.deposit) %></dd>
     </dl>
     <p class="muted">Preços calculados em <%= v.pricing["priced_at"] ? datetime(Time.iso8601(v.pricing["priced_at"])) : "—" %> e congelados nesta versão; a conversão em reserva usa estes valores.</p>

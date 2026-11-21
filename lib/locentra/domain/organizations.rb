@@ -22,6 +22,17 @@ module Locentra
           text[0, max]
         end
 
+        # Texto opcional sem corte: acima do limite é recusado. Remove espaços das pontas e preserva as
+        # quebras de linha internas, normalizadas para LF (o navegador envia CRLF e conta cada quebra como
+        # um caractere no maxlength); vazio vira nil.
+        def optional!(value, field, max:)
+          text = value.to_s.gsub(/\r\n?/, "\n").strip
+          return nil if text.empty?
+          raise ValidationError.field(field, "até #{max} caracteres") if text.length > max
+
+          text
+        end
+
         def slugify(value)
           value.to_s.unicode_normalize(:nfkd).gsub(/\p{Mn}/, "").downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-|-\z/, "")[0, 60]
         end

@@ -19,7 +19,7 @@
       <input id="inicio" name="inicio" type="datetime-local" required value="<%= @values["inicio"] %>"<%= invalid(@errors, "inicio") %>><%= field_errors(@errors, "inicio") %></div>
     <div><label for="fim">Devolução</label>
       <input id="fim" name="fim" type="datetime-local" required value="<%= @values["fim"] %>"<%= invalid(@errors, "fim") %>><%= field_errors(@errors, "fim") %></div>
-    <fieldset class="full">
+    <fieldset class="full" data-line-group="itens">
       <legend>Itens</legend>
       <div data-lines>
         <% rows = [Array(@values["produto"]).size, 1].max %>
@@ -31,13 +31,14 @@
               <% @products.each do |p| %><option value="<%= p.id %>"<%= selected(Array(@values["produto"])[i], p.id) %>><%= p.name %> · <%= p.tracking_label %></option><% end %>
             </select>
             <label for="quantidade-<%= i %>">Quantidade</label>
-            <input id="quantidade-<%= i %>" name="quantidade[]" type="number" min="1" value="<%= Array(@values["quantidade"])[i] || 1 %>">
+            <input id="quantidade-<%= i %>" name="quantidade[]" type="number" min="1" value="<%= Array(@values["quantidade"])[i] || 1 %>" data-reset-value="1">
             <button type="button" class="link-button" data-remove-line>Remover</button>
           </div>
         <% end %>
       </div>
       <button type="button" data-add-line>Adicionar item</button>
     </fieldset>
+    <%= partial("shared/fee_fields") %>
     <fieldset class="full">
       <legend>Política de bloqueio</legend>
       <label class="radio"><input type="radio" name="modo" value="hold"<%= checked(@values["modo"].to_s.empty? || @values["modo"] == "hold") %>>
@@ -49,7 +50,10 @@
       <label for="validade_bloqueio">Validade do bloqueio temporário (minutos)</label>
       <input id="validade_bloqueio" name="validade_bloqueio" type="number" min="5" max="1440" value="<%= @values["validade_bloqueio"] || @hold_minutes %>">
     </fieldset>
-    <div><label for="cupom">Cupom</label><input id="cupom" name="cupom" value="<%= @values["cupom"] %>"<%= invalid(@errors, "cupom") %>><%= field_errors(@errors, "cupom") %></div>
+    <div><label for="cupom">Cupom</label>
+      <input id="cupom" name="cupom" maxlength="40" autocapitalize="characters" autocomplete="off" value="<%= @values["cupom"] %>"<%= invalid(@errors, "cupom", describedby: "ajuda-cupom") %>>
+      <p class="muted" id="ajuda-cupom">Cupons valem para reservas, não para orçamentos.<% if can?("coupons.read") %> <a href="/cupons?situacao=active" target="_blank" rel="noopener">Consultar cupons vigentes (abre em nova aba)</a><% end %></p>
+      <%= field_errors(@errors, "cupom") %></div>
     <div><label for="desconto">Desconto manual (%)</label><input id="desconto" name="desconto" inputmode="decimal" value="<%= @values["desconto"] %>">
       <p class="muted">Limite do seu papel: <%= percent(Locentra::Domain::Identity.discount_limit_bps(request.actor.role)) %></p></div>
     <div class="full"><label for="observacoes">Observações</label><textarea id="observacoes" name="observacoes" rows="2"><%= @values["observacoes"] %></textarea></div>

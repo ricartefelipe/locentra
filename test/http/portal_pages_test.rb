@@ -1,10 +1,13 @@
 # frozen_string_literal: true
 
 require_relative "portal_http_helper"
+require_relative "../support/commercial_terms_support"
 
 # Funcionalidades do portal pela interface (Rack::Lint): disponibilidade e solicitação de reserva,
 # reservas, orçamentos, contratos com aceite e PDF, cobranças e isolamento entre clientes e organizações.
 class PortalPagesTest < PortalHttpTest
+  include CommercialTermsSupport
+
   def test_availability_check_and_reservation_request_through_the_screens
     portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
     portal_login
@@ -75,6 +78,52 @@ class PortalPagesTest < PortalHttpTest
     follow_redirect!
 
     assert_includes last_response.body, "Orçamento #{rejected.code} rejeitado"
+  end
+
+  # O cliente vê as tarifas e a condição negociada antes de aprovar, sem dados internos (origem da
+  # tarifa, valor padrão, código do catálogo ou observações da condição).
+  def test_quote_page_details_fees_and_negotiated_condition_before_the_approval
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    create_agreement(@customer, 800, notes: "Observação interna da negociação")
+    fee = create_fee("ENTREGA", "Entrega no local", 15_000)
+    fees = [catalog_fee(fee, 20_000), custom_fee("Taxa de estacionamento", 3_000)]
+    quote = uc(:create_quote).call(@actor, portal_quote_input(@customer, @branch, @camera, 20).merge(fees: fees))
+    uc(:send_quote).call(@actor, quote.id)
+    portal_login
+    page = get_ok("/portal/orcamentos/#{quote.id}")
+
+    assert_includes page, "<td>−8% (−R$ 12,00)</td>"
+    assert_includes page, "o subtotal já considera a condição negociada (−R$ 12,00)"
+    assert_match(%r{<dt>Entrega no local</dt>\s*<dd>R\$ 200,00</dd>}, page)
+    assert_match(%r{<dt>Taxa de estacionamento</dt>\s*<dd>R\$ 30,00</dd>}, page)
+    assert_includes page, "<dt>Total</dt><dd><strong>R$ 368,00</strong></dd>"
+    assert_operator page.index("Taxa de estacionamento"), :<, page.index("Aprovar versão 1"), "o detalhamento vem antes da aprovação"
+    ["valor ajustado", "(avulsa)", "padrão", "default_amount_cents", "Observação interna", "ENTREGA", "/cupons/"].each do |internal|
+      refute_includes page, internal
+    end
+  end
+
+  def test_reservation_and_contract_pages_detail_coupon_and_fees_without_internal_data
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    fee = create_fee("ENTREGA", "Entrega no local", 15_000)
+    create_coupon("BEMVINDO10")
+    reservation = reserve(@actor, @customer, @branch, period("2026-03-12T08:00:00Z", "2026-03-13T08:00:00Z"), [line(@camera, 1)],
+                          mode: "confirm", coupon_code: "bemvindo10", fees: [catalog_fee(fee, 18_000)])
+    contract = uc(:issue_contract).call(@actor, reservation.id)
+    portal_login
+    page = get_ok("/portal/reservas/#{reservation.id}")
+
+    assert_includes page, "<dt>Cupom BEMVINDO10 (10%)</dt>"
+    assert_includes page, "<dd>−R$ 15,00</dd>"
+    assert_match(%r{<dt>Entrega no local</dt>\s*<dd>R\$ 180,00</dd>}, page)
+    assert_includes page, "<dt>Total</dt><dd><strong>R$ 315,00</strong></dd>"
+    refute_match(%r{valor ajustado|padrão R\$|/cupons/|ENTREGA}, page)
+    terms = get_ok("/portal/contratos/#{contract.id}")
+
+    assert_includes terms, "<h3>Valores na emissão</h3>"
+    assert_includes terms, "<dt>Cupom BEMVINDO10 (10%)</dt>"
+    assert_match(%r{<dt>Entrega no local</dt>\s*<dd>R\$ 180,00</dd>}, terms)
+    refute_match(%r{valor ajustado|padrão R\$|/cupons/}, terms)
   end
 
   def test_contract_acceptance_pdf_download_and_statement_through_the_screens

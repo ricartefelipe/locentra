@@ -3,6 +3,7 @@
 require_relative "config"
 require_relative "infrastructure"
 require_relative "infrastructure/observability/logger"
+require_relative "wiring/commercial_terms"
 
 module Locentra
   # Composition root: monta adaptadores e casos de uso a partir da configuração.
@@ -52,6 +53,7 @@ module Locentra
         access: P::AccessRepository.new, organizations: P::OrganizationRepository.new, subscriptions: P::SubscriptionRepository.new,
         customers: P::CustomerRepository.new, catalog: P::CatalogRepository.new, availability: P::AvailabilityRepository.new,
         reservations: P::ReservationRepository.new, audit: P::AuditRepository.new, pricing: P::PricingRepository.new,
+        coupons: P::CouponRepository.new, fees: P::FeeRepository.new, price_agreements: P::PriceAgreementRepository.new,
         credentials: P::CredentialRepository.new, idempotency: P::IdempotencyRepository.new, reports: P::ReportsRepository.new,
         webhooks: P::WebhookRepository.new, attachments: P::AttachmentRepository.new,
         receivables: P::ReceivableRepository.new, payments: P::PaymentRepository.new, deposits: P::DepositRepository.new,
@@ -76,7 +78,7 @@ module Locentra
         tokens: A::Identity::OneTimeTokens.new(repository: repos[:user_tokens], clock: clock, ids: ids),
         sessions: A::Identity::Sessions.new(uow: uow, repository: repos[:sessions], clock: clock, ids: ids),
         limits: A::Organizations::PlanLimits.new(subscriptions: repos[:subscriptions]),
-        pricer: A::Reservations::Pricer.new(pricing: repos[:pricing]),
+        pricer: A::Reservations::Pricer.new(pricing: repos[:pricing], ids: ids),
         pricing_rules: Domain::Pricing::Rules.new,
         mailer: @mailer, http: @http,
         box: I::SecretBox.new(config.encryption_key, previous: config.previous_encryption_keys),
@@ -113,6 +115,7 @@ module Locentra
       build_contract_use_cases(uc)
       build_cli_use_cases(uc)
       build_portal_use_cases(uc)
+      uc.merge!(Wiring::CommercialTerms.build(uow: uow, repos: repos, services: services, clock: clock, ids: ids))
       @use_cases = UseCases.new(uc)
     end
 

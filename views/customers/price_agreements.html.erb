@@ -1,0 +1,89 @@
+<% c = @data[:customer] %>
+<% create_path = "/clientes/#{c.id}/condicoes" %>
+<% writable = can?("price_agreements.write") %>
+<section class="panel" id="condicoes" aria-labelledby="condicoes-titulo">
+  <h2 id="condicoes-titulo">Condições negociadas</h2>
+  <p class="muted">Vale o maior desconto entre a condição do produto e a geral, aplicado depois do desconto por quantidade. Reservas e orçamentos já registrados não mudam. Horários no fuso <%= time_zone.identifier %>.</p>
+  <% if @agreements.items.empty? %>
+    <p class="empty">Nenhuma condição negociada para este cliente.</p>
+  <% else %>
+    <% if @agreements.total > @agreements.items.size %>
+      <p class="notice" role="status">Mostrando <%= @agreements.items.size %> de <%= @agreements.total %> condições (as não encerradas primeiro).</p>
+    <% end %>
+    <table class="table">
+      <caption class="sr-only">Condições negociadas de <%= c.name %></caption>
+      <thead><tr><th scope="col">Escopo</th><th scope="col">Desconto</th><th scope="col">Vigência</th><th scope="col">Observações</th>
+        <th scope="col">Cadastrada por</th><th scope="col">Situação</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
+      <tbody>
+        <% @agreements.items.each do |row| %>
+          <% a = row[:agreement] %>
+          <% end_path = "#{create_path}/#{a.id}/encerrar" %>
+          <% row_errors = failed_submission?(end_path) ? @errors : {} %>
+          <tr>
+            <td><% if a.product_id.nil? %>Todos os produtos<% elsif row[:product] %><%= row[:product][:name] %> (<%= row[:product][:sku] %>)<% else %>Produto específico<% end %></td>
+            <td><%= percent(a.discount_bps) %></td>
+            <td><%= validity(a.valid_from, a.valid_until) %></td>
+            <td class="pre"><%= a.notes || "—" %></td>
+            <td><%= row[:created_by_name] || "—" %></td>
+            <td><%= status_badge(row[:status], label(:agreement_status, row[:status])) %>
+              <% if a.end_scheduled?(@now) %>
+                <br><span class="muted">encerramento agendado para <%= datetime(a.ended_at) %><% if row[:ended_by_name] %> por <%= row[:ended_by_name] %><% end %>: <%= a.end_reason %></span>
+              <% elsif a.ended_at %>
+                <br><span class="muted">Encerrada em <%= datetime(a.ended_at) %><% if row[:ended_by_name] %> por <%= row[:ended_by_name] %><% end %>: <%= a.end_reason %></span>
+              <% end %></td>
+            <td>
+              <% if writable && a.ended_at.nil? && row[:status] != "expired" %>
+                <details<%= open_after_failure(end_path) %>>
+                  <summary>Encerrar</summary>
+                  <form method="post" action="<%= end_path %>" class="stack" data-confirm="Encerrar esta condição negociada? Reservas e orçamentos já registrados não mudam.">
+                    <%= csrf_field %>
+                    <label for="motivo-<%= a.id %>">Motivo do encerramento</label>
+                    <input id="motivo-<%= a.id %>" name="motivo" required maxlength="500" value="<%= submitted(end_path, "motivo") %>"<%= invalid(row_errors, "motivo") %>>
+                    <%= field_errors(row_errors, "motivo") %>
+                    <label for="encerrar-<%= a.id %>">Encerrar em</label>
+                    <input id="encerrar-<%= a.id %>" name="encerrar_em" type="datetime-local" value="<%= submitted(end_path, "encerrar_em") %>"<%= invalid(row_errors, "encerrar_em", describedby: "ajuda-encerrar-#{a.id}") %>>
+                    <p class="muted" id="ajuda-encerrar-<%= a.id %>">Vazio: agora; para trocar a condição sem intervalo, informe aqui o início da próxima.</p>
+                    <%= field_errors(row_errors, "encerrar_em") %>
+                    <button type="submit" class="danger">Encerrar condição</button>
+                  </form>
+                </details>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+  <% if writable %>
+    <% form_errors = failed_submission?(create_path) ? @errors : {} %>
+    <details<%= open_after_failure(create_path) %>>
+      <summary>Nova condição negociada</summary>
+      <form method="post" action="<%= create_path %>" class="form-grid">
+        <%= csrf_field %>
+        <div><label for="condicao-produto">Produto (SKU)</label>
+          <input id="condicao-produto" name="produto" list="condicao-produtos" autocomplete="off" autocapitalize="characters" value="<%= submitted(create_path, "produto") %>"<%= invalid(form_errors, "produto", describedby: "ajuda-condicao-produto") %>>
+          <datalist id="condicao-produtos">
+            <% @agreement_products.each do |product| %><option value="<%= product.sku %>"><%= product.name %></option><% end %>
+          </datalist>
+          <p class="muted" id="ajuda-condicao-produto">Vazio: todos os produtos (condição geral).</p>
+          <%= field_errors(form_errors, "produto") %></div>
+        <div><label for="condicao-desconto">Desconto (%)</label>
+          <input id="condicao-desconto" name="desconto" required inputmode="decimal" value="<%= submitted(create_path, "desconto") %>"<%= invalid(form_errors, "desconto", describedby: "ajuda-condicao-desconto") %>>
+          <p class="muted" id="ajuda-condicao-desconto">Até 90%, com até duas casas decimais (por exemplo 8 ou 7,5).</p>
+          <%= field_errors(form_errors, "desconto") %></div>
+        <div><label for="condicao-inicio">Início da vigência</label>
+          <input id="condicao-inicio" name="valido_de" type="datetime-local" value="<%= submitted(create_path, "valido_de") %>"<%= invalid(form_errors, "valido_de", describedby: "ajuda-condicao-inicio") %>>
+          <p class="muted" id="ajuda-condicao-inicio">Vazio: a partir do cadastro.</p>
+          <%= field_errors(form_errors, "valido_de") %></div>
+        <div><label for="condicao-fim">Fim da vigência</label>
+          <input id="condicao-fim" name="valido_ate" type="datetime-local" value="<%= submitted(create_path, "valido_ate") %>"<%= invalid(form_errors, "valido_ate", describedby: "ajuda-condicao-fim") %>>
+          <p class="muted" id="ajuda-condicao-fim">Opcional. A condição deixa de valer neste instante (fim exclusivo).</p>
+          <%= field_errors(form_errors, "valido_ate") %></div>
+        <div class="full"><label for="condicao-observacoes">Observações</label>
+          <textarea id="condicao-observacoes" name="observacoes" rows="2" maxlength="500"<%= invalid(form_errors, "observacoes") %>><%= submitted(create_path, "observacoes") %></textarea>
+          <%= field_errors(form_errors, "observacoes") %></div>
+        <div class="full"><button type="submit" class="primary">Cadastrar condição</button></div>
+      </form>
+    </details>
+  <% end %>
+</section>

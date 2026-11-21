@@ -163,9 +163,22 @@ module Locentra
     # Percentuais em pontos-base exibidos com aritmética inteira (sem Float): 500 → "5%",
     # 250 → "2,5%", 1234 → "12,34%".
     module Percent
+      PATTERN = /\A(\d{1,3})(?:[.,](\d{1,2}))?\z/
+
       module_function
 
       def label(bps) = "#{value(bps)}%"
+
+      # Percentual digitado em pontos-base, com aritmética inteira: "12" → 1200, "12,5" → 1250,
+      # "12.34" → 1234; vazio → nil. Mais de duas casas, notação exponencial, sinal ou textos como
+      # "Infinity" são recusados no campo informado.
+      def parse(value, field)
+        text = value.to_s.strip
+        return nil if text.empty?
+
+        match = PATTERN.match(text) || raise(ValidationError.field(field, "percentual inválido (até duas casas decimais)"))
+        (match[1].to_i * 100) + match[2].to_s.ljust(2, "0").to_i
+      end
 
       # Mesmo texto, sem o símbolo (valor de campo de formulário).
       def value(bps)

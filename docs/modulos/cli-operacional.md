@@ -14,13 +14,14 @@ Comandos administrativos de banco (migrations, status, seed) continuam separados
 |---|---|
 | Aplicação | `application/jobs.rb` (`Jobs::ListFailures`, `Jobs::RetryJob`, `Jobs::ErrorText`), `application/integrations.rb` (`WhoAmI`; filtro `kind:` em `AuthenticateCredential`), `GetReservation#by_reference`, `GetAsset#by_reference`, filtro `skus:` em `CheckAvailability` |
 | Persistência | `Jobs::Queue#lock`, `CredentialRepository#find`, `AvailabilityRepository#product_ids_by_sku`; `AccessRepository#active_credential` passa a devolver o tipo e, como `CredentialRepository#find_active`, exige organização ativa; `ReservationRepository#search` aceita `customer_names:`; `Jobs::Queue` identifica cada tentativa por `attempt_id` |
-| Interface | `interfaces/cli/operational.rb` (entrada, autenticação, erros e códigos de saída), `invocation.rb` (comandos, opções e ajuda), `commands.rb` (execução e apresentação), `token_source.rb` (origem da credencial), `output.rb` (redação, formatação humana e JSON) |
+| Interface | `interfaces/cli/operational.rb` (entrada, autenticação, erros e códigos de saída), `invocation.rb` (comandos, opções e ajuda), `commands.rb` (execução e apresentação), `commercial_terms_commands.rb` (cupons, tarifas e condições negociadas), `command_support.rb` (resultado, instantes e paginação comuns às classes de comandos), `token_source.rb` (origem da credencial), `output.rb` (redação, formatação humana e JSON), `interfaces/commercial_terms_serializers.rb` (JSON das condições comerciais, o mesmo da API v1) |
 | Executável | `bin/locentra` |
 | Composição | `System#build_cli_use_cases` (`whoami`, `list_failed_jobs`, `retry_job`) |
 
 Os demais comandos usam casos de uso já existentes: `get_organization`, `check_availability`,
 `list_reservations`, `get_reservation`, `get_customer`, `get_asset`, `reconcile_payments` e `finance`
-(relatório de conciliação).
+(relatório de conciliação). Os comandos de condições comerciais usam os casos de uso de
+`Application::CommercialTerms` (ver [condicoes-comerciais.md](condicoes-comerciais.md)).
 
 ## Identidade e credencial
 
@@ -64,6 +65,15 @@ Os demais comandos usam casos de uso já existentes: `get_organization`, `check_
 | `finance reconcile` | `reconcile_payments`, `finance#report` | `finance.write` e `finance.read` | `finance.read` é conferido antes de executar, para não conciliar sem poder exibir o relatório. Correções seguras aplicadas pela conciliação são auditadas como `cli` |
 | `jobs failures [--limite N]` | `list_failed_jobs` | `jobs.manage` | Tarefas `dead` da organização, mais recentes primeiro (padrão 50, máximo 100) |
 | `jobs retry ID` | `retry_job` | `jobs.manage` | Bloqueia a tarefa (`FOR UPDATE`), exige situação `dead`, volta a `pending` com tentativas zeradas e audita `job.retried` (tipo, tentativas anteriores e erro redigido). Tarefa em outra situação: conflito (69). Em `job_attempts`, a numeração continua após o reprocessamento, tentativas ainda abertas (lease vencido sem retorno do worker) são encerradas como `lease_lost` e cada tentativa é encerrada pelo próprio identificador, sem alterar tentativas anteriores |
+| `coupons list [--situacao S] [--busca T] [--ordem=O] [--limite N] [--deslocamento N]` | `list_coupons` | `coupons.read` | Situações: `active`, `scheduled`, `expired`, `exhausted`, `inactive`. A busca considera o início do código e qualquer trecho da descrição. Ordens: `code` (padrão), `-created_at`, `valid_until`. Mostra desconto, vigência no fuso da organização, usos ("3 de 100" ou "3 (sem limite)") e subtotal mínimo |
+| `coupons show CÓDIGO\|ID [--limite N] [--deslocamento N]` | `get_coupon`, `list_coupon_redemptions` | `coupons.read` (+ `reservations.read` para a reserva e `customers.read` para o cliente de cada uso) | Dados do cupom e usos, mais recentes primeiro; as opções paginam os usos. O estado de cada uso vem da reserva (ativo, liberado por cancelamento ou por expiração do bloqueio). Sem os escopos, reserva e cliente aparecem como "—" e as chaves são omitidas no JSON |
+| `coupons create --codigo C --tipo T --valor V [--descricao T] [--inicio-vigencia I] [--fim-vigencia I] [--maximo-usos N] [--subtotal-minimo V]` | `create_coupon` | `coupons.write` | `--tipo percent` com `--valor` percentual (`10`, `12,5`) ou `--tipo fixed` com valor em reais (`50,00`). Código repetido, inclusive de cupom desativado: conflito (69). Auditado (`coupon.created`) |
+| `coupons deactivate CÓDIGO\|ID` e `coupons reactivate CÓDIGO\|ID` | `set_coupon_active` | `coupons.write` | Reservas já registradas não mudam. No mesmo estado a operação é nula: código 0, sem gravação nem auditoria (`changed: false` no JSON) |
+| `fees list [--situacao S] [--busca T] [--limite N] [--deslocamento N]` | `list_fees` | `fees.read` | Situações: `active`, `inactive`. A busca considera o código e o nome |
+| `fees show CÓDIGO\|ID` | `get_fee` | `fees.read` | Nome, descrição, valor padrão e situação |
+| `agreements list --cliente ID [--limite N] [--deslocamento N]` | `list_price_agreements` | `price_agreements.read` (+ `catalog.read` para SKU e nome do produto) | Condições não encerradas primeiro; a situação indica o encerramento agendado. Sem `catalog.read`, o produto aparece pelo identificador |
+| `agreements create --cliente ID --desconto P [--produto SKU\|ID] [--inicio-vigencia I] [--fim-vigencia I] [--observacoes T]` | `create_price_agreement` | `price_agreements.write` | Sem `--produto`, condição geral. Sem `--inicio-vigencia`, vale a partir do cadastro. Sobreposição com outra condição do mesmo cliente e escopo: conflito (69). Auditado (`price_agreement.created`) |
+| `agreements end ID --motivo T [--encerrar-em I]` | `end_price_agreement` | `price_agreements.write` | Encerramento único, imediato ou agendado. Condição já encerrada, com encerramento agendado ou expirada: conflito (69). Auditado (`price_agreement.ended`) |
 
 `jobs failures` exige `jobs.manage` (e não um escopo de leitura) porque a mensagem de erro de uma
 tarefa pode revelar detalhes de integrações. Tarefas de outra organização ou sem organização não são
@@ -71,14 +81,22 @@ visíveis: filtro explícito por `organization_id` e RLS.
 
 ### Instantes
 
-`--inicio`, `--fim`, `--de` e `--ate` aceitam:
+`--inicio`, `--fim`, `--de`, `--ate`, `--inicio-vigencia`, `--fim-vigencia` e `--encerrar-em` aceitam:
 
 - ISO 8601 com fuso: `2026-03-10T08:00:00Z`, `2026-03-10T05:00-03:00`;
 - data e hora locais da organização (fuso IANA): `2026-03-10T05:00`;
-- somente data (`--de`/`--ate` e também `--inicio`/`--fim`): início do dia local, `2026-03-10`.
+- somente data: início do dia local, `2026-03-10`.
 
 Horários locais inexistentes no fuso são rejeitados e ambíguos resolvem para a primeira ocorrência
-(ADR-005). Períodos são `[início, fim)` em UTC.
+(ADR-005). Períodos e vigências são `[início, fim)` em UTC: para um cupom valer o dia 30/11 inteiro,
+informe `--fim-vigencia 2026-12-01`.
+
+### Valores
+
+`--valor` (cupom de valor fixo) e `--subtotal-minimo` aceitam reais com até duas casas (`50`, `50,00`,
+`1.234,56`). `--valor` (cupom percentual) e `--desconto` aceitam percentual com até duas casas (`10`,
+`12,5`). A conversão é feita com aritmética inteira (centavos e pontos-base); formato inválido é erro de
+validação (1) no campo da opção.
 
 ## Saída
 
@@ -99,6 +117,18 @@ Horários locais inexistentes no fuso são rejeitados e ambíguos resolvem para 
 | `finance reconcile` | `report` (`id`, `provider`, `status`, `window_start`, `started_at`, `finished_at`, `summary`, `error`), `items[]` |
 | `jobs failures` | `data[]` (`id`, `kind`, `attempts`, `max_attempts`, `last_error`, `correlation_id`, `created_at`, `updated_at`, `finished_at`) |
 | `jobs retry` | `job` (`id`, `kind`, `status`, `previous_attempts`) |
+| `coupons list` | `data[]` (campos de `Coupon` da API v1), `pagination` |
+| `coupons show` | `coupon` (campos de `Coupon`), `redemptions` (`data[]` com os campos de `CouponRedemption`, `pagination`) |
+| `coupons create` | `coupon` |
+| `coupons deactivate`, `coupons reactivate` | `coupon`, `changed` |
+| `fees list` | `data[]` (campos de `Fee` da API v1), `pagination` |
+| `fees show` | `fee` |
+| `agreements list` | `data[]` (campos de `PriceAgreement` da API v1; `product` somente com `catalog.read`), `pagination` |
+| `agreements create`, `agreements end` | `agreement` |
+
+Os recursos de condições comerciais são serializados pelo mesmo módulo da API v1
+(`Interfaces::CommercialTermsSerializers`): os campos de `Coupon`, `CouponRedemption`, `Fee` e
+`PriceAgreement` são os descritos em `docs/openapi.yaml`.
 
 Erros vão para o stderr: em texto (`erro: ...`) ou, com `--json`, como
 `{"error":{"code","message","details","exit_code","request_id"}}`. `details.fields` traz os erros
@@ -109,10 +139,10 @@ por campo de validação e `details.shortages` as faltas de disponibilidade.
 | Código | Significado | Exemplos |
 |---|---|---|
 | 0 | Sucesso | |
-| 1 | Erro de negócio ou validação | instante inválido, SKU inexistente, reserva ou tarefa inexistente ou de outra organização (`not_found`), nenhuma conta de provedor ativa |
+| 1 | Erro de negócio ou validação | instante inválido, SKU inexistente, reserva, tarefa, cupom, tarifa ou condição inexistente ou de outra organização (`not_found`), nenhuma conta de provedor ativa |
 | 2 | Configuração ou conexão | credencial ausente, arquivo de credencial inseguro, `DATABASE_URL` ausente, inválida ou com papel inadequado (migrations, worker, superusuário, `BYPASSRLS`), banco inacessível, tempo de espera do pool esgotado |
 | 64 | Uso incorreto | comando, subcomando ou opção desconhecidos, argumento ausente ou excedente, `--token` |
-| 69 | Indisponível ou conflito | tarefa que não está `dead`, conflito de estado, provedor de pagamentos fora do ar (relatório `failed` é exibido) |
+| 69 | Indisponível ou conflito | tarefa que não está `dead`, conflito de estado, provedor de pagamentos fora do ar (relatório `failed` é exibido), código de cupom já usado, condição negociada sobreposta ou já encerrada |
 | 70 | Erro interno inesperado | registrado no log (stderr) com o `request_id` |
 | 77 | Permissão negada | credencial inválida, revogada, expirada, de outro tipo ou de organização suspensa ou encerrada; escopo insuficiente |
 | 130 | Interrompido (Ctrl+C) | |
@@ -145,6 +175,9 @@ docker compose run --rm -e LOCENTRA_TOKEN web ruby bin/locentra whoami
 docker compose run --rm -e LOCENTRA_TOKEN web ruby bin/locentra availability --inicio 2026-03-10T08:00 --fim 2026-03-11T08:00 --produto CAM-01
 docker compose run --rm -e LOCENTRA_TOKEN web ruby bin/locentra reservations list --situacao confirmed --de 2026-03-01 --json
 docker compose run --rm -e LOCENTRA_TOKEN web ruby bin/locentra jobs retry 01960f3e-0000-7000-8000-000000000001
+docker compose run --rm -e LOCENTRA_TOKEN web ruby bin/locentra coupons create --codigo VERAO15 --tipo percent --valor 15 --fim-vigencia 2027-03-01 --maximo-usos 200
+docker compose run --rm -e LOCENTRA_TOKEN web ruby bin/locentra coupons show VERAO15
+docker compose run --rm -e LOCENTRA_TOKEN web ruby bin/locentra agreements create --cliente 01960f3e-0000-7000-8000-000000000002 --desconto 8 --observacoes "Contrato anual"
 ```
 
 Com arquivo: `install -m 600 /dev/null ~/.locentra-token`, grave o token no arquivo e use
@@ -161,6 +194,7 @@ Com arquivo: `install -m 600 /dev/null ~/.locentra-token`, grave o token no arqu
 | `test/cli/assets_test.rb` | Situação física, bloqueios, ordem de manutenção e histórico (humano); JSON por id; não encontrado, isolamento e escopo |
 | `test/cli/finance_test.rb` | Conciliação humana com correção de webhook perdido auditada como `cli`; JSON; sem conta (1); `finance.read`/`finance.write` (77, sem executar); provedor fora do ar (69, relatório `failed`, chave não exibida) |
 | `test/cli/jobs_test.rb` | Tarefas mortas humano e JSON com erro redigido (inclusive `Authorization: Bearer`, `access_token`, `client_secret` e erro terminado em `password=...`, com JSON válido); reprocessamento humano e JSON auditado com `actor_type = 'cli'`; segunda tentativa em conflito (69); sem `jobs.manage` (77, sem auditoria); isolamento entre organizações; identificador e limite inválidos (1) |
+| `test/cli/commercial_terms_test.rb` | Cupons, tarifas e condições negociadas em saída humana e JSON com os campos da API v1; instantes locais, ISO 8601 e somente data; usos do cupom conforme `reservations.read` e `customers.read`; desativação e reativação nulas no mesmo estado, sem auditoria; auditoria com `actor_type = 'cli'`; conflitos (69: código repetido, sobreposição, condição já encerrada), validação e recurso inexistente (1), escopo ausente (77), uso incorreto (64); isolamento entre organizações; ajuda dos comandos |
 | `test/cli/redaction_test.rb` | `Redactor` e `SafeOutput` sem banco: texto, JSON indentado e compacto e log; propriedade: qualquer combinação de fragmentos sensíveis e caracteres de sintaxe produz JSON válido e sem segredos |
 | `test/cli/subprocess_test.rb` | `bin/locentra` como processo separado (relógio real, System próprio): JSON, `--token-file`, permissão insegura (2) e códigos de saída no shell |
 | `test/integration/jobs_lookups_test.rb` | `whoami`, buscas por código/patrimônio, filtro por SKU, listagem de reservas sem `customers.read` e tarefas mortas com atores da equipe (papel recarregado do banco) |
@@ -171,8 +205,11 @@ Com arquivo: `install -m 600 /dev/null ~/.locentra-token`, grave o token no arqu
 
 ## Limitações
 
-- A CLI expõe somente os comandos listados acima; operações de escrita além de `finance reconcile` e
-  `jobs retry` (reservas, retiradas, devoluções, pagamentos) continuam na interface web e na API.
+- A CLI expõe somente os comandos listados acima; operações de escrita além de `finance reconcile`,
+  `jobs retry`, `coupons create`, `coupons deactivate`, `coupons reactivate`, `agreements create` e
+  `agreements end` (reservas, retiradas, devoluções, pagamentos) continuam na interface web e na API.
+- Edição de cupom e gestão de tarifas adicionais (cadastro, alteração, desativação) ficam na interface web
+  e na API; a exclusão de cupom nunca usado, somente na interface web.
 - `jobs failures` não tem deslocamento: mostra as `--limite` tarefas mortas mais recentes (até 100).
 - Não há leitura interativa do token nem integração com cofres de segredos; o operador fornece o token
   por variável de ambiente ou arquivo protegido.

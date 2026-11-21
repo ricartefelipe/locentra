@@ -103,7 +103,9 @@ class CatalogCustomersTest < DatabaseTest
 
     assert_raises(D::NotFound) { reserve(@actor, customer, D::Organizations::Branch.new(id: SecureRandom.uuid, organization_id: nil, name: "", code: "", address: nil, active: true), window, [line(camera, 1)]) }
     assert_raises(D::ValidationError) { reserve(@actor, customer, @branch, window, [line(camera, 1)], mode: "talvez") }
-    assert_raises(D::ValidationError) { reserve(@actor, customer, @branch, window, [line(camera, 1)], coupon_code: "NAOEXISTE") }
+    missing = assert_raises(D::ValidationError) { reserve(@actor, customer, @branch, window, [line(camera, 1)], coupon_code: "NAOEXISTE") }
+
+    assert_equal({ "cupom" => ["cupom inexistente"] }, missing.errors)
     fake = D::Reservations::Line.new(product_id: SecureRandom.uuid, quantity: 1)
 
     assert_raises(D::NotFound) { reserve(@actor, customer, @branch, window, [fake]) }
@@ -119,16 +121,22 @@ class CatalogCustomersTest < DatabaseTest
       @system.repos[:pricing].insert_coupon(tx, "id" => SecureRandom.uuid, "code" => "PRIMEIRA", "kind" => "percent", "value" => 1000,
                                                 "max_redemptions" => 1, "min_subtotal_cents" => 0, "created_at" => @clock.now)
       @system.repos[:pricing].insert_agreement(tx, "id" => SecureRandom.uuid, "customer_id" => customer.id, "discount_bps" => 500,
-                                                   "created_at" => @clock.now)
+                                                   "created_at" => @clock.now, "valid_from" => @clock.now - 3_600)
+      @system.repos[:pricing].insert_agreement(tx, "id" => SecureRandom.uuid, "customer_id" => customer.id, "product_id" => camera.id,
+                                                   "discount_bps" => 9_000, "created_at" => @clock.now, "valid_from" => @clock.now + 3_600)
     end
     window = period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z")
     reservation = reserve(@actor, customer, @branch, window, [line(camera, 1)], coupon_code: "primeira")
     summary = uc(:get_reservation).call(@actor, reservation.id)[:pricing][:summary]
 
-    assert_equal 9_500, summary["subtotal_cents"], "condição negociada de 5%"
+    assert_equal 9_500, summary["subtotal_cents"], "condição negociada de 5% (a do produto ainda não começou)"
     assert_equal 950, summary["coupon_discount_cents"]
     assert_equal 8_550, reservation.total.cents
-    assert_raises(D::ValidationError) { reserve(@actor, customer, @branch, window, [line(camera, 1)], coupon_code: "PRIMEIRA") }
+    exhausted = assert_raises(D::ValidationError) { reserve(@actor, customer, @branch, window, [line(camera, 1)], coupon_code: "PRIMEIRA") }
+
+    assert_equal({ "cupom" => ["cupom esgotado"] }, exhausted.errors)
+    assert_equal 1, owner_query("SELECT count(*) AS n FROM coupon_redemptions").first["n"].to_i
+    assert_equal 0, owner_query("SELECT redemptions FROM coupons").first["redemptions"].to_i, "o contador da versão 1.0.0 não é mais gravado"
     owner_query("UPDATE memberships SET role = 'attendant' WHERE user_id = $1", [@org[:user_id]])
 
     assert_raises(D::AccessDenied) { reserve(@actor, customer, @branch, window, [line(camera, 1)], manual_discount_bps: 1000) }

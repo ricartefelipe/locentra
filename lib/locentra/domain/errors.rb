@@ -31,7 +31,8 @@ module Locentra
         "reembolso" => -> { Finance::REFUND_STATUSES }, "inspeção" => -> { Maintenance::INSPECTION_STATUSES },
         "ordem de manutenção" => -> { Maintenance::ORDER_STATUSES }, "registro de avaria" => -> { Maintenance::DAMAGE_STATUSES },
         "transferência" => -> { Transfers::STATUSES }, "alerta" => -> { Alerts::STATUSES },
-        "convite do portal" => -> { Portal::INVITATION_STATUSES }, "retirada" => -> { Fulfillment::PICKUP_STATUSES }
+        "convite do portal" => -> { Portal::INVITATION_STATUSES }, "retirada" => -> { Fulfillment::PICKUP_STATUSES },
+        "condição negociada" => -> { Pricing::AGREEMENT_STATUSES }
       }.freeze
 
       def initialize(entity, from, to)
@@ -55,8 +56,8 @@ module Locentra
     # Recurso inexistente ou fora do escopo do tenant. O mesmo erro é usado nos dois casos
     # para não revelar a existência de recursos de outras organizações.
     class NotFound < Error
-      def initialize(resource = "recurso")
-        super("#{resource} não encontrado")
+      def initialize(resource = "recurso", feminine: false)
+        super("#{resource} não encontrad#{feminine ? "a" : "o"}")
       end
     end
 

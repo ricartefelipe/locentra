@@ -10,7 +10,7 @@ dados de outra organização.
 | Consultas | Toda consulta de tenant filtra `organization_id` explicitamente (inclusive atualizações por `id`), além da RLS. |
 | Banco: contexto | `set_config('app.tenant_id', ..., true)` local à transação; sem contexto, `app_tenant_id()` é nulo e nenhuma linha é visível. O contexto desaparece no fim da transação e a conexão volta ao pool sem transação aberta. |
 | Banco: RLS | `ENABLE` e `FORCE ROW LEVEL SECURITY` em todas as tabelas de tenant, com `USING` e `WITH CHECK`. `TenantIsolationTest#test_every_table_with_organization_id_has_forced_row_level_security` percorre o catálogo e falha se alguma tabela com `organization_id`, fora das exceções abaixo, ficar sem RLS forçada. |
-| Banco: papéis | `locentra_app` e `locentra_worker` sem superuser, sem `BYPASSRLS` e sem propriedade de tabelas; `locentra_owner` só para migrations; `locentra_backup` somente leitura, com `BYPASSRLS` e `pg_read_all_data`, usado apenas pelo `pg_dump` (ADR-024). |
+| Banco: papéis | `locentra_app` e `locentra_worker` sem superuser, sem `BYPASSRLS` e sem propriedade de tabelas; `locentra_owner` só para migrations; `locentra_backup` somente leitura, com `BYPASSRLS` e `pg_read_all_data`, usado pelo `pg_dump` (ADR-024) e, por operador, nas consultas de verificação somente leitura dos runbooks que precisam enxergar todas as organizações (contagem de linhas na restauração e verificações da migration 0015, `RUNBOOKS.md` §4 e §13); nunca pela aplicação. |
 | Banco: integridade | Chaves estrangeiras compostas `(organization_id, id)` impedem relacionamentos entre tenants. |
 | Respostas | Recurso de outra organização (ou de outro cliente, no portal) retorna "não encontrado" (sem enumeração). |
 | Áreas | Sessões de portal não acessam rotas da equipe nem a API sem credencial, e vice-versa. |
@@ -18,6 +18,34 @@ dados de outra organização.
 | Arquivos | Chave de armazenamento `<organização>/<anexo>` gerada pelo servidor; download só por rota autenticada que localiza o anexo dentro do tenant. |
 | Idempotência, auditoria, webhooks, relatórios | Tabelas de tenant com RLS; chaves de idempotência têm escopo por organização e ator. |
 | Métricas | Rótulos de baixa cardinalidade, sem identificadores de cliente, reserva ou organização. |
+
+## Condições comerciais (migration 0015)
+
+- `coupon_redemptions` e `additional_fees` são tabelas de tenant como as demais: `organization_id NOT NULL`,
+  RLS habilitada e forçada (`app_enable_tenant_rls`) e chaves estrangeiras compostas. O uso de um cupom
+  referencia `(organization_id, coupon_id)` e `(organization_id, reservation_id)`: não é possível registrar
+  o uso de um cupom por uma reserva de outra organização. `coupons` e `customer_price_agreements` já tinham
+  RLS forçada desde a migration 0004.
+- O código de cupom e o código de tarifa são únicos **por organização**: o mesmo código pode existir em
+  duas organizações, com cadastros independentes. O cupom de uma organização responde "cupom inexistente" na
+  outra, e um identificador de tarifa, cupom ou condição de outra organização responde "não encontrado".
+- **Privilégios de coluna:** além da RLS, `locentra_app` só atualiza as colunas editáveis de `coupons`
+  (descrição, vigência, máximo de usos, subtotal mínimo, ativação e controle de versão) e o contador legado
+  `coupons.redemptions`, que continua atualizável apenas para o retorno à 1.0.0 (`RUNBOOKS.md` §13.4): o
+  congelamento desse contador é regra da aplicação, porque a 1.1.0 não grava a coluna. Também atualiza as
+  colunas editáveis de `additional_fees` (nome, descrição, valor padrão, ativação e controle de versão) e
+  somente as colunas de encerramento de `customer_price_agreements`. `coupon_redemptions` é somente inserção. `locentra_worker`
+  não tem `UPDATE` nem `DELETE` em nenhuma dessas tabelas: o worker não altera condições comerciais, porque a
+  liberação de um uso de cupom não grava nada.
+- **`NO FORCE` pontual na migration 0015:** com a RLS forçada, nem o proprietário das tabelas enxerga linhas
+  sem contexto de organização, e a migration precisa preencher colunas novas em todas as organizações
+  (`coupons.updated_at` e `customer_price_agreements.valid_from`) e verificar sobreposições de vigência.
+  Por isso `coupons` e `customer_price_agreements` ficam com `NO FORCE ROW LEVEL SECURITY` **somente dentro
+  da transação da migration**, que termina com `FORCE` restaurado; se a migration falha, a transação é
+  desfeita e nada muda. A RLS continua habilitada o tempo todo para `locentra_app` e `locentra_worker`, que
+  não são proprietários. `TenantIsolationTest` confirma a RLS forçada depois da migration, e
+  `test/repository/migration_0015_test.rb` confere o preenchimento e o `FORCE` restaurado numa atualização a
+  partir do esquema da 0014.
 
 ## Exceções globais documentadas
 
@@ -46,5 +74,5 @@ ter chave ou escopo por organização como as demais tabelas.
 ## Evidências
 
 `test/repository/tenant_isolation_test.rb` (papel sem bypass, contexto ausente, escrita em outro tenant
-recusada pela RLS, FK composta, ids estrangeiros, tenant forjado no ator, revogação imediata) e os testes de
-isolamento de cada módulo.
+recusada pela RLS, FK composta, ids estrangeiros, tenant forjado no ator, revogação imediata, e cupons,
+usos, condições e tarifas de outra organização invisíveis) e os testes de isolamento de cada módulo.

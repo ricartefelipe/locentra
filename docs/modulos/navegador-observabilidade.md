@@ -6,10 +6,10 @@ demonstração do fluxo completo (RF-06 a RF-32 e RNF-02). Migration: `db/migrat
 
 | Parte | Arquivos |
 |---|---|
-| Testes de navegador | `test/browser/browser_helper.rb`, `navigation_test.rb`, `customers_test.rb`, `reservations_test.rb`; job "Testes de navegador" em `.github/workflows/ci.yml` |
+| Testes de navegador | `test/browser/browser_helper.rb`, `navigation_test.rb`, `customers_test.rb`, `reservations_test.rb`, `commercial_terms_test.rb`; job "Testes de navegador" em `.github/workflows/ci.yml` |
 | Métricas | `infrastructure/observability/logger.rb` (`Metrics`), `interfaces/http/middleware.rb` (`RequestLogger`), `application/base.rb` (`UnitOfWork`), `application/reports.rb` (`CollectMetrics`), `infrastructure/jobs/queue.rb`, `infrastructure/persistence/reports.rb` |
 | Chamadas externas e correlação | `application/external_calls.rb`, `application/finance/support.rb` (`Providers`, `TrackedProvider`), `application/webhooks.rb` (`Deliver`, `Redeliver`), `application/finance/{provider_flow,reconciliation,webhooks}.rb`, `infrastructure/notifications.rb`, `application/overdue.rb`, `interfaces/worker/handlers.rb` |
-| Demonstração | `test/integration/demo_flow_test.rb`, `docs/DEMONSTRACAO.md`, `lib/locentra/seed.rb`, `test/integration/seed_test.rb` |
+| Demonstração | `test/integration/demo_flow_test.rb`, `test/integration/demo_commercial_terms_test.rb`, `docs/DEMONSTRACAO.md`, `lib/locentra/seed.rb`, `test/integration/seed_test.rb` |
 | Interface | `public/img/favicon.svg` e `<link rel="icon">` nos layouts |
 | Composição | `System#build_services` (`external_calls`, `deliver_webhook`), `System#build_finance_use_cases` (`Providers` com registro), `UnitOfWork` com `metrics` |
 
@@ -48,6 +48,8 @@ demonstração do fluxo completo (RF-06 a RF-32 e RNF-02). Migration: `db/migrat
 | `test_new_reservation_uses_the_line_items_module` | Módulo de itens: nova linha vazia com quantidade 1, foco no produto, ids únicos e rótulos associados, remoção devolvendo o foco ao botão; reserva gravada com os dois itens |
 | `test_held_reservation_is_confirmed_from_its_page` | Confirmação pelo botão, mensagem, situação e remoção da ação |
 | `test_data_confirm_dialog_cancels_or_submits_the_form` | Diálogo com o texto de `data-confirm`; cancelar mantém a página e não envia nada ao servidor (o log do servidor tem um único POST); aceitar cancela a reserva |
+| `test_coupon_fee_and_negotiated_condition_reach_the_reservation` | Cadastro de cupom e de tarifa, condição negociada na página do cliente (aviso visível depois do redirecionamento), reserva com tarifa e cupom pelo módulo de linhas (foco na linha nova, rótulos únicos, remoção) e conferência dos valores e dos usos do cupom |
+| `test_attendant_keeps_or_removes_the_fees_of_the_previous_quote_version` | Nova versão de orçamento por atendente: tarifas autorizadas na versão anterior mantidas ou removidas, sem campo editável de valor |
 
 O teste de navegador encontrou uma falha real: sem ícone declarado, o navegador pedia `/favicon.ico`
 em toda página e registrava um 404 no console. O ícone SVG foi adicionado aos layouts.
@@ -176,7 +178,8 @@ de webhooks recebidos é local e não gera `external.call`.
 
 ## Demonstração
 
-`test/integration/demo_flow_test.rb` executa, num único teste, os 14 passos de `docs/DEMONSTRACAO.md`:
+O roteiro de `docs/DEMONSTRACAO.md` tem 15 passos. `test/integration/demo_flow_test.rb` executa, num único
+teste, os passos 1 a 14:
 entrada e escolha da organização pela interface web; cliente, catálogo, ativos e estoque;
 disponibilidade; orçamento enviado, aprovado e convertido (conversão repetida devolve a mesma
 reserva); duas threads disputando a última câmera (uma vence, a outra recebe `Unavailable`) e a
@@ -188,7 +191,9 @@ pagamento pelo simulador confirmado pelo worker; pagamento repetido pela API com
 404 na tela, a API da credencial da Alfa listando somente clientes da Alfa (e 404 para o cliente da
 Beta), `NotFound` nos casos de uso e nenhuma linha da organização A pela RLS. A credencial do teste
 tem os mesmos escopos do roteiro manual (`finance.read`, `finance.write` e `customers.read`), de modo
-que um passo do documento que dependa de outro escopo falha no teste.
+que um passo do documento que dependa de outro escopo falha no teste. O passo 15 (condições comerciais:
+cupom, condição negociada e tarifa) é executado por `test/integration/demo_commercial_terms_test.rb`, com
+dados equivalentes aos do seed e os valores do roteiro.
 
 O seed ganhou o preparo da demonstração manual, idempotente também em bancos semeados antes:
 `ana@alfa.demo` passa a ser gerente da Beta Eventos e a Alfa recebe a conta ativa do simulador. O
@@ -197,7 +202,9 @@ Beta (ativo ou revogado) e qualquer conta de provedor da Alfa (ativa ou desativa
 preparo. Isso importa porque configurar uma conta desativa a anterior: repetir o seed, por exemplo
 pelo `bin/setup`, não pode trocar o Asaas configurado pelo desenvolvedor pelo simulador. O resumo
 devolvido pelo seed continua com as duas organizações (o job "Reconstrução do banco e seed" segue
-esperando duas linhas `skipped`).
+esperando duas linhas `skipped`). O mesmo preparo cria as condições comerciais do passo 15 (tarifas,
+cupons e condições negociadas das duas organizações), com a mesma política: só cria o que nunca existiu e
+não reativa nem altera o que foi mudado depois.
 
 ## Testes
 
@@ -207,8 +214,9 @@ esperando duas linhas `skipped`).
 | `test/unit/application/observability_test.rb` | `ExternalCalls` (sucesso, desfecho classificado, erro mapeado e propagado), provedores com e sem ator, conflitos e transições inválidas contados pela `UnitOfWork` (inclusive `anonymous` e conflito do coordenador), `CollectMetrics` com agregados da fila e totais |
 | `test/http/observability_test.rb` | Correlação de ponta a ponta (eventos, auditoria, tarefas, `job.finished`, `external.call` do webhook e do simulador, simulação, webhook público e e-mails do cadastro e da recuperação de senha); `/metrics` válido no formato do Prometheus com todos os sinais (inclusive conflito e transição inválida tratados por formulário, retentativa e falha permanente agregadas) e nenhum rótulo com UUID ou identificador do tenant; token de métricas |
 | `test/repository/observability_tables_test.rb` | Colunas e privilégios de `queue_stats` e `job_outcome_totals`; `retry_later` e `kill` com lease perdido não somam; `retry_later` na última tentativa soma uma linha `dead` e nenhuma `retry` |
-| `test/integration/demo_flow_test.rb` | Roteiro completo |
-| `test/integration/seed_test.rb` | Seed idempotente, preparo completado em banco semeado antes e, ao repetir o seed, conta Asaas, conta desativada e vínculo revogado mantidos |
+| `test/integration/demo_flow_test.rb` | Passos 1 a 14 do roteiro |
+| `test/integration/demo_commercial_terms_test.rb` | Passo 15 do roteiro (condições comerciais) |
+| `test/integration/seed_test.rb` | Seed idempotente, preparo completado em banco semeado antes e, ao repetir o seed, conta Asaas, conta desativada e vínculo revogado mantidos; condições comerciais criadas uma vez só, sem reativar o que foi desativado |
 | `test/browser/*` | Tabela da seção de testes de navegador |
 
 ## Limitações

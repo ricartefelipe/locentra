@@ -11,7 +11,7 @@
   <input id="validade" name="validade" type="datetime-local" required value="<%= @values["validade"] %>"<%= invalid(@errors, "validade", describedby: "ajuda-validade") %>>
   <p class="muted" id="ajuda-validade">Até <%= Locentra::Domain::Quotes::MAX_VALIDITY_DAYS %> dias e no máximo até o início da locação.</p>
   <%= field_errors(@errors, "validade") %></div>
-<fieldset class="full">
+<fieldset class="full" data-line-group="itens">
   <legend>Itens</legend>
   <%= field_errors(@errors, "itens") %>
   <div data-lines>
@@ -24,7 +24,7 @@
           <% @products.each do |p| %><option value="<%= p.id %>"<%= selected(Array(@values["produto"])[i], p.id) %>><%= p.name %> · <%= p.tracking_label %></option><% end %>
         </select>
         <label for="quantidade-<%= i %>">Quantidade</label>
-        <input id="quantidade-<%= i %>" name="quantidade[]" type="number" min="1" value="<%= Array(@values["quantidade"])[i] || 1 %>">
+        <input id="quantidade-<%= i %>" name="quantidade[]" type="number" min="1" value="<%= Array(@values["quantidade"])[i] || 1 %>" data-reset-value="1">
         <button type="button" class="link-button" data-remove-line>Remover</button>
       </div>
     <% end %>
@@ -32,6 +32,7 @@
   <button type="button" data-add-line>Adicionar item</button>
   <% if @products.empty? %><p class="muted"><a href="/produtos/novo">Cadastre um produto</a> antes de orçar.</p><% end %>
 </fieldset>
+<%= partial("shared/fee_fields") %>
 <fieldset class="full">
   <legend>Política de bloqueio</legend>
   <label class="radio"><input type="radio" name="politica_bloqueio" value="none"<%= checked(@values["politica_bloqueio"].to_s.empty? || @values["politica_bloqueio"] == "none") %>>

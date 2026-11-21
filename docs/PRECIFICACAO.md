@@ -1,7 +1,10 @@
 # Política de precificação
 
-Implementação: `lib/locentra/domain/pricing.rb`. Valores comerciais do catálogo são definidos por cada
-organização; os planos da plataforma são hipóteses de produto.
+Implementação: `lib/locentra/domain/pricing.rb` (motor de preços e cupom) e
+`lib/locentra/domain/commercial_terms.rb` (cadastro de cupons, condições negociadas e tarifas adicionais).
+Valores comerciais do catálogo são definidos por cada organização; os planos da plataforma são hipóteses de
+produto. O cadastro das condições comerciais (telas, API, CLI, permissões, auditoria e concorrência) está em
+[`modulos/condicoes-comerciais.md`](modulos/condicoes-comerciais.md).
 
 ## Representação
 
@@ -41,26 +44,114 @@ organização; os planos da plataforma são hipóteses de produto.
 
 ## Composição do total
 
-> Na versão 1.0.0, cupons (passo 5), condições negociadas (passo 3) e tarifas adicionais (passo 7) são
-> calculados pelo motor e cobertos por testes, mas não há tela, API nem comando para cadastrá-los ou
-> informá-los; o campo "Cupom" da nova reserva só aceita cupons já existentes no banco. Ver
-> [`STATUS.md`](STATUS.md).
-
 1. Linha = preço unitário × quantidade.
 2. Desconto da faixa de quantidade (maior faixa atingida).
-3. Condição negociada do cliente (`customer_price_agreements`, por produto ou geral, maior vigente).
+3. Condição negociada do cliente, aplicada sobre o valor depois da faixa (ver abaixo).
 4. Subtotal = soma das linhas.
-5. Cupom (percentual ou fixo, limitado ao subtotal; validade, valor mínimo e limite de utilizações; o consumo
-   ocorre com lock na criação da reserva).
-6. Desconto manual autorizado, limitado por papel (proprietário/administrador 100%, gerente 20%,
-   atendente 5%, demais 0%).
+5. Cupom (percentual ou fixo, limitado ao subtotal), somente em reservas.
+6. Desconto manual autorizado, sobre o subtotal depois do cupom, limitado por papel
+   (proprietário/administrador 100%, gerente 20%, atendente 5%, demais 0%).
 7. Tarifas adicionais (entrega, montagem etc.).
 8. Caução prevista = soma da caução unitária × quantidade (fora do total da locação; ver política de caução).
+
+Todos os valores são inteiros em centavos e vale
+`subtotal − cupom − desconto manual + tarifas = total` (a caução não entra no total).
+
+Exemplo (passo 15 da demonstração): 1 câmera por 2 diárias de R$ 450,00 = R$ 900,00; condição negociada de
+8% = −R$ 72,00, subtotal R$ 828,00; cupom de 10% = −R$ 82,80; tarifa de entrega R$ 150,00; total
+R$ 895,20.
+
+## Cupons
+
+- **Cadastro:** código único por organização (3 a 40 caracteres: letras sem acento, números, hífen ou
+  sublinhado; convertido para maiúsculas), tipo `percent` (0,01% a 100%, em pontos-base) ou `fixed` (valor em
+  centavos), descrição, vigência, máximo de usos e subtotal mínimo. Código, tipo e valor não mudam depois do
+  cadastro: para outro desconto, cadastra-se outro cupom. O campo "Cupom" da reserva aceita o código em
+  maiúsculas ou minúsculas.
+- **Vigência:** semiaberta `[início, fim)`, gravada em UTC e avaliada no instante da criação da reserva
+  (`priced_at`), nunca no período da locação. Sem início, o cupom vale imediatamente; sem fim, não tem prazo.
+  As telas e a CLI exibem os instantes no fuso da organização: para valer o dia 30/11 inteiro, o fim é
+  01/12 00:00.
+- **Subtotal mínimo:** comparado com o subtotal da reserva, depois das faixas de quantidade e das condições
+  negociadas e antes do cupom.
+- **Uso por reserva:** cada reserva criada com o cupom grava uma linha imutável no livro de usos
+  (`coupon_redemptions`, no máximo uma por reserva) com o subtotal e o desconto. O uso é **ativo** enquanto
+  a reserva está solicitada, confirmada, em andamento ou concluída, ou em bloqueio temporário ainda válido.
+  Cancelamento e expiração do bloqueio **liberam** o uso sem nenhuma gravação: o estado do uso é derivado
+  da situação da reserva, e o uso de um bloqueio vencido aparece liberado no mesmo instante, mesmo antes da
+  varredura.
+- **Limite:** `max_redemptions` limita os usos ativos. A verificação acontece na criação da reserva, com o
+  cupom travado, e é repetida por um gatilho do banco. Para o limite, o bloqueio vencido continua contando
+  por uma **carência de 5 minutos** depois de `hold_expires_at`: uma confirmação que leu o relógio antes do
+  vencimento pode gravar a reserva como confirmada depois dele, e até o COMMIT quem conta ainda vê o
+  bloqueio. Nesse intervalo o cupom pode aparecer com uso disponível e ainda responder "cupom esgotado". O
+  máximo não pode ser reduzido abaixo dos usos ativos; na edição, a comparação usa a mesma carência, e a
+  mensagem avisa quando um bloqueio vencido há menos de 5 minutos entrou na contagem.
+- **Base legada:** `coupons.redemptions` guarda os usos registrados até a versão 1.0.0, quando o contador só
+  aumentava. A coluna ficou congelada: usos ativos = contador legado + usos ativos do livro.
+- **Situação** (nesta ordem de precedência): desativado, expirado, agendado, esgotado, vigente. A recusa na
+  reserva informa o motivo: "cupom inexistente", "cupom desativado", "cupom expirado", "cupom ainda não está
+  vigente", "cupom esgotado" ou "subtotal abaixo do mínimo do cupom (R$ 300,00)".
+- **Onde não se aplica:** orçamentos e solicitações do portal não aceitam cupom. A reserva convertida de um
+  orçamento copia os preços do orçamento, sem cupom.
+- Cupom usado (inclusive antes da versão 1.1.0) não é excluído; pode ser desativado.
+
+## Condições negociadas por cliente
+
+- Desconto percentual (0,01% a 90%) para um cliente, **geral** (todos os produtos) ou de **um produto**, com
+  vigência `[início, fim)` avaliada no instante da precificação.
+- Em cada linha vale o **maior** desconto entre a condição vigente do produto e a geral; em empate, a do
+  produto. A condição é aplicada depois da faixa de quantidade e fica identificada no snapshot da linha.
+- **Sem sobreposição:** o mesmo cliente não tem duas condições do mesmo escopo (geral, ou o mesmo produto)
+  com vigências que se cruzam. A regra é verificada na aplicação e garantida por uma exclusion constraint.
+- **Imutável:** depois de criada, a condição só recebe o encerramento, uma única vez, com motivo. O
+  encerramento é imediato ou **agendado** para um instante futuro, anterior ao fim da vigência. Para trocar
+  a condição sem intervalo, agenda-se o encerramento da atual para o instante em que a próxima começa.
+- **Início e encerramento informados:** vazio vale o instante atual; um instante até 24 horas no passado é
+  ajustado para o instante atual (o campo de data e hora dos formulários não tem segundos); mais de 24 horas
+  no passado é recusado.
+- Encerrar ou cadastrar condições não altera reservas, orçamentos e contratos já registrados. A extensão de
+  uma reserva usa a condição gravada no snapshot da linha.
+
+## Tarifas adicionais
+
+- **Catálogo** da organização: código único (2 a 30 caracteres), nome, descrição e valor padrão. O código não
+  muda. Alterar o valor padrão ou desativar a tarifa não muda documentos já registrados.
+- **Aplicação:** reservas e orçamentos recebem até 10 tarifas; a mesma tarifa do catálogo não se repete no
+  documento. Sem valor informado, vale o valor padrão vigente.
+- **Ajustes** exigem a permissão `fees.override` (gerente, administrador ou proprietário): valor acima do
+  padrão, valor abaixo do padrão e **tarifa avulsa** (descrição e valor, fora do catálogo). A redução é um
+  desconto: fica limitada ao desconto manual máximo do papel sobre o valor padrão (gerente, 20%), e
+  credenciais de integração não reduzem tarifas.
+- **Continuidade na nova versão de orçamento:** a entrada idêntica a uma da versão anterior (mesma tarifa e
+  mesmo valor, ou avulsa com a mesma descrição e o mesmo valor) já foi autorizada e é mantida sem nova
+  autorização, mesmo que a tarifa tenha sido desativada. Cada entrada anterior autoriza uma única entrada da
+  nova versão: a cópia repetida de uma avulsa mantida é um ajuste novo. Uma tarifa do catálogo escolhida de
+  novo sem valor usa o valor padrão vigente.
+- Tarifas inativas não são aceitas em documentos novos. Os ajustes de tarifa são registrados na auditoria
+  da reserva ou do orçamento e não fazem parte do snapshot de preços.
+- Pela API, as tarifas são informadas somente na criação de reserva (não há API de orçamentos).
 
 ## Snapshots e alterações
 
 - Cada item de reserva guarda o snapshot completo (tabela, unidades, descrição, descontos e totais); a
-  reserva guarda o resumo. Alterações no catálogo não alteram reservas, orçamentos aprovados nem contratos.
+  reserva guarda o resumo. Alterações no catálogo, nos cupons, nas condições negociadas e nas tarifas não
+  alteram reservas, orçamentos nem contratos já registrados. No banco, a coluna `pricing` de `reservations` e
+  de `reservation_items` não pode ser alterada (gatilho).
+- **Condições comerciais no snapshot:**
+
+  | Onde | Chave | Conteúdo |
+  |---|---|---|
+  | Linha (`reservation_items.pricing`, `quote_versions.items[]`) | `negotiated_discount_bps`, `negotiated_discount_cents` | Desconto negociado aplicado à linha |
+  | Linha | `negotiated_agreement_id` | Condição negociada aplicada (nulo sem condição) |
+  | Resumo (`reservations.pricing`, `quote_versions.pricing`) | `coupon_code`, `coupon_discount_cents` | Código e desconto do cupom |
+  | Resumo | `coupon` | Cupom como estava na precificação: `id`, `code`, `kind`, `value`, `description`, `valid_from`, `valid_until` (nulo sem cupom) |
+  | Resumo | `agreements` | Condições aplicadas às linhas: `id`, `scope` (`general` ou `product`), `product_id`, `discount_bps`, `valid_from`, `valid_until`, `ended_at` |
+  | Resumo | `fees`, `fees_cents` | Tarifas: `fee_id`, `code`, `description` (nome da tarifa ou texto da avulsa), `amount_cents`, `default_amount_cents` (nulo na avulsa), `source` (`catalog` ou `custom`); e a soma |
+
+  Snapshots gravados antes do cadastro de condições comerciais não têm `coupon`, `agreements` nem
+  `negotiated_agreement_id`; telas, PDF, termos de contrato e API tratam essas chaves como opcionais. O
+  contrato copia cupom, condições e tarifas para os termos, e o PDF os descreve na seção "Valores".
 - **Extensão:** o valor original é preservado; a diferença entre o preço do novo período (calculado com a
   tabela do snapshot) e o valor original é gravada como ajuste (`reservation_adjustments`, tipo `extension`)
   e, em contratos, como aditivo.

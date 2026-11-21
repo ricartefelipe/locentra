@@ -198,18 +198,61 @@ module Locentra
         end
       end
 
-      # Cupom de desconto aplicado sobre o subtotal.
-      Coupon = Data.define(:code, :kind, :value, :valid_from, :valid_until, :max_redemptions, :redemptions, :min_subtotal_cents, :active) do
-        def applicable?(subtotal, now)
-          active && (valid_from.nil? || now >= valid_from) && (valid_until.nil? || now < valid_until) &&
-            (max_redemptions.nil? || redemptions < max_redemptions) && subtotal.cents >= min_subtotal_cents.to_i
+      COUPON_REJECTIONS = { "inactive" => "cupom desativado", "expired" => "cupom expirado", "scheduled" => "cupom ainda não está vigente",
+                            "exhausted" => "cupom esgotado" }.freeze
+
+      # Cupom de desconto aplicado sobre o subtotal. `redemptions` são os usos ativos (contador legado
+      # da 1.0.0 mais os usos ativos do livro), calculados pelo repositório; `legacy_redemptions` é o
+      # contador congelado e `total_redemptions`, todos os usos já registrados (legado e livro).
+      Coupon = Data.define(:code, :kind, :value, :valid_from, :valid_until, :max_redemptions, :redemptions, :min_subtotal_cents, :active,
+                           :id, :organization_id, :description, :created_by, :created_at, :updated_at, :deactivated_at,
+                           :lock_version, :total_redemptions, :legacy_redemptions) do
+        def initialize(id: nil, organization_id: nil, description: nil, created_by: nil, created_at: nil, updated_at: nil,
+                       deactivated_at: nil, lock_version: 1, total_redemptions: nil, legacy_redemptions: 0, **)
+          super
+        end
+
+        # Precedência: desativado > expirado > agendado > esgotado > vigente. Vigência semiaberta [início, fim).
+        def status(now)
+          if !active then "inactive"
+          elsif valid_until && valid_until <= now then "expired"
+          elsif valid_from && valid_from > now then "scheduled"
+          elsif max_redemptions && redemptions >= max_redemptions then "exhausted"
+          else "active"
+          end
+        end
+
+        def rejection(subtotal, now)
+          reason = COUPON_REJECTIONS[status(now)]
+          return reason if reason
+          return nil if subtotal.cents >= min_subtotal_cents.to_i
+
+          "subtotal abaixo do mínimo do cupom (#{Money.new(min_subtotal_cents.to_i).format_brl})"
+        end
+
+        def applicable?(subtotal, now) = rejection(subtotal, now).nil?
+
+        def remaining = max_redemptions && [max_redemptions - redemptions, 0].max
+
+        # Texto único de usos para web, CLI e testes: "3 de 100" ou "3 (sem limite)".
+        def usage_text
+          used = Pricing.count_label(redemptions)
+          max_redemptions ? "#{used} de #{Pricing.count_label(max_redemptions)}" : "#{used} (sem limite)"
         end
 
         def discount(subtotal)
           amount = kind == "percent" ? subtotal.percent(value) : Money.new(value)
           amount.min(subtotal)
         end
+
+        def to_snapshot
+          { "id" => id, "code" => code, "kind" => kind, "value" => value, "description" => description,
+            "valid_from" => valid_from&.getutc&.iso8601, "valid_until" => valid_until&.getutc&.iso8601 }
+        end
       end
+
+      # Inteiro com separador de milhar: 1000000 → "1.000.000".
+      def count_label(number) = number.to_s.reverse.scan(/\d{1,3}/).join(".").reverse
 
       # Composição do total: subtotal das linhas, cupom, desconto manual autorizado e tarifas.
       module Totals
@@ -224,7 +267,8 @@ module Locentra
           subtotal = Money.new(lines.sum { |l| l.fetch("total_cents") })
           coupon_discount = Money.zero
           if coupon
-            raise ValidationError.field("cupom", "cupom inválido ou expirado") unless coupon.applicable?(subtotal, now)
+            reason = coupon.rejection(subtotal, now)
+            raise ValidationError.field("cupom", reason) if reason
 
             coupon_discount = coupon.discount(subtotal)
           end
