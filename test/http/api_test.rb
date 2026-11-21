@@ -196,7 +196,9 @@ class ApiTest < HttpTest
 
   # Schemas de resposta da API v1 ampliada: fechados (sem chaves extras) e com todas as propriedades
   # obrigatórias, para que o validador acuse qualquer divergência das respostas reais.
-  CLOSED_SCHEMAS = %w[QuoteSummary QuotePage Quote QuoteVersion QuoteVersionItem QuoteHold QuoteReservationLink QuoteConversion].freeze
+  CLOSED_SCHEMAS = %w[QuoteSummary QuotePage Quote QuoteVersion QuoteVersionItem QuoteHold QuoteReservationLink QuoteConversion
+                      ContractSummary ContractPage Contract ContractDocument ContractAmendment ContractCancellationPreview
+                      ContractAmendmentResult ContractCancellationResult].freeze
 
   def test_openapi_response_schemas_are_closed
     schemas = openapi.dig("components", "schemas")

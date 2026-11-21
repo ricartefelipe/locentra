@@ -14,6 +14,7 @@ require_relative "web/portal_controllers"
 require_relative "api/v1"
 require_relative "api/v1_finance"
 require_relative "api/v1_quotes"
+require_relative "api/v1_contracts"
 require_relative "routes_commercial_terms"
 
 module Locentra
@@ -60,6 +61,7 @@ module Locentra
           draw_api(r, API::V1Controller.new(deps))
           CommercialTermsRoutes.draw_api(r, deps)
           draw_api_quotes(r, API::QuotesV1Controller.new(deps))
+          draw_api_contracts(r, API::ContractsV1Controller.new(deps))
         end
 
         def draw_staff(router, deps, web)
@@ -319,6 +321,17 @@ module Locentra
           r.post "/api/v1/quotes/:id/approve", api, :approve_quote, auth: :api
           r.post "/api/v1/quotes/:id/reject", api, :reject_quote, auth: :api
           r.post "/api/v1/quotes/:id/convert", api, :convert_quote, auth: :api
+        end
+
+        # Contratos na API v1: emissão, PDF de cada versão, aditivo e cancelamento.
+        def draw_api_contracts(router, api)
+          r = router
+          r.get "/api/v1/contracts", api, :contracts, auth: :api
+          r.post "/api/v1/contracts", api, :create_contract, auth: :api
+          r.get "/api/v1/contracts/:id", api, :contract, auth: :api
+          r.get "/api/v1/contracts/:id/documents/:version", api, :contract_document, auth: :api
+          r.post "/api/v1/contracts/:id/amendments", api, :amend_contract, auth: :api
+          r.post "/api/v1/contracts/:id/cancel", api, :cancel_contract, auth: :api
         end
 
         def draw_api(router, api)

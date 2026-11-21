@@ -479,6 +479,161 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /contracts:
+    get:
+      summary: Lista contratos
+      description: Escopo `contracts.read`. Filtros por situação, cliente e busca no código do contrato, da reserva ou no nome do cliente (`q`).
+      operationId: listContracts
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [issued, active, closed, cancelled] } }
+        - { name: customer_id, in: query, schema: { type: string, format: uuid } }
+        - { name: q, in: query, schema: { type: string, maxLength: 40 } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de contratos
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContractPage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Emite o contrato da reserva confirmada
+      description: >-
+        Escopo `contracts.write`. Congela os termos (cliente, itens, preços, política de cancelamento e fuso da
+        reserva) e gera a versão 1 do documento em PDF. Responde `201` quando emite e `200` quando a reserva já tinha
+        contrato (o mesmo), com `Location` do contrato nos dois casos. Reserva que não está confirmada nem em andamento
+        responde `409` `reservation_not_confirmed`.
+      operationId: issueContract
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContractIssueInput" }
+      responses:
+        "200":
+          description: Contrato já emitido para a reserva
+          headers:
+            Location: { description: Endereço do contrato, schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contract" }
+        "201":
+          description: Contrato emitido
+          headers:
+            Location: { description: Endereço do contrato, schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contract" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /contracts/{id}:
+    get:
+      summary: Detalha contrato com documentos, aditivos e prévia de cancelamento
+      description: >-
+        Escopo `contracts.read`. `cancellation_preview` traz a multa no instante atual enquanto o contrato pode ser
+        cancelado (antes da retirada); depois, é nula.
+      operationId: getContract
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: Contrato
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Contract" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /contracts/{id}/documents/{version}:
+    get:
+      summary: PDF de uma versão do documento do contrato
+      description: >-
+        Escopo `contracts.read`. O arquivo vem como anexo (`Content-Disposition: attachment`) com o nome
+        `contrato-<código>-v<versão>.pdf`, sem cache e com `Repr-Digest` (RFC 9530) com o SHA-256 gravado na geração,
+        para conferência de integridade. Versão inexistente ou conteúdo ausente no armazenamento respondem `404`;
+        versão que não é inteiro positivo, `422` em `versao`.
+      operationId: getContractDocument
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Documento em PDF
+          headers:
+            Content-Disposition: { description: "attachment; filename=\"contrato-C-000001-v1.pdf\"; filename*=UTF-8''...", schema: { type: string } }
+            Cache-Control: { description: "private, no-store", schema: { type: string } }
+            Repr-Digest: { description: "sha-256=:<SHA-256 em base64>:", schema: { type: string } }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /contracts/{id}/amendments:
+    post:
+      summary: Registra aditivo de extensão do prazo
+      description: >-
+        Escopos `contracts.write` e `reservations.write`. Estende a reserva na mesma transação (a diferença de valor é
+        gravada como ajuste), registra o aditivo e gera nova versão do documento. Extensão que invade outra reserva
+        responde `409` `unavailable` com `shortages`, sem aditivo. Contrato encerrado ou cancelado responde `409`
+        `invalid_transition`.
+      operationId: amendContract
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContractAmendmentInput" }
+      responses:
+        "201":
+          description: Aditivo registrado
+          headers:
+            Location: { description: Endereço do contrato, schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContractAmendmentResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /contracts/{id}/cancel:
+    post:
+      summary: Cancela o contrato com a política de cancelamento congelada
+      description: >-
+        Escopos `contracts.write` e `reservations.cancel`. A multa é a da faixa da política do contrato aplicada ao
+        total contratado (com os aditivos), gravada como ajuste da reserva quando positiva; a reserva é cancelada na
+        mesma transação. Depois da retirada, `409` `contract_not_cancellable`.
+      operationId: cancelContract
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Contrato cancelado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContractCancellationResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /payments:
     post:
       summary: Registra pagamento recebido fora do provedor (manual), confirmado na hora
@@ -1499,3 +1654,122 @@ components:
       properties:
         quote: { $ref: "#/components/schemas/Quote" }
         reservation: { $ref: "#/components/schemas/Reservation" }
+    ContractSummary:
+      type: object
+      additionalProperties: false
+      required: [id, code, status, reservation_id, reservation_code, customer_id, quote_id, current_document_version, issued_at, activated_at,
+                 closed_at, cancelled_at]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: C-000001 }
+        status: { type: string, enum: [issued, active, closed, cancelled] }
+        reservation_id: { type: string, format: uuid }
+        reservation_code: { type: string }
+        customer_id: { type: string, format: uuid }
+        quote_id: { type: [string, "null"], format: uuid }
+        current_document_version: { type: integer, minimum: 1 }
+        issued_at: { type: string, format: date-time }
+        activated_at: { type: [string, "null"], format: date-time, description: Primeiro aceite registrado }
+        closed_at: { type: [string, "null"], format: date-time }
+        cancelled_at: { type: [string, "null"], format: date-time }
+    ContractPage:
+      type: object
+      additionalProperties: false
+      required: [data, pagination]
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/ContractSummary" } }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    Contract:
+      type: object
+      additionalProperties: false
+      required: [id, code, status, reservation_id, reservation_code, customer_id, quote_id, current_document_version, issued_at, activated_at,
+                 closed_at, cancelled_at, cancellation_reason, cancellation_fee, contracted_total, current_total, time_zone, cancellation_policy,
+                 documents, amendments, cancellation_preview]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: C-000001 }
+        status: { type: string, enum: [issued, active, closed, cancelled] }
+        reservation_id: { type: string, format: uuid }
+        reservation_code: { type: string }
+        customer_id: { type: string, format: uuid }
+        quote_id: { type: [string, "null"], format: uuid }
+        current_document_version: { type: integer, minimum: 1 }
+        issued_at: { type: string, format: date-time }
+        activated_at: { type: [string, "null"], format: date-time }
+        closed_at: { type: [string, "null"], format: date-time }
+        cancelled_at: { type: [string, "null"], format: date-time }
+        cancellation_reason: { type: [string, "null"] }
+        cancellation_fee:
+          description: Multa registrada no cancelamento (nula antes dele)
+          oneOf: [{ $ref: "#/components/schemas/Money" }, { type: "null" }]
+        contracted_total: { $ref: "#/components/schemas/Money" }
+        current_total: { $ref: "#/components/schemas/Money" }
+        time_zone: { type: [string, "null"], example: America/Sao_Paulo, description: Fuso do contrato (o da precificação da reserva) }
+        cancellation_policy: { $ref: "#/components/schemas/CancellationPolicy" }
+        documents: { type: array, description: "Versões do documento, da mais recente para a primeira", items: { $ref: "#/components/schemas/ContractDocument" } }
+        amendments: { type: array, items: { $ref: "#/components/schemas/ContractAmendment" } }
+        cancellation_preview:
+          description: Multa no instante atual enquanto o contrato pode ser cancelado (nula depois da retirada ou do encerramento)
+          oneOf: [{ $ref: "#/components/schemas/ContractCancellationPreview" }, { type: "null" }]
+    ContractDocument:
+      type: object
+      additionalProperties: false
+      required: [version, reason, sha256, byte_size, filename, generated_at, accepted_at, accepted_by_name, accepted_via, download_path]
+      properties:
+        version: { type: integer, minimum: 1 }
+        reason: { type: string, enum: [issue, amendment] }
+        sha256: { type: string, description: SHA-256 do PDF em hexadecimal }
+        byte_size: { type: integer }
+        filename: { type: string, example: contrato-C-000001-v1.pdf }
+        generated_at: { type: string, format: date-time }
+        accepted_at: { type: [string, "null"], format: date-time }
+        accepted_by_name: { type: [string, "null"] }
+        accepted_via: { type: [string, "null"], enum: [staff, portal, null] }
+        download_path: { type: string, example: "/api/v1/contracts/01a1fe5d-b66d-716b-a416-525ff7d3ba04/documents/1" }
+    ContractAmendment:
+      type: object
+      additionalProperties: false
+      required: [number, kind, description, changes, amount_delta, document_version, created_at]
+      properties:
+        number: { type: integer, minimum: 1 }
+        kind: { type: string, enum: [extension] }
+        description: { type: string }
+        changes: { type: object, description: "Fim anterior e novo fim (`from_end`, `to_end`, em ISO 8601 e no horário local)" }
+        amount_delta: { $ref: "#/components/schemas/Money" }
+        document_version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+    ContractCancellationPreview:
+      type: object
+      additionalProperties: false
+      required: [fee_bps, fee, base, hours_before]
+      properties:
+        fee_bps: { type: integer, minimum: 0, maximum: 10000 }
+        fee: { $ref: "#/components/schemas/Money" }
+        base: { $ref: "#/components/schemas/Money" }
+        hours_before: { type: integer, description: Horas inteiras até o início (negativo depois dele) }
+    ContractAmendmentResult:
+      type: object
+      additionalProperties: false
+      required: [contract, amendment]
+      properties:
+        contract: { $ref: "#/components/schemas/Contract" }
+        amendment: { $ref: "#/components/schemas/ContractAmendment" }
+    ContractCancellationResult:
+      type: object
+      additionalProperties: false
+      required: [contract, cancellation]
+      properties:
+        contract: { $ref: "#/components/schemas/Contract" }
+        cancellation: { $ref: "#/components/schemas/ContractCancellationPreview" }
+    ContractIssueInput:
+      type: object
+      required: [reservation_id]
+      properties:
+        reservation_id: { type: string, format: uuid }
+        conditions: { type: [string, "null"], maxLength: 5000, description: "Condições específicas; sem o campo, valem as da versão aprovada do orçamento" }
+    ContractAmendmentInput:
+      type: object
+      required: [ends_at]
+      properties:
+        ends_at: { type: string, format: date-time, description: Novo fim da reserva }
+        description: { type: [string, "null"], maxLength: 1000 }
