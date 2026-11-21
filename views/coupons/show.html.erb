@@ -2,7 +2,7 @@
 <% path = "/cupons/#{coupon.id}" %>
 <% current = { "descricao" => coupon.description, "valido_de" => local_input(coupon.valid_from), "valido_ate" => local_input(coupon.valid_until),
                "maximo_usos" => coupon.max_redemptions, "versao" => coupon.lock_version,
-               "subtotal_minimo" => coupon.min_subtotal_cents.to_i.positive? ? Locentra::Domain::Money.new(coupon.min_subtotal_cents).to_decimal_string : "" } %>
+               "subtotal_minimo" => coupon.min_subtotal_cents.to_i.positive? ? money_input(coupon.min_subtotal_cents) : "" } %>
 <% editing = !@values.nil? %>
 <header class="page-header">
   <h1>Cupom <%= coupon.code %> <%= status_badge(@data[:status], label(:coupon_status, @data[:status])) %></h1>

@@ -121,6 +121,63 @@ module Locentra
             end
           end
         end
+
+        # Catálogo de tarifas adicionais: lista, cadastro, detalhe com histórico, edição com controle
+        # otimista, desativação e reativação.
+        class FeesController < Controller
+          include CommercialTermsForms
+
+          def index(ctx)
+            filters = %w[busca situacao ordem].to_h { |name| [name, ctx.query(name).to_s] }
+            page = uc(:list_fees).call(ctx.actor, status: blank(filters["situacao"]), search: filters["busca"],
+                                                  sort: blank(filters["ordem"]) || "name", limit: ctx.query("limite"), offset: ctx.query("inicio"))
+            render(ctx, "fees/index", title: "Tarifas adicionais", page: page, filters: filters)
+          end
+
+          def new(ctx, errors: {}, status: 200, values: {})
+            render(ctx, "fees/new", title: "Nova tarifa", status: status, values: values, errors: errors)
+          end
+
+          def create(ctx)
+            f = ctx.form
+            fee = uc(:create_fee).call(ctx.actor, { code: f["codigo"], name: f["nome"], description: f["descricao"],
+                                                    default_amount: default_amount(f["valor_padrao"]) })
+            redirect(ctx, "/tarifas/#{fee.id}", notice: "Tarifa #{fee.code} cadastrada.")
+          rescue Domain::ValidationError => e
+            new(ctx, errors: e.errors, status: 422, values: ctx.form)
+          rescue Domain::Conflict => e
+            new(ctx, errors: conflict_errors(e), status: 409, values: ctx.form)
+          end
+
+          def show(ctx, errors: {}, status: 200, values: nil)
+            data = uc(:get_fee).call(ctx.actor, ctx.param(:id))
+            render(ctx, "fees/show", title: "Tarifa #{data[:fee].code}", status: status, data: data, errors: errors, values: values)
+          end
+
+          def update(ctx)
+            f = ctx.form
+            attrs = { name: f["nome"], description: f["descricao"], default_amount: default_amount(f["valor_padrao"]) }
+            result = uc(:update_fee).call(ctx.actor, ctx.param(:id), attrs, lock_version: f["versao"])
+            redirect(ctx, "/tarifas/#{result.record.id}", notice: result.changed ? "Tarifa atualizada." : "Nenhuma alteração a salvar.")
+          rescue Domain::ValidationError => e
+            show(ctx, errors: e.errors, status: 422, values: ctx.form)
+          rescue Domain::Conflict => e
+            show(ctx, errors: { "base" => [e.message] }, status: 409, values: stale?(e) ? nil : ctx.form)
+          end
+
+          def deactivate(ctx) = toggle(ctx, false, "Tarifa desativada. Ela deixa de aparecer nos formulários; documentos já registrados não mudam.")
+          def reactivate(ctx) = toggle(ctx, true, "Tarifa reativada.")
+
+          private
+
+          def toggle(ctx, active, notice)
+            result = uc(:set_fee_active).call(ctx.actor, ctx.param(:id), active: active)
+            redirect(ctx, "/tarifas/#{result.record.id}", notice: result.changed ? notice : "Nenhuma alteração a salvar.")
+          end
+
+          # Valor em branco fica para a validação do domínio ("valor positivo").
+          def default_amount(value) = blank(value) && money!(blank(value), "valor_padrao")
+        end
       end
     end
   end

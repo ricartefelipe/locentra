@@ -111,6 +111,12 @@ module Locentra
           Domain::Money.new(cents).format_brl
         end
 
+        # Valor de campo monetário: decimal com vírgula, sem símbolo nem separador de milhar ("1234,50").
+        def money_input(value)
+          cents = value.is_a?(Domain::Money) ? value.cents : value.to_i
+          Domain::Money.new(cents).to_decimal_string.tr(".", ",")
+        end
+
         def time_zone = request.time_zone
 
         def datetime(value, pattern = "%d/%m/%Y %H:%M")
@@ -246,6 +252,7 @@ module Locentra
           ["Produtos e kits", "/produtos", "catalog.read"],
           ["Ativos", "/ativos", "catalog.read"],
           ["Cupons", "/cupons", "coupons.read"],
+          ["Tarifas adicionais", "/tarifas", "fees.read"],
           ["Retiradas e devoluções", "/operacao", "fulfillment.write"],
           ["Manutenção", "/manutencao", "maintenance.write"],
           ["Usuários e permissões", "/usuarios", "members.read"],

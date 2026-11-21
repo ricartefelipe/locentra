@@ -5,8 +5,8 @@ require_relative "web/commercial_terms_controllers"
 module Locentra
   module Interfaces
     module HTTP
-      # Rotas das condições comerciais (cupons). As rotas literais vêm antes das parametrizadas
-      # ("/cupons/novo" antes de "/cupons/:id").
+      # Rotas das condições comerciais (cupons e tarifas adicionais). As rotas literais vêm antes das
+      # parametrizadas ("/cupons/novo" antes de "/cupons/:id").
       module CommercialTermsRoutes
         module_function
 
@@ -22,6 +22,15 @@ module Locentra
           r.post "/cupons/:id/desativar", coupons, :deactivate
           r.post "/cupons/:id/reativar", coupons, :reactivate
           r.post "/cupons/:id/excluir", coupons, :destroy
+
+          fees = Web::FeesController.new(deps)
+          r.get "/tarifas", fees, :index
+          r.get "/tarifas/nova", fees, :new
+          r.post "/tarifas", fees, :create
+          r.get "/tarifas/:id", fees, :show
+          r.post "/tarifas/:id", fees, :update
+          r.post "/tarifas/:id/desativar", fees, :deactivate
+          r.post "/tarifas/:id/reativar", fees, :reactivate
         end
       end
     end
