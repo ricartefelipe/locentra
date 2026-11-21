@@ -78,9 +78,14 @@ R$ 895,20.
   (`coupon_redemptions`, no máximo uma por reserva) com o subtotal e o desconto. O uso é **ativo** enquanto
   a reserva está solicitada, confirmada, em andamento ou concluída, ou em bloqueio temporário ainda válido.
   Cancelamento e expiração do bloqueio **liberam** o uso sem nenhuma gravação: o estado do uso é derivado
-  da situação da reserva, e um bloqueio vencido deixa de contar no mesmo instante, mesmo antes da varredura.
+  da situação da reserva, e o uso de um bloqueio vencido aparece liberado no mesmo instante, mesmo antes da
+  varredura.
 - **Limite:** `max_redemptions` limita os usos ativos. A verificação acontece na criação da reserva, com o
-  cupom travado, e é repetida por um gatilho do banco. O máximo não pode ser reduzido abaixo dos usos ativos.
+  cupom travado, e é repetida por um gatilho do banco. Para o limite, o bloqueio vencido continua contando
+  por uma **carência de 5 minutos** depois de `hold_expires_at`: uma confirmação que leu o relógio antes do
+  vencimento pode gravar a reserva como confirmada depois dele, e até o COMMIT quem conta ainda vê o
+  bloqueio. Nesse intervalo o cupom pode aparecer com uso disponível e ainda responder "cupom esgotado". O
+  máximo não pode ser reduzido abaixo dos usos ativos.
 - **Base legada:** `coupons.redemptions` guarda os usos registrados até a versão 1.0.0, quando o contador só
   aumentava. A coluna ficou congelada: usos ativos = contador legado + usos ativos do livro.
 - **Situação** (nesta ordem de precedência): desativado, expirado, agendado, esgotado, vigente. A recusa na

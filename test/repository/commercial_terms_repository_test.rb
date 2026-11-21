@@ -178,16 +178,18 @@ class CommercialTermsRepositoryTest < DatabaseTest
     assert_equal "4 (sem limite)", usage("LIVRE")
   end
 
-  # O instante de referência do gatilho é o do próprio uso (relógio da aplicação): um bloqueio temporário
-  # vencido e ainda não varrido deixa de contar.
-  def test_limit_trigger_ignores_expired_holds_at_the_redemption_instant
+  # O instante de referência do gatilho é o do próprio uso (relógio da aplicação), recuado pela carência
+  # do limite: um bloqueio temporário vencido e ainda não varrido deixa de contar depois da carência.
+  def test_limit_trigger_ignores_expired_holds_after_the_grace_at_the_redemption_instant
     coupon = create_coupon("BLOQUEIO", max_redemptions: 1)
     hold = book(mode: "hold", hold_minutes: 10)
     redeem(coupon, hold)
     other = book(mode: "request", day: 12)
+    grace = Pricing::Redemptions::LIMIT_GRACE
 
     assert_raises(D::ValidationError) { redeem(coupon, other, at: @clock.now + 599) }
-    redeem(coupon, other, at: @clock.now + 600)
+    assert_raises(D::ValidationError) { redeem(coupon, other, at: @clock.now + 600 + grace - 1) }
+    redeem(coupon, other, at: @clock.now + 600 + grace)
 
     assert_equal "held", status_of(hold), "o bloqueio continua sem varredura"
     assert_equal(2, tenant_tx { |tx| @pricing.active_redemptions(tx, coupon.id, @clock.now) })

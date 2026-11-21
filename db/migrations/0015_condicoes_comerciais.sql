@@ -7,7 +7,8 @@
 -- * Cada uso de cupom é uma linha imutável de coupon_redemptions (no máximo uma por reserva). O uso é
 --   ativo enquanto a reserva está solicitada, confirmada, em andamento ou concluída, ou em bloqueio
 --   temporário ainda válido; cancelamento e expiração liberam o uso sem escrita. O gatilho de inserção
---   recusa o uso além de max_redemptions sob a trava do cupom. Cupom com uso registrado não é excluído.
+--   recusa o uso além de max_redemptions sob a trava do cupom (bloqueio vencido conta durante a carência).
+--   Cupom com uso registrado não é excluído.
 -- * coupons.redemptions é o contador da versão 1.0.0, congelado: a partir desta migration os usos novos
 --   são linhas de coupon_redemptions (usos ativos = contador legado + usos ativos do livro).
 -- * Condições negociadas não mudam depois de criadas: somente o encerramento (imediato ou agendado) é
@@ -60,7 +61,9 @@ CREATE INDEX coupon_redemptions_coupon_idx ON coupon_redemptions (organization_i
 REVOKE UPDATE, DELETE ON coupon_redemptions FROM locentra_app, locentra_worker;
 
 -- Limite de usos verificado no banco sob a trava do cupom. O instante de referência é o do próprio uso
--- (relógio da aplicação), para que bloqueios temporários vencidos não contem.
+-- (relógio da aplicação), recuado pela carência de 300 s (Domain::Pricing::Redemptions::LIMIT_GRACE): um
+-- bloqueio temporário vencido há menos que isso ainda pode estar sendo confirmado por uma transação que
+-- leu o relógio antes do vencimento e continua contando para o limite; depois da carência, não conta.
 CREATE FUNCTION coupon_redemptions_enforce_limit() RETURNS trigger
   LANGUAGE plpgsql
   AS $$
@@ -76,7 +79,7 @@ BEGIN
       JOIN reservations v ON v.organization_id = r.organization_id AND v.id = r.reservation_id
      WHERE r.organization_id = NEW.organization_id AND r.coupon_id = NEW.coupon_id
        AND (v.status IN ('requested', 'confirmed', 'in_progress', 'completed')
-            OR (v.status = 'held' AND v.hold_expires_at > NEW.redeemed_at));
+            OR (v.status = 'held' AND v.hold_expires_at > NEW.redeemed_at - interval '300 seconds'));
     IF target.redemptions + active_count >= target.max_redemptions THEN
       RAISE EXCEPTION 'limite de usos do cupom atingido' USING ERRCODE = 'check_violation';
     END IF;

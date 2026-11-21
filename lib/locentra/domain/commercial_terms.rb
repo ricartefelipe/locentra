@@ -49,6 +49,13 @@ module Locentra
       # Estado de um uso de cupom, derivado da situação da reserva (mesma regra da SQL e do gatilho do
       # banco): o uso libera-se sozinho no cancelamento e na expiração, sem escrita.
       module Redemptions
+        # Carência do limite de usos, em segundos. Uma confirmação que leu o relógio antes do vencimento
+        # do bloqueio pode gravar a reserva como confirmada depois dele; até o COMMIT, quem conta ainda vê
+        # o bloqueio vencido. Para o limite, o bloqueio continua contando durante a carência, maior que a
+        # duração de uma transação (instruções até 15 s, ociosidade em transação até 60 s) e que a
+        # diferença de relógio entre instâncias. A situação exibida do uso não usa a carência.
+        LIMIT_GRACE = 300
+
         module_function
 
         def state(reservation_status, hold_expires_at, now)
@@ -60,6 +67,13 @@ module Locentra
         end
 
         def active?(reservation_status, hold_expires_at, now) = state(reservation_status, hold_expires_at, now) == "active"
+
+        # Instante de referência da contagem para o limite: o bloqueio vencido há menos que a carência conta.
+        def limit_reference(now) = now - LIMIT_GRACE
+
+        def counts_toward_limit?(reservation_status, hold_expires_at, now)
+          active?(reservation_status, hold_expires_at, limit_reference(now))
+        end
       end
 
       # Validações compartilhadas pelos cadastros: erros acumulados por campo, instantes em UTC e

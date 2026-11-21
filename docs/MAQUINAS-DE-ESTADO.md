@@ -96,7 +96,9 @@ não entra em documentos novos; continua nas entradas mantidas de uma nova vers�
 | `released_expired` (liberado: bloqueio temporário expirado) | expirada, ou em bloqueio temporário já vencido e ainda não varrido |
 
 A liberação não grava nada no cupom nem no livro de usos. Como um bloqueio vencido nunca volta a valer e
-reservas canceladas ou expiradas são finais, um uso liberado não volta a ativo.
+reservas canceladas ou expiradas são finais, um uso liberado não volta a ativo. Para o limite de usos, o
+bloqueio vencido ainda conta durante a carência de 5 minutos (`Redemptions.counts_toward_limit?`), porque
+uma confirmação iniciada antes do vencimento pode estar em andamento.
 
 ## Operação (retirada, devolução, inspeção, manutenção, transferência, alertas)
 

@@ -20,7 +20,8 @@ module Locentra
         COUPON_COLUMNS = "id, organization_id, code, kind, value, valid_from, valid_until, max_redemptions, redemptions, min_subtotal_cents, " \
                          "active, description, created_by, created_at, updated_at, deactivated_at, lock_version"
         # Fragmento único de "uso ativo" (`v` é a reserva do uso; $n é o instante de referência). Mesma
-        # regra de Domain::Pricing::Redemptions.active? e do gatilho coupon_redemptions_enforce_limit.
+        # regra de Domain::Pricing::Redemptions.active? e do gatilho coupon_redemptions_enforce_limit, que
+        # conta para o limite com o instante de referência recuado pela carência (limit_reference).
         ACTIVE_USE_SQL = "(v.status IN ('requested', 'confirmed', 'in_progress', 'completed') " \
                          "OR (v.status = 'held' AND v.hold_expires_at > $%<now>d))"
         AGREEMENT_COLUMNS = "id, organization_id, customer_id, product_id, discount_bps, valid_from, valid_until, notes, created_by, created_at, " \
@@ -39,13 +40,15 @@ module Locentra
           )
         end
 
-        # A contagem dos usos fica numa instrução separada, executada depois da trava: em READ
-        # COMMITTED, uma subconsulta na mesma instrução do FOR UPDATE usaria o snapshot anterior à
-        # espera pela trava e não veria o uso confirmado pela transação concorrente.
+        # Cupom para aplicação num documento: `redemptions` traz os usos que contam para o limite, com a
+        # carência de Domain::Pricing::Redemptions.limit_reference (mesma regra do gatilho). A contagem
+        # fica numa instrução separada, executada depois da trava: em READ COMMITTED, uma subconsulta na
+        # mesma instrução do FOR UPDATE usaria o snapshot anterior à espera pela trava e não veria o uso
+        # confirmado pela transação concorrente.
         def find_coupon(tx, code, now:, lock: false)
           row = tx.query_one("SELECT #{COUPON_COLUMNS} FROM coupons WHERE organization_id = $1 AND code = $2 #{"FOR UPDATE" if lock}",
                              [tx.tenant_id!, code])
-          row && self.class.map_coupon(row, active_uses: active_redemptions(tx, row["id"], now))
+          row && self.class.map_coupon(row, active_uses: active_redemptions(tx, row["id"], Domain::Pricing::Redemptions.limit_reference(now)))
         end
 
         def active_redemptions(tx, coupon_id, now)

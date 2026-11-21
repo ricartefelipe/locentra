@@ -220,6 +220,19 @@ class CommercialTermsDomainTest < UnitTest
     assert_equal Domain::Reservations::STATUSES.keys.sort, (expected.keys + ["held"]).sort
   end
 
+  # Para o limite, o bloqueio vencido conta durante a carência; as demais situações seguem active?.
+  def test_expired_hold_counts_toward_the_limit_during_the_grace
+    grace = P::Redemptions::LIMIT_GRACE
+
+    assert_equal now - grace, P::Redemptions.limit_reference(now)
+    assert P::Redemptions.counts_toward_limit?("held", now, now), "vencido no próprio instante"
+    assert P::Redemptions.counts_toward_limit?("held", now - grace + 1, now)
+    refute P::Redemptions.counts_toward_limit?("held", now - grace, now), "carência esgotada"
+    counted = Domain::Reservations::STATUSES.keys.select { |status| P::Redemptions.counts_toward_limit?(status, now + 60, now) }
+
+    assert_equal %w[completed confirmed held in_progress requested], counted.sort
+  end
+
   def test_property_expired_hold_never_becomes_an_active_use_again
     reservation = Domain::Reservations::Reservation.new(
       id: "r1", organization_id: "o1", branch_id: "b1", customer_id: "k1", code: "R-1", status: "held", source: "staff",

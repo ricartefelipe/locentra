@@ -126,6 +126,40 @@ class CouponRedemptionRaceTest < DatabaseTest
     assert_equal 0, retries
   end
 
+  # A confirmação lê o relógio antes do vencimento do bloqueio e ainda não gravou a nova situação quando
+  # o relógio passa do vencimento e outra reserva (de outro produto, sem disputa de estoque) tenta o
+  # último uso: para o limite, o bloqueio vencido há menos que a carência ainda conta, e o resgate é
+  # recusado em vez de deixar a confirmação ultrapassar o máximo.
+  def test_redemption_refused_while_a_confirmation_read_the_clock_before_the_hold_expired
+    coupon = create_coupon("UNICO", max_redemptions: 1)
+    tables = create_product(@actor, sku: "MESA-RACE", tracking: "bulk", pricing: { "daily_cents" => 10_000 })
+    stock(@actor, tables, @branch, 5)
+    hold = book(mode: "hold", hold_minutes: 10, coupon_code: "UNICO")
+    @clock.advance(599)
+    reached = Barrier.new(2)
+    released = Barrier.new(2)
+    reservations = PausingProxy.new(PausingProxy.new(repos[:reservations], :update_status, released), :update_status, reached)
+    confirm = R::ConfirmReservation.new(uow: @system.uow, reservations: reservations, allocator: services[:allocator], audit: services[:audit],
+                                        events: services[:events], clock: @clock, guard: services[:reservation_guard],
+                                        expiry: services[:hold_expiry])
+
+    confirmation = attempt { confirm.call(@actor, hold.id).status }
+    reached.wait
+    @clock.advance(2)
+    redemption = attempt do
+      reserve(@actor, @customers.last, @branch, window(12), [line(tables, 1)], mode: "confirm", coupon_code: "UNICO").status
+    end.value
+    released.wait
+
+    assert_equal [[:ok, "confirmed"], [:validation, { "cupom" => ["cupom esgotado"] }]], [confirmation.value, redemption]
+    assert_equal ["1 de 1", %w[active]], [usage(coupon.id), redemptions_of(coupon.id).map { |use| use[:state] }]
+    @clock.advance(D::Pricing::Redemptions::LIMIT_GRACE)
+
+    assert_equal({ "cupom" => ["cupom esgotado"] }, error_fields { book(@customers.last, day: 12, coupon_code: "UNICO") },
+                 "a reserva confirmada continua com o uso")
+    assert_equal 0, retries
+  end
+
   def test_maximum_cannot_be_reduced_below_a_use_being_redeemed
     coupon = create_coupon("REDUZ", max_redemptions: 3)
     book(coupon_code: "REDUZ")

@@ -214,11 +214,22 @@ class CommercialTermsCouponsTest < DatabaseTest
     assert_equal 1, coupon_row(coupon.id)["lock_version"].to_i
   end
 
-  def test_expired_hold_not_yet_swept_does_not_count_against_the_limit
+  # O uso do bloqueio vencido aparece liberado na hora; para o limite, ainda conta durante a carência
+  # (uma confirmação que leu o relógio antes do vencimento pode estar em andamento) e deixa de contar
+  # depois dela, mesmo sem varredura.
+  def test_expired_hold_not_yet_swept_stops_counting_against_the_limit_after_the_grace
     coupon = create_coupon("BLOQUEIO", max_redemptions: 1)
     hold = book(mode: "hold", hold_minutes: 10, coupon_code: "BLOQUEIO")
     other = bulk("MESA-BLQ")
     @clock.advance(599)
+
+    assert_equal ["cupom esgotado"], coupon_error(product: other, coupon_code: "BLOQUEIO")
+    @clock.advance(1)
+    expired_at = @clock.now
+
+    assert_equal(["0 de 1", "active"], coupon_data(coupon.id).then { |data| [data[:coupon].usage_text, data[:status]] })
+    assert_equal ["cupom esgotado"], coupon_error(product: other, coupon_code: "BLOQUEIO"), "dentro da carência"
+    @clock.advance(D::Pricing::Redemptions::LIMIT_GRACE - 1)
 
     assert_equal ["cupom esgotado"], coupon_error(product: other, coupon_code: "BLOQUEIO")
     @clock.advance(1)
@@ -227,7 +238,7 @@ class CommercialTermsCouponsTest < DatabaseTest
     assert_equal %w[held confirmed], [status_of(hold), status_of(accepted)], "o bloqueio vencido continua sem varredura"
     uses = redemptions_of(coupon.id)
 
-    assert_equal [%w[active released_expired], [nil, @clock.now]], [uses.map { |use| use[:state] }, uses.map { |use| use[:released_at] }]
+    assert_equal [%w[active released_expired], [nil, expired_at]], [uses.map { |use| use[:state] }, uses.map { |use| use[:released_at] }]
     assert_equal(["1 de 1", "exhausted"], coupon_data(coupon.id).then { |data| [data[:coupon].usage_text, data[:status]] })
     assert_raises(D::HoldExpired) { uc(:confirm_reservation).call(@actor, hold.id) }
     assert_equal "1 de 1", usage(coupon.id)
