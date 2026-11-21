@@ -45,6 +45,15 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
   aprovação do orçamento, na reserva e no contrato.
 - O snapshot de preços de reservas e itens não pode ser alterado no banco.
 
+### Corrigido
+
+- Texto com caractere nulo (U+0000) ou UTF-8 inválido, em qualquer endpoint da API v1 e da web, passa a ser
+  erro do cliente em vez de erro interno (500): a API responde 422 no campo (corpo JSON, em qualquer nível, e
+  query string) e os formulários respondem 400, inclusive em parâmetros aninhados (`nome[chave]`) e em partes
+  multipart de texto com outra codificação que não seja ASCII puro.
+- O OpenAPI descreve `allocations` e `adjustments` do detalhe da reserva (`GET /reservations/{id}`), que já
+  eram devolvidos na 1.0.0.
+
 ### Atualização
 
 - **Migration 0015** (`0015_condicoes_comerciais.sql`). Antes de migrar, execute a verificação prévia de
