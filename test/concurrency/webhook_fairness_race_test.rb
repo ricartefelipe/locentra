@@ -8,7 +8,8 @@ require_relative "../support/webhook_support"
 # Fila de webhooks sob concorrência real: reivindicações simultâneas em transações abertas ao mesmo
 # tempo nunca deixam uma organização acima do limite nem reivindicam a mesma tarefa duas vezes, as
 # threads de webhooks de um worker não são monopolizadas pelos destinos lentos de uma organização e a
-# reativação de um endpoint disputando com a retenção de uma entrega nunca deixa a entrega parada.
+# reativação de um endpoint disputando com a retenção de uma entrega nunca deixa a entrega parada, e a
+# limpeza do histórico não remove uma entrega que um reenvio concorrente devolveu a `pending`.
 class WebhookFairnessRaceTest < DatabaseTest
   include WorkerHelpers
   include WebhookHelpers
@@ -277,5 +278,28 @@ class WebhookFairnessRaceTest < DatabaseTest
 
     assert_equal({ "status" => "delivered", "held_at" => nil }, final_delivery(delivery))
     assert_equal 1, @servers.first.requests.size
+  end
+
+  # O reenvio segura a transação depois de devolver a entrega a `pending`; a retenção, em outra thread,
+  # espera o lock da linha e, depois do commit, reavalia as condições no DELETE externo e não a remove.
+  def test_purge_does_not_remove_a_delivery_redelivered_concurrently
+    endpoint = uc(:create_webhook).call(@alfa[:actor], url: "http://127.0.0.1:9/hook", events: ["*"])["id"]
+    delivery = pending_delivery(@alfa, endpoint)
+    owner_query("UPDATE webhook_deliveries SET status = 'failed', attempts = 1, last_attempt_at = $2 WHERE id = $1",
+                [delivery, @clock.now - (40 * 86_400)], tenant: @alfa[:organization_id])
+    gate = Gate.new
+    webhooks = PausingProxy.new(@system.repos[:webhooks], :reset_delivery, gate, after: true)
+    redeliver = A::Webhooks::Redeliver.new(uow: @system.uow, webhooks: webhooks, queue: @system.queue, audit: @system.services[:audit])
+    requested = Thread.new { redeliver.call(@alfa[:actor], delivery) }
+    gate.reached
+    purge = Thread.new { worker_system.services[:purge_history].call(@alfa[:organization_id]) }
+    sleep 0.3
+
+    assert_predicate purge, :alive?, "a retenção espera o lock da linha da entrega"
+    gate.resume
+
+    assert requested.value
+    assert_equal({ "webhook_deliveries" => 0, "outbox_events" => 0, "inbound_webhooks" => 0 }, purge.value)
+    assert_equal({ "status" => "pending", "held_at" => nil }, final_delivery(delivery))
   end
 end

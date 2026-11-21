@@ -68,7 +68,7 @@ module Locentra
         damage_reports: P::DamageReportRepository.new, transfers: P::TransferRepository.new, alerts: P::AlertRepository.new,
         operations: P::OperationsRepository.new,
         quotes: P::QuoteRepository.new, contracts: P::ContractRepository.new, portal: P::PortalRepository.new,
-        outcome_totals: P::OutcomeTotalsRepository.new
+        outcome_totals: P::OutcomeTotalsRepository.new, retention: P::RetentionRepository.new
       }
     end
 
@@ -107,6 +107,11 @@ module Locentra
                                                              totals: totals, audit: @services[:audit])
       @services[:release_held_webhooks] = A::Webhooks::ReleaseHeld.new(transactor: transactor, webhooks: repos[:webhooks], queue: queue,
                                                                        totals: totals, clock: clock)
+      windows = A::Retention::Windows.new(outbox_seconds: config.outbox_retention_days * 86_400,
+                                          deliveries_seconds: config.webhook_delivery_retention_days * 86_400,
+                                          inbound_seconds: config.inbound_webhook_retention_days * 86_400)
+      @services[:purge_history] = A::Retention::PurgeHistory.new(transactor: transactor, retention: repos[:retention], totals: totals, clock: clock,
+                                                                 windows: windows)
     end
 
     def common = { uow: uow, clock: clock }
