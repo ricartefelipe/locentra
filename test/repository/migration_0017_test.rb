@@ -147,6 +147,36 @@ class Migration0017Test < Minitest::Test
     assert_legacy_inserts(org, data)
   end
 
+  # SQL da 1.2.0 (Redeliver e Deliver) sobre entregas retidas pela versão nova, como no retorno à 1.2.0 ou
+  # num worker da 1.2.0 durante a implantação gradual: o reenvio e a entrega concluída liberam a retenção
+  # em vez de violar o CHECK; a falha mantém a entrega retida para a versão nova.
+  LEGACY_RESET_SQL = "UPDATE webhook_deliveries SET status = 'pending' WHERE organization_id = $1 AND id = $2"
+  LEGACY_ATTEMPT_SQL = <<~SQL
+    UPDATE webhook_deliveries
+       SET status = $3, attempts = attempts + 1, last_status_code = $4, last_error = $5, last_attempt_at = $6,
+           delivered_at = CASE WHEN $3 = 'delivered' THEN $6::timestamptz ELSE delivered_at END
+     WHERE organization_id = $1 AND id = $2 AND status <> 'delivered'
+  SQL
+
+  def test_legacy_redelivery_and_attempts_release_held_deliveries
+    data = legacy_data
+    org = data[:org]
+    migrator(MIGRATIONS).migrate
+    failed, pending, retried, born_held = Array.new(4) { legacy_delivery(org, data[:active], legacy_event(org, dispatched: true), "failed") }
+    ids = "{#{[failed, pending, retried, born_held].join(",")}}"
+    owner_query(org, "UPDATE webhook_deliveries SET status = 'pending' WHERE id = ANY($1::uuid[])", ["{#{pending},#{born_held}}"])
+    owner_query(org, "UPDATE webhook_deliveries SET held_at = $2 WHERE id = ANY($1::uuid[])", [ids, LEGACY_AT])
+
+    assert_equal 1, role_exec(TestDatabase.app_url, org, LEGACY_RESET_SQL, [org, failed])
+    assert_equal 1, role_exec(TestDatabase.app_url, org, LEGACY_RESET_SQL, [org, born_held])
+    assert_equal 1, role_exec(TestDatabase.worker_url, org, LEGACY_ATTEMPT_SQL, [org, pending, "delivered", 200, nil, LEGACY_AT])
+    assert_equal 1, role_exec(TestDatabase.worker_url, org, LEGACY_ATTEMPT_SQL, [org, retried, "failed", 503, nil, LEGACY_AT])
+    states = owner_query(org, "SELECT id, status, held_at IS NOT NULL AS held FROM webhook_deliveries WHERE id = ANY($1::uuid[])", [ids])
+             .to_h { |row| [row["id"], [row["status"], row["held"]]] }
+
+    assert_equal({ failed => %w[pending f], born_held => %w[pending f], pending => %w[delivered f], retried => %w[failed t] }, states)
+  end
+
   private
 
   def assert_new_indexes

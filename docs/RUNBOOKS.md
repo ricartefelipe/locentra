@@ -546,7 +546,8 @@ chamada de rede e sem gastar tentativas; nada se perde.
 
 A migration `0017_webhooks_por_organizacao_e_retencao.sql` adiciona colunas anuláveis ou com DEFAULT em
 `webhook_endpoints` e `webhook_deliveries`, sete índices (seis parciais ou simples nas tabelas existentes e a
-chave da tabela nova) e a tabela `worker_outcome_totals`. Não há verificação prévia: nenhum dado existente
+chave da tabela nova), a tabela `worker_outcome_totals` e o gatilho `webhook_deliveries_release_hold` (uma
+entrega que volta a `pending` ou é concluída deixa de estar retida). Não há verificação prévia: nenhum dado existente
 impede a migration.
 
 ### 16.1 Aplicação com a 1.2.0 em execução
@@ -582,11 +583,20 @@ acompanhe `locentra_retention_purged_total`.
 
 ### 16.3 Retorno à versão 1.2.0
 
-O retorno não exige mudança no banco: a 1.2.0 ignora as colunas, os índices e a tabela nova. Consequências:
+O retorno não exige mudança no banco: a 1.2.0 ignora as colunas, os índices e a tabela nova, e o gatilho
+`webhook_deliveries_release_hold` mantém os comandos da 1.2.0 compatíveis com `webhook_deliveries_held_check`.
+Consequências:
 
 - endpoints pausados continuam com `paused_at`, mas a 1.2.0 não lê a coluna e volta a entregar normalmente;
-- entregas **retidas** continuam retidas e sem tarefa: a 1.2.0 não as reenvia. Ao voltar à versão nova,
-  reative o endpoint pela tela (seção 15) para liberá-las;
+- entregas **retidas** ficam sem tarefa. A tela da 1.2.0 não mostra a retenção: a entrega aparece com o
+  status gravado, "Falhou" (com **Reenviar**) quando a retenção veio depois de uma tentativa ou "Pendente"
+  (sem **Reenviar**) quando já nasceu retida;
+- o **Reenviar** da 1.2.0 sobre uma entrega retida a devolve a `pending`, o gatilho limpa `held_at` e a
+  entrega sai normalmente, uma vez por reenvio. Uma tentativa da 1.2.0 que conclui a entrega também limpa
+  `held_at`; uma tentativa com falha a mantém retida;
+- as entregas que continuarem retidas saem ao voltar à versão nova, com a reativação do endpoint pela tela
+  (seção 15). Para evitar entregas pendentes sem tarefa durante o retorno, reative os endpoints pausados
+  antes de trocar a versão, se o destino já estiver corrigido;
 - a 1.2.0 não faz retenção do histórico de integrações nem atualiza `worker_outcome_totals`.
 
 Antes de retornar, liste as entregas retidas por endpoint (com contexto de cada organização ou pelo papel

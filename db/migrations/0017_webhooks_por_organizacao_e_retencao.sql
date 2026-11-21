@@ -7,7 +7,8 @@
 -- * Circuito consistente: `failing_since` existe se e somente se há falhas consecutivas
 --   (webhook_endpoints_failure_streak_check). O contador nunca é negativo.
 -- * Entrega retida nunca está entregue (webhook_deliveries_held_check): a retenção vale só para o que
---   ainda precisa sair.
+--   ainda precisa sair. Voltar a entrega a 'pending' ou concluí-la encerra a retenção
+--   (webhook_deliveries_release_hold), também quando o comando vem da 1.2.0.
 -- * Reivindicação por organização: `jobs_ready_org_idx` dá a cabeça de cada organização com tarefas
 --   pendentes em O(log n), sem percorrer o backlog de uma organização para chegar à seguinte.
 -- * Retenção: os índices parciais cobrem exatamente as condições de remoção (entregas concluídas e não
@@ -20,8 +21,9 @@
 --   retenção roda no contexto de cada organização.
 --
 -- Compatibilidade com a 1.2.0 (implantação gradual e retorno): somente colunas com DEFAULT ou anuláveis,
--- índices e uma tabela nova. A 1.2.0 continua inserindo endpoints e entregas sem as colunas novas e
--- ignora pausa e limite por organização. Sem CONCURRENTLY: o Migrator aplica cada migration numa
+-- índices, uma tabela nova e um gatilho. A 1.2.0 continua inserindo endpoints e entregas sem as colunas
+-- novas e ignora pausa e limite por organização; o reenvio manual e as tentativas da 1.2.0 sobre uma
+-- entrega retida não violam o CHECK, porque o gatilho limpa held_at. Sem CONCURRENTLY: o Migrator aplica cada migration numa
 -- transação; a construção dos índices percorre as tabelas (ver docs/RUNBOOKS.md, lock_timeout).
 
 -- Circuito por endpoint
@@ -35,6 +37,21 @@ ALTER TABLE webhook_endpoints
 ALTER TABLE webhook_deliveries
   ADD COLUMN held_at timestamptz,
   ADD CONSTRAINT webhook_deliveries_held_check CHECK (held_at IS NULL OR status <> 'delivered');
+
+-- Toda mudança de status para 'pending' (reenvio ou liberação) ou 'delivered' (tentativa concluída) encerra a
+-- retenção. A versão nova já grava held_at = NULL nesses comandos; o gatilho cobre a 1.2.0 (reenvio manual e
+-- worker durante a implantação gradual ou depois do retorno), que altera só o status.
+CREATE FUNCTION app_webhook_delivery_release_hold() RETURNS trigger
+  LANGUAGE plpgsql
+  AS $$
+BEGIN
+  NEW.held_at := NULL;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER webhook_deliveries_release_hold BEFORE UPDATE OF status ON webhook_deliveries
+  FOR EACH ROW WHEN (NEW.held_at IS NOT NULL AND NEW.status IN ('pending', 'delivered'))
+  EXECUTE FUNCTION app_webhook_delivery_release_hold();
 
 -- Reivindicação por organização (cabeça de cada organização em O(log n))
 CREATE INDEX jobs_ready_org_idx ON jobs (queue, organization_id, priority, run_at) WHERE status = 'pending';

@@ -236,7 +236,8 @@ Configurações da organização e filiais (migration 0016; regras em
 Circuito por endpoint (migration 0017): `consecutive_failures` e `failing_since` andam juntos
 (`webhook_endpoints_failure_streak_check`: há início da sequência se e somente se há falhas), `paused_at`
 marca a pausa automática e `webhook_deliveries.held_at` marca a entrega retida enquanto o endpoint está
-pausado (`webhook_deliveries_held_check`: nunca numa entrega `delivered`). `worker_outcome_totals` aceita
+pausado (`webhook_deliveries_held_check`: nunca numa entrega `delivered`; o gatilho
+`webhook_deliveries_release_hold` limpa `held_at` quando o status passa a `pending` ou `delivered`). `worker_outcome_totals` aceita
 somente a lista fechada de pares família/desfecho do CHECK.
 
 Retenção: tarefas `succeeded`/`cancelled` e suas tentativas são removidas 14 dias após a conclusão pelo

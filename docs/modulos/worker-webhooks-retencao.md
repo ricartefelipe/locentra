@@ -201,13 +201,15 @@ A aplicação web só lê a tabela; o worker grava e ninguém remove.
 | D11 | Removem-se só entregas concluídas antigas, entregas de endpoints desativados antigos, eventos sem entrega e recebidos processados ou ignorados |
 | D12 | Todo `DELETE` repete as condições na tabela-alvo (reavaliação após o lock) |
 | D13 | Totais por desfecho em `worker_outcome_totals`, gravados pelo worker e expostos pela web; nada no caminho da reivindicação |
-| D14 | Migration compatível com a 1.2.0: colunas anuláveis ou com DEFAULT, índices e uma tabela nova |
+| D14 | Migration compatível com a 1.2.0: colunas anuláveis ou com DEFAULT, índices, uma tabela nova e um gatilho que encerra a retenção quando a entrega volta a `pending` ou é concluída |
 
 ## Compatibilidade com a 1.2.0
 
 Durante a implantação gradual, a 1.2.0 continua inserindo endpoints e entregas (sem as colunas novas) e
-ignora a pausa e o limite. No retorno à 1.2.0, as entregas retidas continuam retidas, sem tarefa, até o
-endpoint ser reativado na versão nova. O procedimento está em [`../RUNBOOKS.md`](../RUNBOOKS.md) §16.
+ignora a pausa e o limite. No retorno à 1.2.0, as entregas retidas ficam sem tarefa até o endpoint ser
+reativado na versão nova. O reenvio manual da 1.2.0 e uma tentativa da 1.2.0 que conclui a entrega só
+alteram o status; o gatilho `webhook_deliveries_release_hold` limpa `held_at` nesses casos, e o CHECK
+`webhook_deliveries_held_check` continua válido. O procedimento está em [`../RUNBOOKS.md`](../RUNBOOKS.md) §16.
 
 ## Como testar
 
@@ -218,7 +220,7 @@ endpoint ser reativado na versão nova. O procedimento está em [`../RUNBOOKS.md
 | `test/unit/application/retention_test.rb` | Ordem dos passos, lote incompleto, teto de lotes, corte por tipo, totais e transação por lote |
 | `test/unit/config_test.rb` | Padrões e mínimos das variáveis novas |
 | `test/unit/application/observability_test.rb`, `test/unit/infrastructure/metrics_test.rb` | Métricas novas, rótulos e HELP |
-| `test/repository/migration_0017_test.rb` | Atualização da 1.2.0: colunas, índices, CHECKs, RLS e inserções no formato antigo |
+| `test/repository/migration_0017_test.rb` | Atualização da 1.2.0: colunas, índices, CHECKs, RLS, inserções no formato antigo e reenvio e tentativas da 1.2.0 sobre entregas retidas |
 | `test/repository/observability_tables_test.rb` | `worker_outcome_totals` sem dados de tenant, só gravável pelo worker |
 | `test/integration/webhook_fairness_test.rb` | Ordem justa, limite, lease vencido com fencing, tarefas sem organização, fila `default` sem limite, prioridade entre filas, `run_at` futuro e tarefas esgotadas |
 | `test/integration/webhook_circuit_test.rb` | Pausa só depois de 1 h, auditoria, totais, retenção, despacho retido, sucesso que zera, regras e lotes da reativação, reenvio retido de novo |

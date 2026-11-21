@@ -24,8 +24,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 - **Métricas:** `locentra_webhook_deliveries_total{outcome}`, `locentra_webhook_endpoint_pauses_total` e
   `locentra_retention_purged_total{kind}`, somadas entre todos os workers e expostas em `/metrics`.
 - **Migration 0017:** circuito por endpoint, entregas retidas, índice da reivindicação por organização,
-  índices da retenção e tabela `worker_outcome_totals`, compatível com a 1.2.0 em execução
-  (`docs/RUNBOOKS.md`, seção 16).
+  índices da retenção, tabela `worker_outcome_totals` e gatilho que encerra a retenção quando a entrega volta
+  a pendente ou é concluída, compatível com a 1.2.0 em execução e no retorno, inclusive no reenvio manual de
+  uma entrega retida (`docs/RUNBOOKS.md`, seção 16).
 
 ### Alterado
 

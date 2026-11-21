@@ -408,4 +408,5 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
 - **Consequências:** uma organização não ocupa mais do que o limite das threads de webhooks de todos os
   workers; destinos fora do ar param de consumir tentativas e as entregas esperam a reativação sem se perder;
   o histórico de integrações tem tamanho limitado. A migration 0017 é compatível com a 1.2.0 em execução e no
-  retorno (as retidas continuam retidas até a reativação na versão nova; `RUNBOOKS.md` §16).
+  retorno: o gatilho `webhook_deliveries_release_hold` encerra a retenção quando a 1.2.0 reenvia ou conclui
+  uma entrega retida, e as demais continuam retidas até a reativação na versão nova (`RUNBOOKS.md` §16).
