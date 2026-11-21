@@ -23,9 +23,10 @@ module Locentra
         end
 
         # Texto opcional sem corte: acima do limite é recusado. Remove espaços das pontas e preserva as
-        # quebras de linha internas; vazio vira nil.
+        # quebras de linha internas, normalizadas para LF (o navegador envia CRLF e conta cada quebra como
+        # um caractere no maxlength); vazio vira nil.
         def optional!(value, field, max:)
-          text = value.to_s.strip
+          text = value.to_s.gsub(/\r\n?/, "\n").strip
           return nil if text.empty?
           raise ValidationError.field(field, "até #{max} caracteres") if text.length > max
 

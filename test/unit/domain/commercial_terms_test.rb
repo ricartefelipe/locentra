@@ -281,6 +281,7 @@ class CommercialTermsDomainTest < UnitTest
 
     assert_equal "Linha 1\n\nLinha 2", text.optional!("  Linha 1\n\nLinha 2  ", "descricao", max: 20)
     assert_nil text.optional!("   ", "descricao", max: 20)
+    assert_equal "a\nb\nc", text.optional!("a\r\nb\rc", "descricao", max: 5), "quebras CRLF e CR viram LF e contam como uma"
     assert_equal({ "descricao" => ["até 5 caracteres"] }, assert_raises(Domain::ValidationError) { text.optional!("123456", "descricao", max: 5) }.errors)
     assert_equal "tarifa não encontrada", Domain::NotFound.new("tarifa", feminine: true).message
     assert_equal "cupom não encontrado", Domain::NotFound.new("cupom").message

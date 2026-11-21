@@ -85,6 +85,23 @@ class CommercialTermsFeesPagesTest < CommercialTermsHttpTest
     refute_includes stale, "Edição concorrente"
   end
 
+  # O navegador envia as quebras de linha do textarea como CRLF e conta cada uma como um caractere no
+  # maxlength: o servidor normaliza antes de comparar e de medir.
+  def test_textarea_line_breaks_do_not_create_false_changes_nor_count_twice
+    fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000, description: "linha 1\nlinha 2")
+    post_form "/tarifas/#{fee.id}", edit_form(fee, descricao: "linha 1\r\nlinha 2")
+    follow_redirect!
+
+    assert_includes last_response.body, "Nenhuma alteração a salvar."
+    assert_empty audit_events("fee.updated")
+    long = (["a" * 50] + Array.new(9) { "a" * 49 }).join("\r\n") # 500 caracteres no navegador, 509 bytes enviados
+    post_form "/tarifas/#{fee.id}", edit_form(fee, descricao: long)
+    follow_redirect!
+
+    assert_includes last_response.body, "Tarifa atualizada."
+    assert_equal([500, 0], uc(:get_fee).call(@actor, fee.id)[:fee].description.then { |text| [text.length, text.count("\r")] })
+  end
+
   def test_deactivation_reactivation_and_list_filters
     fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000)
     @clock.advance(60)
