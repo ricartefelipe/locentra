@@ -338,9 +338,10 @@ module Locentra
           @customers = customers
         end
 
-        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada).
-        def call(actor, pickup_id, tx: nil)
-          Composition.run(@uow, actor, "reservations.read", tx) do |t, _|
+        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada);
+        # `permission` é então a permissão da mutação, conferida no lugar da de leitura.
+        def call(actor, pickup_id, tx: nil, permission: nil)
+          Composition.run(@uow, actor, Composition.detail_permission(tx, "reservations.read", permission), tx) do |t, _|
             pickup = @fulfillment.find_pickup(t, Domain::Identifier.parse(pickup_id)) || raise(Domain::NotFound, "retirada")
             reservation = @reservations.find(t, pickup.reservation_id)
             customer = @customers.find(t, reservation.customer_id)

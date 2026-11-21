@@ -32,6 +32,12 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 - Os casos de uso de orçamentos, contratos, retirada, devolução, inspeções, alertas e configurações aceitam a
   transação do chamador (`tx:`), sem mudança na interface web e na CLI.
 
+### Corrigido
+
+- As mutações da API v1 de orçamentos, contratos, retirada e devolução exigem somente o escopo de escrita: o
+  detalhe devolvido é lido na transação da mutação com a permissão dela, e a credencial sem o escopo de leitura
+  deixa de receber 403 depois de a operação ser desfeita.
+
 ## [1.2.0] — 2026-11-21
 
 ### Adicionado

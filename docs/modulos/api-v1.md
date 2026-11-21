@@ -90,8 +90,11 @@ uso aceitam `tx:` e, nesse caso, usam `Application::Composition.run`: a permiss�
 ator recebido e nenhuma transação nova é aberta (o coordenador recusa transação aninhada). A resposta é o
 detalhe atualizado, lido pelo caso de uso de leitura na mesma transação (`GetQuote`, `GetContract`,
 `GetPickup`, `GetReturn`, `GetOrganization` com `tx:`): a gravação ainda não foi confirmada, e o corpo gravado
-na chave é exatamente o que o replay devolve. Sem `tx:`, os casos de uso seguem o caminho da interface web e da
-CLI, sem mudança.
+na chave é exatamente o que o replay devolve. Nessa leitura composta, `GetQuote`, `GetContract`, `GetPickup` e
+`GetReturn` recebem `permission:` com a permissão da mutação (`quotes.write`, `contracts.write`,
+`fulfillment.write`), já conferida na transação, e não exigem o escopo de leitura: cada mutação exige somente
+os escopos da tabela acima (`Composition.detail_permission`). Sem `tx:`, os casos de uso seguem o caminho da
+interface web e da CLI, sem mudança, e as leituras conferem sempre a permissão de leitura.
 
 ## Criação que pode encontrar o recurso existente
 

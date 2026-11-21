@@ -362,9 +362,10 @@ module Locentra
           @clock = clock
         end
 
-        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada).
-        def call(actor, contract_id, tx: nil)
-          Composition.run(@uow, actor, Scope.read_permission(actor), tx) do |t, current|
+        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada);
+        # `permission` é então a permissão da mutação, conferida no lugar da de leitura.
+        def call(actor, contract_id, tx: nil, permission: nil)
+          Composition.run(@uow, actor, Composition.detail_permission(tx, Scope.read_permission(actor), permission), tx) do |t, current|
             contract = Scope.find!(@contracts, t, current, contract_id)
             amendments = @contracts.amendments(t, contract.id)
             reservation = @reservations.find(t, contract.reservation_id)

@@ -389,7 +389,9 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   sem `tx`, o caminho da web e da CLI é o de antes.
 - **Detalhe lido na mesma transação (D2):** a mutação responde com o detalhe atualizado, lido pelo caso de uso
   de leitura com `tx:` (a gravação ainda não foi confirmada). Esse corpo fica gravado na chave e o replay
-  devolve exatamente a mesma resposta.
+  devolve exatamente a mesma resposta. Nessa leitura composta confere-se a permissão da própria mutação
+  (`permission:` dos casos de uso de detalhe), e não a de leitura: a credencial só com o escopo de escrita
+  recebe o resultado, como nas mutações de reservas e de condições comerciais.
 - **Configurações somente por sessão de usuário (D3):** `PATCH /organization/settings` vale só para sessão de
   usuário com `organization.manage` (cookie de sessão e `X-CSRF-Token`). Credenciais recebem 403 `forbidden`,
   mesmo com o escopo: a tela de credenciais oferece todos os escopos e as credenciais com `organization.manage`

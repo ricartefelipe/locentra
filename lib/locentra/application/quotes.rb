@@ -555,9 +555,10 @@ module Locentra
           @reservations = reservations
         end
 
-        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada).
-        def call(actor, quote_id, tx: nil)
-          Composition.run(@uow, actor, Scope.read_permission(actor), tx) do |t, current|
+        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada);
+        # `permission` é então a permissão da mutação, conferida no lugar da de leitura.
+        def call(actor, quote_id, tx: nil, permission: nil)
+          Composition.run(@uow, actor, Composition.detail_permission(tx, Scope.read_permission(actor), permission), tx) do |t, current|
             quote = Scope.find!(@quotes, t, current, quote_id)
             versions = @quotes.versions(t, quote.id)
             # O cliente vê somente as versões que lhe foram enviadas.

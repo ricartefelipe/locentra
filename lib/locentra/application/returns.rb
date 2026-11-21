@@ -248,9 +248,10 @@ module Locentra
           @fulfillment = fulfillment
         end
 
-        # Com `tx`, lê na transação do chamador (detalhe devolvido pelo registro da devolução).
-        def call(actor, return_id, tx: nil)
-          Composition.run(@uow, actor, "reservations.read", tx) do |t, _|
+        # Com `tx`, lê na transação do chamador (detalhe devolvido pelo registro da devolução);
+        # `permission` é então a permissão da mutação, conferida no lugar da de leitura.
+        def call(actor, return_id, tx: nil, permission: nil)
+          Composition.run(@uow, actor, Composition.detail_permission(tx, "reservations.read", permission), tx) do |t, _|
             row = @fulfillment.find_return(t, Domain::Identifier.parse(return_id)) || raise(Domain::NotFound, "devolução")
             fees = @reservations.adjustments(t, row["reservation_id"]).select { |a| a["kind"] == "late_fee" && a["details"]["return_id"] == row["id"] }
             { return: row, lines: @fulfillment.return_lines(t, row["id"]), late_fees: fees }

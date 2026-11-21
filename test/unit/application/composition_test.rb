@@ -51,4 +51,10 @@ class CompositionTest < UnitTest
     assert_equal :own_tx, A::Composition.run(uow, credential([]), nil, nil) { |tx, _| tx }
     assert_equal [["api", nil]], uow.calls
   end
+
+  def test_detail_permission_uses_the_mutation_permission_only_in_the_composed_transaction
+    assert_equal "quotes.write", A::Composition.detail_permission(:caller_tx, "quotes.read", "quotes.write")
+    assert_equal "quotes.read", A::Composition.detail_permission(nil, "quotes.read", "quotes.write")
+    assert_equal "quotes.read", A::Composition.detail_permission(:caller_tx, "quotes.read", nil)
+  end
 end

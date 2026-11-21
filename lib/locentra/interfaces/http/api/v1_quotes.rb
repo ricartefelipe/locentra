@@ -138,7 +138,8 @@ module Locentra
 
           private
 
-          def detail(actor, id, tx) = QS.detail(uc(:get_quote).call(actor, id, tx: tx))
+          # Detalhe lido na transação da mutação, que já conferiu `quotes.write`: não exige também `quotes.read`.
+          def detail(actor, id, tx) = QS.detail(uc(:get_quote).call(actor, id, tx: tx, permission: "quotes.write"))
 
           # Conteúdo de uma versão, com os erros de formato reunidos por campo. Na criação o cliente é
           # obrigatório; na nova versão ele não pode ser enviado.

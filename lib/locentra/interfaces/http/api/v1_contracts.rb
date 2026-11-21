@@ -119,7 +119,8 @@ module Locentra
 
           private
 
-          def detail(actor, id, tx) = CS.detail(uc(:get_contract).call(actor, id, tx: tx))
+          # Detalhe lido na transação da mutação, que já conferiu `contracts.write`: não exige também `contracts.read`.
+          def detail(actor, id, tx) = CS.detail(uc(:get_contract).call(actor, id, tx: tx, permission: "contracts.write"))
 
           def required_instant(data, key, field)
             api_instant(data, key, field) || raise(Domain::ValidationError.field(field, "obrigatório"))

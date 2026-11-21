@@ -75,6 +75,23 @@ class QuotesApiTest < ApiV1TestCase
     assert_equal 0, count("SELECT count(*) FROM quotes")
   end
 
+  # O detalhe devolvido pela mutação é lido na transação dela, sem exigir `quotes.read` da credencial.
+  def test_mutations_require_only_the_write_scope
+    write = token(%w[quotes.write])
+    body = post!(201, "/quotes", payload, token: write)
+
+    assert_conforms body, "Quote"
+    id = body["id"]
+
+    assert_equal 2, post!(201, "/quotes/#{id}/versions", revision(terms: "Retirada na loja."), token: write)["current_version"]
+    assert_equal "sent", post!(200, "/quotes/#{id}/send", {}, token: write)["status"]
+    assert_equal "approved", post!(200, "/quotes/#{id}/approve", { "version" => 2, "approver_name" => "Maria Compradora" }, token: write)["status"]
+    converted = post!(201, "/quotes/#{id}/convert", {}, token: token(%w[quotes.write reservations.write]))
+
+    assert_equal ["converted", "confirmed"], [converted["quote"]["status"], converted["reservation"]["status"]]
+    assert_equal "rejected", post!(200, "/quotes/#{sent.id}/reject", { "reason" => "Preço acima do orçamento" }, token: write)["status"]
+  end
+
   def test_create_validation_errors_are_reported_by_field
     post!(422, "/quotes", payload("valid_until" => 20_260_305, "manual_discount_bps" => "5", "fees" => [{ "fee_id" => @fee.id, "amount_cents" => "100" }],
                                   "terms" => 12, "hold_minutes" => 60.5))

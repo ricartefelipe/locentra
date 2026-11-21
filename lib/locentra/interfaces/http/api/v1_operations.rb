@@ -150,7 +150,7 @@ module Locentra
             idempotent(ctx, "fulfillment.write", "POST /api/v1/reservations/#{id}/returns", data,
                        location: ->(body) { "/api/v1/returns/#{body["id"]}" }) do |tx, actor|
               row = uc(:register_return).call(actor, id, entries: entries, notes: notes, tx: tx)
-              [201, OS.return_detail(uc(:get_return).call(actor, row["id"], tx: tx))]
+              [201, OS.return_detail(uc(:get_return).call(actor, row["id"], tx: tx, permission: "fulfillment.write"))]
             end
           end
 
@@ -209,7 +209,11 @@ module Locentra
 
           private
 
-          def pickup_body(ctx, actor, id, tx) = OS.pickup(uc(:get_pickup).call(actor, id, tx: tx), pickers: ctx.can?("customers.read"))
+          # Detalhes lidos na transação da mutação, que já conferiu `fulfillment.write`: não exigem também
+          # `reservations.read`.
+          def pickup_body(ctx, actor, id, tx)
+            OS.pickup(uc(:get_pickup).call(actor, id, tx: tx, permission: "fulfillment.write"), pickers: ctx.can?("customers.read"))
+          end
 
           # Conferência: `tag` para ativos e `quantity` (inteiro) para estoque, com os erros de formato reunidos.
           def check_entries(data)

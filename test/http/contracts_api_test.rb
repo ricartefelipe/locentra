@@ -68,6 +68,19 @@ class ContractsApiTest < ApiV1TestCase
     assert_equal ["/api/v1/contracts/#{body["id"]}", 1], [@idempotent_location, count("SELECT count(*) FROM contracts")]
   end
 
+  # O detalhe devolvido pela mutação é lido na transação dela, sem exigir `contracts.read` da credencial.
+  def test_mutations_require_only_the_write_scopes
+    body = post!(201, "/contracts", { "reservation_id" => reservation.id }, token: token(%w[contracts.write]))
+
+    assert_conforms body, "Contract"
+    amended = post!(201, "/contracts/#{body["id"]}/amendments", { "ends_at" => "2026-03-13T08:00:00Z" }, token: token(%w[contracts.write reservations.write]))
+
+    assert_equal 2, amended["contract"]["current_document_version"]
+    cancelled = post!(200, "/contracts/#{body["id"]}/cancel", { "reason" => "Evento adiado" }, token: token(%w[contracts.write reservations.cancel]))
+
+    assert_equal "cancelled", cancelled["contract"]["status"]
+  end
+
   def test_list_filters_and_paginates
     other = create_customer(@actor, name: "Agência Norte", document: "11144477735")
     first = issued

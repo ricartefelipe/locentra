@@ -150,6 +150,12 @@ module Locentra
         Authorizer.authorize!(actor, permission) if permission
         yield tx, actor
       end
+
+      # Permissão da leitura do detalhe. Quando a própria mutação devolve o detalhe, lido na transação dela,
+      # confere-se a permissão da mutação (`mutation`), já exigida nessa transação: quem tem somente o escopo
+      # de escrita recebe o resultado sem precisar também do de leitura. Fora da transação composta vale
+      # sempre a permissão de leitura.
+      def detail_permission(tx, read, mutation) = tx && mutation ? mutation : read
     end
 
     # Trilha de auditoria gravada na mesma transação da operação.

@@ -78,6 +78,23 @@ class OperationsApiTest < ApiV1TestCase
     assert_idempotent("/reservations/#{rental.id}/pickups", {}, 201)
   end
 
+  # Os detalhes devolvidos pelas mutações são lidos na transação delas, sem exigir `reservations.read`.
+  def test_mutations_require_only_the_write_scope
+    write = token(%w[fulfillment.write])
+    reservation = rental
+    body = post!(201, "/reservations/#{reservation.id}/pickups", {}, token: write)
+
+    assert_conforms body, "Pickup"
+    assert_equal "checked", post!(200, "/pickups/#{body["id"]}/check", check_body(body), token: write)["lines"].first["status"]
+    assert_equal "delivered", post!(200, "/pickups/#{body["id"]}/deliver", { "picker" => { "kind" => "customer" } }, token: write)["status"]
+    returned = post!(201, "/reservations/#{reservation.id}/returns", { "entries" => entries_for(reservation) }, token: write)
+
+    assert_equal [true, "completed"], [returned["completes_reservation"], reservation_status(reservation)]
+    other = post!(201, "/reservations/#{confirmed([line(@chairs, 1)], after_rental).id}/pickups", {}, token: write)
+
+    assert_equal "cancelled", post!(200, "/pickups/#{other["id"]}/cancel", { "reason" => "Cliente não compareceu" }, token: write)["status"]
+  end
+
   def test_check_gathers_errors_and_refuses_text_quantities
     body = post!(201, "/reservations/#{rental.id}/pickups")
     post!(422, "/pickups/#{body["id"]}/check", { "items" => [{ "line_id" => asset_line(body)["id"], "tag" => "CAM-INEXISTENTE" },
