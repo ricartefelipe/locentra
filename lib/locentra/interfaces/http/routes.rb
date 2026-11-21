@@ -309,6 +309,7 @@ module Locentra
         def draw_api(router, api)
           r = router
           r.get "/api/v1/openapi.yaml", api, :openapi, auth: :public
+          r.get "/api/v1/organization", api, :organization, auth: :api
           r.get "/api/v1/availability", api, :availability, auth: :api
           r.get "/api/v1/customers", api, :customers, auth: :api
           r.post "/api/v1/customers", api, :create_customer, auth: :api
