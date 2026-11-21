@@ -143,7 +143,8 @@ module Locentra
           "partial" => "info", "not_delivered" => "muted", "pending" => "warning", "checked" => "info", "approved" => "success",
           "rejected" => "danger", "open" => "warning", "dismissed" => "muted", "received" => "success", "resolved" => "muted",
           "overdue" => "danger", "affected_by_overdue" => "warning", "asset_unavailable" => "danger", "draft" => "neutral",
-          "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted"
+          "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted", "scheduled" => "info",
+          "exhausted" => "warning", "ended" => "muted", "released_cancelled" => "muted", "released_expired" => "muted"
         }.freeze
 
         # Rótulo em português de um código interno (ver Labels::GROUPS).
@@ -152,6 +153,17 @@ module Locentra
         # Percentual a partir de pontos-base, com aritmética inteira (Domain::Percent).
         def percent(bps) = Domain::Percent.label(bps)
         def percent_value(bps) = Domain::Percent.value(bps)
+
+        # Vigência semiaberta [início, fim) no fuso da organização: "desde …", "até …" ou "sem prazo".
+        def validity(from, to)
+          parts = []
+          parts << "desde #{datetime(from)}" if from
+          parts << "até #{datetime(to)}" if to
+          parts.empty? ? "sem prazo" : parts.join(" ")
+        end
+
+        # Desconto de um cupom (cadastro ou snapshot): percentual em pontos-base ou valor fixo em centavos.
+        def coupon_discount(kind, value) = kind == "percent" ? percent(value) : money(value)
 
         def asset_status(status) = Domain::Catalog::ASSET_STATUSES.fetch(status.to_s) { Labels.label(:field, status) }
 
@@ -233,6 +245,7 @@ module Locentra
           ["Financeiro", "/financeiro", "finance.read"],
           ["Produtos e kits", "/produtos", "catalog.read"],
           ["Ativos", "/ativos", "catalog.read"],
+          ["Cupons", "/cupons", "coupons.read"],
           ["Retiradas e devoluções", "/operacao", "fulfillment.write"],
           ["Manutenção", "/manutencao", "maintenance.write"],
           ["Usuários e permissões", "/usuarios", "members.read"],

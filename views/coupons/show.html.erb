@@ -1,0 +1,88 @@
+<% coupon = @data[:coupon] %>
+<% path = "/cupons/#{coupon.id}" %>
+<% current = { "descricao" => coupon.description, "valido_de" => local_input(coupon.valid_from), "valido_ate" => local_input(coupon.valid_until),
+               "maximo_usos" => coupon.max_redemptions, "versao" => coupon.lock_version,
+               "subtotal_minimo" => coupon.min_subtotal_cents.to_i.positive? ? Locentra::Domain::Money.new(coupon.min_subtotal_cents).to_decimal_string : "" } %>
+<% editing = !@values.nil? %>
+<header class="page-header">
+  <h1>Cupom <%= coupon.code %> <%= status_badge(@data[:status], label(:coupon_status, @data[:status])) %></h1>
+  <p class="muted"><a href="/cupons">Voltar para cupons</a></p>
+</header>
+<%= partial("shared/errors") %>
+<div class="grid-2">
+  <section class="panel" aria-labelledby="cupom-dados">
+    <h2 id="cupom-dados">Dados do cupom</h2>
+    <dl class="details">
+      <dt>Tipo</dt><dd><%= label(:coupon_kind, coupon.kind) %></dd>
+      <dt>Desconto</dt><dd><%= coupon_discount(coupon.kind, coupon.value) %></dd>
+      <dt>Descrição</dt><dd><%= coupon.description || "—" %></dd>
+      <dt>Vigência</dt><dd><%= validity(coupon.valid_from, coupon.valid_until) %></dd>
+      <dt>Usos ativos</dt>
+      <dd><%= coupon.usage_text %><% if coupon.max_redemptions %>; restantes: <%= Locentra::Domain::Pricing.count_label(coupon.remaining) %><% end %>
+        <% if coupon.legacy_redemptions.to_i.positive? %><br><span class="muted">inclui <%= Locentra::Domain::Pricing.count_label(coupon.legacy_redemptions) %> usos registrados antes da versão 1.1.0</span><% end %></dd>
+      <dt>Total de usos</dt><dd><%= Locentra::Domain::Pricing.count_label(coupon.total_redemptions.to_i) %> <span class="muted">(inclui os liberados por cancelamento ou expiração)</span></dd>
+      <dt>Subtotal mínimo</dt><dd><%= coupon.min_subtotal_cents.to_i.positive? ? money(coupon.min_subtotal_cents) : "—" %></dd>
+      <dt>Cadastrado por</dt><dd><%= @data[:created_by_name] || "—" %><% if coupon.created_at %> em <%= datetime(coupon.created_at) %><% end %></dd>
+      <dt>Atualizado em</dt><dd><%= datetime(coupon.updated_at) %></dd>
+      <% if coupon.deactivated_at %><dt>Desativado em</dt><dd><%= datetime(coupon.deactivated_at) %></dd><% end %>
+    </dl>
+    <p class="muted">Horários no fuso <%= time_zone.identifier %>.</p>
+  </section>
+  <% if can?("coupons.write") %>
+    <section class="panel" aria-labelledby="cupom-acoes">
+      <h2 id="cupom-acoes">Ações</h2>
+      <details<%= open_after_failure(path) %>>
+        <summary>Editar cupom</summary>
+        <form method="post" action="<%= path %>" class="form-grid">
+          <%= csrf_field %>
+          <input type="hidden" name="versao" value="<%= (@values || current)["versao"] %>">
+          <p class="full muted">Código, tipo e desconto não mudam; para outro desconto, cadastre um novo cupom.</p>
+          <%= partial("coupons/fields", prefix: "e-", values: @values || current, errors: editing ? @errors : {}) %>
+          <div class="full"><button type="submit">Salvar alterações</button></div>
+        </form>
+      </details>
+      <div class="action-row">
+        <% if coupon.active %>
+          <form method="post" action="<%= path %>/desativar" data-confirm="Desativar o cupom <%= coupon.code %>? Reservas já registradas não mudam.">
+            <%= csrf_field %><button type="submit" class="danger">Desativar cupom</button></form>
+        <% else %>
+          <form method="post" action="<%= path %>/reativar"><%= csrf_field %><button type="submit">Reativar cupom</button></form>
+        <% end %>
+        <% if @data[:deletable] %>
+          <form method="post" action="<%= path %>/excluir" data-confirm="Excluir o cupom <%= coupon.code %>? Esta ação não pode ser desfeita.">
+            <%= csrf_field %><button type="submit" class="danger">Excluir cupom</button></form>
+        <% end %>
+      </div>
+      <% unless @data[:deletable] %><p class="muted">Cupom com uso registrado não pode ser excluído; desative-o para impedir novos usos.</p><% end %>
+    </section>
+  <% end %>
+</div>
+<section class="panel" id="usos" aria-labelledby="cupom-usos">
+  <h2 id="cupom-usos">Usos</h2>
+  <% if @redemptions.items.empty? %>
+    <p class="empty">Este cupom ainda não foi usado.</p>
+  <% else %>
+    <table class="table">
+      <caption class="sr-only">Usos do cupom <%= coupon.code %></caption>
+      <thead><tr><th scope="col">Reserva</th><th scope="col">Cliente</th><th scope="col" class="num">Subtotal</th><th scope="col" class="num">Desconto</th>
+        <th scope="col">Usado em</th><th scope="col">Situação</th></tr></thead>
+      <tbody>
+        <% @redemptions.items.each do |use| %>
+          <tr>
+            <td><% if use[:reservation_id] %><a href="/reservas/<%= use[:reservation_id] %>"><%= use[:reservation_code] %></a><% else %>—<% end %></td>
+            <td><%= use[:customer_name] || "—" %></td>
+            <td class="num"><%= money(use[:subtotal]) %></td>
+            <td class="num">−<%= money(use[:discount]) %></td>
+            <td><%= datetime(use[:redeemed_at]) %></td>
+            <td><%= status_badge(use[:state], label(:redemption_state, use[:state])) %><% if use[:released_at] %><br><span class="muted">em <%= datetime(use[:released_at]) %></span><% end %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+    <%= partial("shared/pagination", page: @redemptions, base_path: path, query: {}, offset_param: "inicio_usos", label: "Paginação dos usos") %>
+  <% end %>
+</section>
+<section class="panel" aria-labelledby="cupom-historico">
+  <h2 id="cupom-historico">Histórico</h2>
+  <%= partial("shared/history", history: @data[:history]) %>
+</section>

@@ -82,6 +82,11 @@ module Locentra
           raise Domain::ValidationError.field(field, "data e hora inválidas ou inexistentes no fuso da organização")
         end
 
+        # Instante opcional de formulário (datetime-local no fuso da organização): vazio vale nil.
+        def optional_local_time(ctx, value, field)
+          value.to_s.strip.empty? ? nil : local_time(ctx, value, field)
+        end
+
         def period_from(ctx, starts, ends)
           Domain::Period.new(local_time(ctx, starts, "inicio"), local_time(ctx, ends, "fim"))
         end
