@@ -51,6 +51,8 @@ module Locentra
         end
       end
 
+      # Nova filial: o limite de filiais do plano é verificado sob a trava da assinatura. O endereço acima de
+      # 300 caracteres é recusado (não truncado).
       class CreateBranch
         def initialize(uow:, organizations:, limits:, audit:, clock:, ids:)
           @uow = uow
@@ -252,15 +254,19 @@ module Locentra
         end
       end
 
+      # Organização, filiais e assinatura. Sem `permission`, serve aos formulários e à resolução de
+      # `--filial` na CLI (qualquer membro); `read_organization` usa `organization.read` (página da
+      # organização, API e `organization show`).
       class GetOrganization
-        def initialize(uow:, organizations:)
+        def initialize(uow:, organizations:, permission: nil)
           @uow = uow
           @organizations = organizations
+          @permission = permission
         end
 
         def call(actor)
-          @uow.run(actor) do |tx, current|
-            org = @organizations.find(tx, tx.tenant_id!) || raise(Domain::NotFound, "organização")
+          @uow.run(actor, @permission) do |tx, current|
+            org = @organizations.find(tx, tx.tenant_id!) || raise(Domain::NotFound.new("organização", feminine: true))
             { organization: org, branches: @organizations.branches(tx), subscription: @organizations.subscription(tx), actor: current }
           end
         end

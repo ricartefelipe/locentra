@@ -4,7 +4,7 @@ require_relative "../unit_helper"
 
 # Regras das configurações da organização (política de cancelamento, validade padrão do bloqueio, fuso e
 # nome), da revisão e da desativação de filiais.
-class OrganizationSettingsTest < UnitTest
+class OrganizationSettingsDomainTest < UnitTest
   O = Domain::Organizations
   P = O::CancellationPolicy
   FIELD = "faixas_cancelamento"

@@ -12,14 +12,13 @@ module OrganizationSettingsSupport
       cancellation_rows: cancellation_rows || policy_rows(org.cancellation_policy), confirm_timezone_change: confirm_timezone_change }
   end
 
-  # Grava a revisão calculada pelo domínio diretamente na organização do ator.
-  def change_settings(actor: @actor, **changes)
+  # Alteração pelo caso de uso (somente os campos informados mudam); devolve a organização revisada.
+  def change_settings(actor: @actor, lock_version: nil, **changes)
     org = uc(:get_organization).call(actor)[:organization]
-    revised = org.revise(**settings_attrs(org, **changes))
-    owner_query("UPDATE organizations SET name = $2, timezone = $3, settings = $4, lock_version = $5 WHERE id = $1",
-                [org.id, revised.name, revised.timezone, JSON.generate(revised.settings), revised.lock_version], tenant: org.id)
-    revised
+    uc(:update_organization_settings).call(actor, settings_attrs(org, **changes), lock_version: lock_version).record
   end
+
+  def current_organization(actor = @actor) = uc(:get_organization).call(actor)[:organization]
 
   def portal_actor(customer, org: @org)
     user_id = SecureRandom.uuid

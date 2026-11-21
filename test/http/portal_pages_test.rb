@@ -287,7 +287,7 @@ class PortalPagesTest < PortalHttpTest
                                       "produto" => [@camera.id], "quantidade" => ["1"] }
 
     assert_equal 422, last_response.status
-    assert_includes last_response.body, "filial não encontrado"
+    assert_includes last_response.body, "filial não encontrada"
     refute_includes get_ok("/portal/reservas"), other_reservation.code
     refute_includes get_ok("/portal/orcamentos"), other_quote.code
     refute_includes get_ok("/portal/contratos"), other_contract.code

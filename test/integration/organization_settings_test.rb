@@ -2,14 +2,17 @@
 
 require_relative "integration_helper"
 require_relative "../support/operations_support"
+require_relative "../support/portal_support"
 require_relative "../support/organization_settings_support"
 
-# Configurações da organização de ponta a ponta: a política de cancelamento congelada na reserva e na
+# Configurações da organização de ponta a ponta: quem altera e quem lê, isolamento por organização, a
+# política de cancelamento congelada na reserva e na
 # versão do orçamento (o contrato copia a da reserva), a validade padrão do bloqueio e as consequências
 # da troca de fuso (preços, extensões, multas, vencimentos, contratos e aditivos no fuso de referência
 # da reserva; reservas novas no fuso novo).
-class OrganizationSettingsTest < DatabaseTest
+class OrganizationSettingsFlowTest < DatabaseTest
   include OperationsSupport
+  include PortalHelpers
   include OrganizationSettingsSupport
 
   POLICY_B = { "tiers" => [{ "min_hours_before" => 48, "fee_bps" => 2000 }, { "min_hours_before" => 0, "fee_bps" => 5000 }] }.freeze
@@ -40,6 +43,54 @@ class OrganizationSettingsTest < DatabaseTest
   def approve(quote, version)
     uc(:send_quote).call(@actor, quote.id)
     uc(:approve_quote).call(@actor, quote.id, version: version, approver_name: "Maria Compradora")
+  end
+
+  def settings_events
+    owner_query("SELECT actor_id, details FROM audit_events WHERE action = 'organization.settings_updated' ORDER BY occurred_at, id")
+      .map { |row| [row["actor_id"], JSON.parse(row["details"])] }
+  end
+
+  # Papéis e isolamento -------------------------------------------------------------------------------
+
+  def test_owner_and_admin_change_the_settings_with_before_and_after_in_the_audit
+    admin = staff_member(@org, "admin@alfa.test", "admin")
+    change_settings(hold_minutes: "45")
+    renamed = change_settings(actor: admin, name: "Locadora Alfa Eventos", lock_version: 2)
+
+    assert_equal ["Locadora Alfa Eventos", 3, 45], [renamed.name, renamed.lock_version, current_organization.hold_minutes]
+    assert_equal [[@org[:user_id], { "changes" => { "hold_minutes" => [30, 45] }, "lock_version" => 2 }],
+                  [admin.user_id, { "changes" => { "name" => ["Locadora Alfa", "Locadora Alfa Eventos"] }, "lock_version" => 3 }]], settings_events
+  end
+
+  def test_other_roles_and_credentials_cannot_change_the_settings_but_every_role_reads_them
+    %w[manager attendant stock_operator finance auditor].each do |role|
+      member = staff_member(@org, "#{role}@alfa.test", role)
+
+      assert_raises(D::AccessDenied, role) { change_settings(actor: member, hold_minutes: "45") }
+      assert_equal "Locadora Alfa", uc(:read_organization).call(member)[:organization].name, role
+    end
+    token = uc(:create_credential).call(@actor, name: "Terminal", scopes: %w[organization.manage organization.read], kind: "cli",
+                                                expires_in_days: 30)["token"]
+    cli = uc(:authenticate_credential).call(token)
+    error = assert_raises(D::AccessDenied) { uc(:update_organization_settings).call(cli, settings_attrs(current_organization, hold_minutes: "45")) }
+
+    assert_equal "as configurações da organização são alteradas somente por usuários", error.message
+    assert_equal [1, 30], [uc(:read_organization).call(cli)[:organization].lock_version, current_organization.hold_minutes]
+    assert_empty settings_events
+  end
+
+  def test_settings_and_branches_are_isolated_by_organization
+    beta = create_organization(name: "Locadora Beta", email: "dona@beta.test")
+    change_settings(hold_minutes: "45")
+    intruder = beta[:actor]
+
+    assert_equal [30, 45], [current_organization(intruder).hold_minutes, current_organization.hold_minutes]
+    assert_raises(D::NotFound) { uc(:get_branch).call(intruder, @branch.id) }
+    assert_raises(D::NotFound) { uc(:update_branch).call(intruder, @branch.id, name: "Invasora", address: nil) }
+    assert_raises(D::NotFound) { uc(:set_branch_active).call(intruder, @branch.id, active: false) }
+    branch = uc(:get_branch).call(@actor, @branch.id)[:branch]
+
+    assert_equal [true, 1, "Matriz"], [branch.active, branch.lock_version, branch.name]
   end
 
   # Snapshot da política -----------------------------------------------------------------------------

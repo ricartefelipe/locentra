@@ -5,7 +5,9 @@ require_relative "../support/commercial_terms_support"
 
 # Garantias do banco para as configurações da organização e a gestão de filiais, exercitadas com os papéis
 # reais: privilégios por coluna, política de cancelamento imutável na reserva e na versão do orçamento,
-# preenchimento de inserções no formato da 1.1.0 e CHECKs de formato.
+# preenchimento de inserções no formato da 1.1.0, CHECKs de formato e as consultas do repositório de
+# organizações (gravação com versão esperada, vínculos de filial, impacto da troca de fuso), sempre
+# restritas ao tenant.
 class OrganizationSettingsRepositoryTest < DatabaseTest
   include CommercialTermsSupport
 
@@ -106,6 +108,21 @@ class OrganizationSettingsRepositoryTest < DatabaseTest
     assert_equal default_policy, policy_of("reservations", legacy_insert), "JSON null equivale a ausente"
   end
 
+  # A aplicação sempre informa a política: o gatilho de preenchimento é só para instâncias 1.1.0.
+  def test_repositories_always_receive_the_policy_explicitly
+    parameters = Locentra::Infrastructure::Persistence::ReservationRepository.instance_method(:insert).parameters
+
+    assert_includes parameters, %i[keyreq cancellation_policy]
+    quotes = @system.repos[:quotes]
+    quote_id = owner_query("SELECT quote_id FROM quote_versions WHERE id = $1", [quote_version_id]).first["quote_id"]
+    version = tenant_tx { |tx| quotes.find_version(tx, quote_id, 1) }
+
+    assert_equal D::Organizations::CancellationPolicy::DEFAULT, version.cancellation_policy
+    error = assert_raises(ArgumentError) { tenant_tx { |tx| quotes.insert_version(tx, version.with(cancellation_policy: nil), @actor.user_id) } }
+
+    assert_equal "versão sem política de cancelamento", error.message
+  end
+
   def test_shape_checks_refuse_malformed_policies_settings_and_branch_states
     invalid_shapes = ['{"tiers": []}', '{"tiers": {}}', '{"faixas": []}', '{"tiers": [{"min_hours_before": "24", "fee_bps": 0}]}', "[]", '{"tiers": [1]}']
     shape_ok = invalid_shapes.map { |shape| owner_query("SELECT app_cancellation_policy_shape_ok($1::jsonb) AS ok", [shape]).first["ok"] }
@@ -122,5 +139,80 @@ class OrganizationSettingsRepositoryTest < DatabaseTest
     assert_raises(PG::CheckViolation) { owner_query("UPDATE branches SET active = false WHERE id = $1", [@branch.id]) }
     assert_raises(PG::CheckViolation) { owner_query("UPDATE branches SET deactivated_at = now() WHERE id = $1", [@branch.id]) }
     assert_equal 1, owner_query("UPDATE branches SET active = false, deactivated_at = now() WHERE id = $1 RETURNING id", [@branch.id]).size
+  end
+
+  def repo = @system.repos[:organizations]
+  def reservations = @system.repos[:reservations]
+
+  def test_updates_with_the_expected_version_return_the_number_of_rows
+    org = tenant_tx { |tx| repo.lock(tx, @org[:organization_id]) }
+    revised = org.with(name: "Locadora Beta", lock_version: 2)
+    branch = tenant_tx { |tx| repo.lock_branch(tx, @branch.id) }
+    renamed = branch.with(name: "Sede", lock_version: 2)
+
+    assert_equal [1, 0], [tenant_tx { |tx| repo.update_settings(tx, revised, 1, @clock.now) }, tenant_tx do |tx|
+      repo.update_settings(tx, revised, 1, @clock.now)
+    end]
+    assert_equal [1, 0], [tenant_tx { |tx| repo.update_branch(tx, renamed, 1, @clock.now) }, tenant_tx { |tx| repo.update_branch(tx, renamed, 1, @clock.now) }]
+    assert_equal(["Locadora Beta", 2], tenant_tx { |tx| repo.find(tx, @org[:organization_id]) }.then { |found| [found.name, found.lock_version] })
+    assert_equal(["Sede", 2], tenant_tx { |tx| repo.find_branch(tx, @branch.id) }.then { |found| [found.name, found.lock_version] })
+    assert_raises(ArgumentError) { tenant_tx { |tx| repo.find_branch(tx, @branch.id, lock: :exclusive) } }
+  end
+
+  def test_queries_and_locks_see_only_the_tenant
+    beta = create_organization(name: "Locadora Beta", email: "dona@beta.test")
+    reservation = book
+
+    assert_nil(tenant_tx { |tx| repo.lock(tx, beta[:organization_id]) })
+    assert_nil(tenant_tx { |tx| repo.find_branch(tx, beta[:branch].id, lock: :share) })
+    assert_nil(tenant_tx(beta) { |tx| reservations.cancellation_policy(tx, reservation.id) })
+    assert_nil(tenant_tx(beta) { |tx| reservations.reference_timezone(tx, reservation.id) })
+    assert_equal [1, 1], [tenant_tx { |tx| repo.active_branch_count(tx) }, tenant_tx(beta) { |tx| repo.active_branch_count(tx) }]
+    assert_equal({ assets: 0, stock_units: 0 }, tenant_tx(beta) { |tx| repo.branch_usage(tx, @branch.id) })
+    assert_equal 0, tenant_tx(beta) { |tx| repo.branch_commitments(tx, @branch.id, @clock.now) }[:reservations][:count]
+    assert_equal({ open_reservations: 0, open_contracts: 0, scheduled_terms: 0 }, tenant_tx(beta) { |tx| repo.timezone_impact(tx, @clock.now) })
+    assert_equal([D::Organizations::CancellationPolicy::DEFAULT, "America/Sao_Paulo"],
+                 tenant_tx { |tx| [reservations.cancellation_policy(tx, reservation.id), reservations.reference_timezone(tx, reservation.id)] })
+  end
+
+  def quote_in(branch, valid_until:, send: true)
+    quote = uc(:create_quote).call(@actor, { customer_id: @customer.id, branch_id: branch.id, period: window(20), lines: [line(@chairs, 1)],
+                                             valid_until: valid_until })
+    uc(:send_quote).call(@actor, quote.id) if send
+    quote
+  end
+
+  def test_branch_commitments_count_only_what_blocks_the_deactivation
+    north = uc(:create_branch).call(@actor, name: "Unidade Norte", code: "NORTE")
+    stock(@actor, @chairs, north, 10)
+    open = Array.new(6) { |i| reserve(@actor, @customer, north, window(10 + i), [line(@chairs, 1)], mode: "confirm") }
+    reserve(@actor, @customer, north, window(18), [line(@chairs, 1)], mode: "hold", hold_minutes: 5)
+    vigente = quote_in(north, valid_until: @clock.now + 7200)
+    quote_in(north, valid_until: @clock.now + 600)
+    quote_in(north, valid_until: @clock.now + 7200, send: false)
+    incoming = uc(:request_transfer).call(@actor, to_branch_id: north.id, product_id: @chairs.id, from_branch_id: @branch.id, quantity: 1)
+    uc(:request_transfer).call(@actor, to_branch_id: @branch.id, product_id: @chairs.id, from_branch_id: north.id, quantity: 1)
+    @clock.travel_to(@clock.now + 1200)
+    commitments = tenant_tx { |tx| repo.branch_commitments(tx, north.id, @clock.now) }
+
+    assert_equal({ count: 6, codes: open.map(&:code).sort.first(5) }, commitments[:reservations], "o bloqueio vencido não conta")
+    assert_equal({ count: 1, codes: [vigente.code] }, commitments[:sent_quotes], "orçamento enviado vencido e rascunho não contam")
+    assert_equal({ count: 0, codes: [] }, commitments[:approved_quotes])
+    assert_equal({ count: 1, codes: [incoming.code] }, commitments[:incoming_transfers], "a transferência de saída não conta")
+    assert_equal({ assets: 0, stock_units: 10 }, tenant_tx { |tx| repo.branch_usage(tx, north.id) })
+    assert_equal(2, tenant_tx { |tx| repo.active_branch_count(tx) })
+  end
+
+  def test_timezone_impact_counts_open_records_and_future_validities
+    book(day: 10, mode: "hold") # vencido depois de uma hora: não conta
+    book(day: 12)
+    uc(:issue_contract).call(@actor, book(day: 14).id)
+    create_coupon("FUTURO", valid_from: @clock.now + 86_400)
+    create_coupon("ATEMAIO", valid_until: @clock.now + 86_400)
+    create_coupon("SEMPRAZO")
+    create_agreement(@customer, 500, valid_until: @clock.now + 86_400)
+    @clock.travel_to(@clock.now + 3600)
+
+    assert_equal({ open_reservations: 2, open_contracts: 1, scheduled_terms: 3 }, tenant_tx { |tx| repo.timezone_impact(tx, @clock.now) })
   end
 end

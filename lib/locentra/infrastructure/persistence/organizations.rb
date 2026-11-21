@@ -4,13 +4,31 @@ module Locentra
   module Infrastructure
     module Persistence
       class OrganizationRepository
+        include OrganizationQueries
+
         D = Domain::Organizations
+        LOCKS = { nil => "", share: " FOR SHARE", update: " FOR NO KEY UPDATE" }.freeze
         ORGANIZATION_COLUMNS = "id, name, slug, timezone, status, settings, lock_version"
         BRANCH_COLUMNS = "id, organization_id, name, code, address, active, deactivated_at, lock_version"
 
         def find(tx, id)
           row = tx.query_one("SELECT #{ORGANIZATION_COLUMNS} FROM organizations WHERE id = $1", [id])
           row && map_organization(row)
+        end
+
+        # Trava da organização do contexto para alterar as configurações ou contar as filiais ativas. FOR NO
+        # KEY UPDATE não conflita com as chaves estrangeiras (FOR KEY SHARE) das inserções do tenant.
+        def lock(tx, id)
+          row = tx.query_one("SELECT #{ORGANIZATION_COLUMNS} FROM organizations WHERE id = $1 AND id = $2 FOR NO KEY UPDATE", [id, tx.tenant_id!])
+          row && map_organization(row)
+        end
+
+        # Grava a revisão das configurações se a versão ainda for a esperada; devolve o número de linhas.
+        def update_settings(tx, org, expected, now)
+          tx.execute(<<~SQL, [tx.tenant_id!, org.name, org.timezone, org.settings, org.lock_version, now, expected])
+            UPDATE organizations SET name = $2, timezone = $3, settings = $4, lock_version = $5, updated_at = $6
+             WHERE id = $1 AND lock_version = $7
+          SQL
         end
 
         def find_plan(tx, plan_id)
@@ -43,8 +61,22 @@ module Locentra
                    [tx.tenant_id!]).map { |row| map_branch(row) }
         end
 
-        def branch_active?(tx, id)
-          !tx.query_one("SELECT 1 FROM branches WHERE organization_id = $1 AND id = $2 AND active", [tx.tenant_id!, id]).nil?
+        # Filial do tenant, ativa ou não. `lock`: nil (leitura), :share (FOR SHARE, operações que criam vínculo
+        # com a filial) ou :update (FOR NO KEY UPDATE, edição, desativação e reativação).
+        def find_branch(tx, id, lock: nil)
+          clause = LOCKS.fetch(lock) { raise ArgumentError, "trava desconhecida: #{lock.inspect}" }
+          row = tx.query_one("SELECT #{BRANCH_COLUMNS} FROM branches WHERE organization_id = $1 AND id = $2#{clause}", [tx.tenant_id!, id])
+          row && map_branch(row)
+        end
+
+        def lock_branch(tx, id) = find_branch(tx, id, lock: :update)
+
+        # Grava a filial se a versão ainda for a esperada; devolve o número de linhas. O código não muda.
+        def update_branch(tx, branch, expected, now)
+          tx.execute(<<~SQL, [tx.tenant_id!, branch.id, branch.name, branch.address, branch.active, branch.deactivated_at, branch.lock_version, now, expected])
+            UPDATE branches SET name = $3, address = $4, active = $5, deactivated_at = $6, lock_version = $7, updated_at = $8
+             WHERE organization_id = $1 AND id = $2 AND lock_version = $9
+          SQL
         end
 
         def insert_membership(tx, row)

@@ -190,7 +190,7 @@ module Locentra
           R::Rules.validate_start!(period, now)
           lines = R::Rules.normalize_lines(input.fetch(:lines))
           customer = active_customer!(tx, input.fetch(:customer_id))
-          branch_id = active_branch!(tx, input.fetch(:branch_id))
+          branch_id = Organizations::BranchGuard.active!(@organizations, tx, input.fetch(:branch_id), field: "filial").id
           org = @organizations.find(tx, tx.tenant_id!)
           products = active_products!(tx, lines)
           priced = if input[:pricing_snapshot]
@@ -216,13 +216,6 @@ module Locentra
           raise Domain::ValidationError.field("cliente", "cliente bloqueado ou inativo") unless customer.status == "active"
 
           customer
-        end
-
-        def active_branch!(tx, branch_id)
-          id = Domain::Identifier.parse(branch_id, "filial")
-          raise Domain::NotFound, "filial" unless @organizations.branch_active?(tx, id)
-
-          id
         end
 
         def active_products!(tx, lines)
