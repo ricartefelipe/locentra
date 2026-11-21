@@ -782,7 +782,7 @@ components:
           required: [fee_id]
           properties:
             fee_id: { type: string, format: uuid }
-            amount_cents: { type: integer, minimum: 1, description: Sem o campo, vale o valor padrão; valor diferente exige `fees.override` }
+            amount_cents: { type: integer, minimum: 1, description: "Sem o campo, vale o valor padrão; valor diferente exige `fees.override`" }
         - type: object
           required: [description, amount_cents]
           properties:
@@ -831,7 +831,7 @@ components:
         valid_until: { type: [string, "null"], format: date-time, description: Fim da vigência (exclusivo); nulo é sem prazo }
         max_redemptions: { type: [integer, "null"] }
         redemptions: { type: integer, description: Usos ativos (reservas não canceladas nem expiradas e usos anteriores à versão 1.1.0) }
-        total_redemptions: { type: integer, description: Todos os usos registrados, inclusive os liberados }
+        total_redemptions: { type: integer, description: "Todos os usos registrados, inclusive os liberados" }
         remaining: { type: [integer, "null"], description: Usos restantes; nulo sem limite }
         min_subtotal: { $ref: "#/components/schemas/Money" }
         active: { type: boolean }
@@ -861,7 +861,7 @@ components:
         valid_until: { type: [string, "null"], format: date-time }
         max_redemptions: { type: [integer, "null"], minimum: 1, maximum: 1000000, description: Não pode ficar abaixo dos usos ativos }
         min_subtotal_cents: { type: [integer, "null"], minimum: 0 }
-        lock_version: { type: integer, minimum: 1, description: Versão lida pelo cliente (controle otimista, opcional) }
+        lock_version: { type: integer, minimum: 1, description: "Versão lida pelo cliente (controle otimista, opcional)" }
     CouponPage:
       type: object
       properties:

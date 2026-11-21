@@ -191,6 +191,39 @@ class ApiTest < HttpTest
     end
   end
 
+  SCHEMA_KEYWORDS = %w[$ref type format properties items required enum const description example examples default minimum maximum
+                       exclusiveMinimum exclusiveMaximum minLength maxLength minItems maxItems pattern oneOf anyOf allOf not
+                       additionalProperties nullable readOnly writeOnly title deprecated].freeze
+
+  # Um escalar sem aspas com vírgula dentro de `{ ... }` encerra o valor na vírgula e cria uma chave
+  # espúria no schema: toda chave de schema precisa ser uma palavra-chave conhecida.
+  def test_openapi_schemas_use_only_known_keywords
+    spec = YAML.safe_load_file(File.expand_path("../../docs/openapi.yaml", __dir__))
+    unknown = []
+    spec.dig("components", "schemas").each { |name, schema| check_schema(schema, "schemas/#{name}", unknown) }
+    find_schemas(spec["paths"], "paths", unknown)
+    find_schemas(spec["components"].except("schemas"), "components", unknown)
+
+    assert_empty unknown
+  end
+
+  def find_schemas(node, path, unknown)
+    case node
+    when Hash
+      node.each { |key, value| key == "schema" ? check_schema(value, "#{path}/schema", unknown) : find_schemas(value, "#{path}/#{key}", unknown) }
+    when Array then node.each_with_index { |value, index| find_schemas(value, "#{path}[#{index}]", unknown) }
+    end
+  end
+
+  def check_schema(schema, path, unknown)
+    return unless schema.is_a?(Hash)
+
+    (schema.keys - SCHEMA_KEYWORDS).each { |key| unknown << "#{path}: #{key}" }
+    schema.fetch("properties", {}).each { |name, property| check_schema(property, "#{path}/#{name}", unknown) }
+    %w[items not additionalProperties].each { |key| check_schema(schema[key], "#{path}/#{key}", unknown) }
+    %w[oneOf anyOf allOf].each { |key| Array(schema[key]).each_with_index { |item, i| check_schema(item, "#{path}/#{key}[#{i}]", unknown) } }
+  end
+
   def test_confirming_an_expired_hold_records_the_expiration
     hold = reserve(@actor, @customer, @org[:branch], period("2026-03-25T08:00:00Z", "2026-03-25T12:00:00Z"), [line(@camera, 1)], hold_minutes: 5)
     @clock.advance(6 * 60)
