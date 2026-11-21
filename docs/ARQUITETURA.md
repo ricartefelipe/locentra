@@ -51,7 +51,7 @@ flowchart TB
 | Aplicação | `lib/locentra/application` | Casos de uso: autorização, coordenação do domínio, transações, portas | Domínio |
 | Infraestrutura | `lib/locentra/infrastructure` | PostgreSQL, pool, repositórios SQL, fila, SMTP, PDF, armazenamento, provedores, HTTP seguro | Domínio, Aplicação |
 | Interfaces | `lib/locentra/interfaces/{http,cli,worker}` | Rack/Puma, interface web, portal, API, CLI, worker | Aplicação |
-| Composição | `lib/locentra/system.rb` | Composition root explícito; nenhuma conexão aberta na montagem | Todas |
+| Composição | `lib/locentra/system.rb`, `lib/locentra/wiring/` | Composition root explícito (montagens por módulo em `wiring/`); nenhuma conexão aberta na montagem | Todas |
 
 Carregar `locentra/domain` e `locentra/application` não abre conexões, não inicia threads, não lê variáveis
 de ambiente e não carrega infraestrutura. A aplicação declara as exceções das portas que os adaptadores
@@ -70,6 +70,7 @@ adaptadores de infraestrutura (cifragem, armazenamento, HTTP seguro, Asaas) no m
 | Catálogo e ativos | `catalog.rb` | `catalog.rb` | [Máquinas de estado](MAQUINAS-DE-ESTADO.md) |
 | Disponibilidade e reservas | `availability.rb`, `reservations.rb` | `availability.rb`, `reservations.rb` | [Motor de disponibilidade](DISPONIBILIDADE.md) |
 | Precificação | `pricing.rb` | `reservations.rb` (`Pricer`) | [Precificação](PRECIFICACAO.md) |
+| Condições comerciais | `commercial_terms.rb`, `pricing.rb` (`Coupon`) | `commercial_terms.rb` | [Módulo](modulos/condicoes-comerciais.md), [Precificação](PRECIFICACAO.md) |
 | Orçamentos e contratos | `quotes.rb`, `contracts.rb` | `quotes.rb`, `contracts.rb` | [Módulo](modulos/orcamentos-contratos.md) |
 | Retirada, devolução, manutenção | `fulfillment.rb`, `maintenance.rb`, `transfers.rb`, `alerts.rb` | `fulfillment.rb`, `returns.rb`, `inspections.rb`, `maintenance.rb`, `transfers.rb`, `overdue.rb` | [Módulo](modulos/retirada-devolucao-manutencao.md) |
 | Financeiro e cauções | `finance/*` | `finance/*` | [Módulo](modulos/financeiro.md), [Caução](CAUCAO.md) |

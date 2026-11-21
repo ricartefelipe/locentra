@@ -19,6 +19,31 @@ dados de outra organização.
 | Idempotência, auditoria, webhooks, relatórios | Tabelas de tenant com RLS; chaves de idempotência têm escopo por organização e ator. |
 | Métricas | Rótulos de baixa cardinalidade, sem identificadores de cliente, reserva ou organização. |
 
+## Condições comerciais (migration 0015)
+
+- `coupon_redemptions` e `additional_fees` são tabelas de tenant como as demais: `organization_id NOT NULL`,
+  RLS habilitada e forçada (`app_enable_tenant_rls`) e chaves estrangeiras compostas. O uso de um cupom
+  referencia `(organization_id, coupon_id)` e `(organization_id, reservation_id)`: não é possível registrar
+  o uso de um cupom por uma reserva de outra organização. `coupons` e `customer_price_agreements` já tinham
+  RLS forçada desde a migration 0004.
+- O código de cupom e o código de tarifa são únicos **por organização**: o mesmo código pode existir em
+  duas organizações, com cadastros independentes. O cupom de uma organização responde "cupom inexistente" na
+  outra, e um identificador de tarifa, cupom ou condição de outra organização responde "não encontrado".
+- **Privilégios de coluna:** além da RLS, `locentra_app` só atualiza as colunas editáveis de `coupons`
+  (descrição, vigência, máximo de usos, subtotal mínimo, ativação e controle de versão) e de
+  `additional_fees` (nome, descrição, valor padrão, ativação e controle de versão), e somente as colunas de
+  encerramento de `customer_price_agreements`. `coupon_redemptions` é somente inserção. `locentra_worker`
+  não grava em nenhuma dessas tabelas.
+- **`NO FORCE` pontual na migration 0015:** com a RLS forçada, nem o proprietário das tabelas enxerga linhas
+  sem contexto de organização, e a migration precisa preencher colunas novas em todas as organizações
+  (`coupons.updated_at` e `customer_price_agreements.valid_from`) e verificar sobreposições de vigência.
+  Por isso `coupons` e `customer_price_agreements` ficam com `NO FORCE ROW LEVEL SECURITY` **somente dentro
+  da transação da migration**, que termina com `FORCE` restaurado; se a migration falha, a transação é
+  desfeita e nada muda. A RLS continua habilitada o tempo todo para `locentra_app` e `locentra_worker`, que
+  não são proprietários. `TenantIsolationTest` confirma a RLS forçada depois da migration, e
+  `test/repository/migration_0015_test.rb` confere o preenchimento e o `FORCE` restaurado numa atualização a
+  partir do esquema da 0014.
+
 ## Exceções globais documentadas
 
 | Tabela | Motivo |
@@ -46,5 +71,5 @@ ter chave ou escopo por organização como as demais tabelas.
 ## Evidências
 
 `test/repository/tenant_isolation_test.rb` (papel sem bypass, contexto ausente, escrita em outro tenant
-recusada pela RLS, FK composta, ids estrangeiros, tenant forjado no ator, revogação imediata) e os testes de
-isolamento de cada módulo.
+recusada pela RLS, FK composta, ids estrangeiros, tenant forjado no ator, revogação imediata, e cupons,
+usos, condições e tarifas de outra organização invisíveis) e os testes de isolamento de cada módulo.

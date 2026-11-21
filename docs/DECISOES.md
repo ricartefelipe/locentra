@@ -223,3 +223,59 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   que o e-mail já tem conta (a conta nova entra direto na organização criada, então uma resposta neutra
   não esconderia a diferença); a enumeração fica limitada pelos limites por IP e por e-mail. Nome de
   organização repetido recebe sufixo aleatório no identificador, sem revelar a outra organização.
+
+## ADR-027 — Condições comerciais: cupons, condições negociadas e tarifas adicionais
+
+- **Contexto:** a versão 1.0.0 aplicava cupons, condições negociadas e tarifas no motor de preços, mas sem
+  cadastro. O contador `coupons.redemptions` só aumentava: uma reserva cancelada ou um bloqueio temporário
+  vencido consumia o cupom para sempre. Condições do mesmo cliente podiam se sobrepor (valia a maior), e
+  não havia como saber qual condição formou um preço.
+- **Livro de usos imutável e uso ativo derivado:** cada uso de cupom é uma linha de `coupon_redemptions`
+  (no máximo uma por reserva), nunca alterada. O uso é ativo conforme a situação da reserva (solicitada,
+  confirmada, em andamento ou concluída; ou bloqueio temporário ainda válido), então cancelamento e expiração
+  liberam o uso **sem nenhuma escrita**. A alternativa de decrementar um contador na liberação criaria a ordem
+  de travas estoque → reserva → cupom, inversa à da criação (cupom → estoque), com impasses entre o resgate e
+  a expiração em lote do alocador. Sem escrita na liberação, o cancelamento, a expiração e o alocador não
+  tocam em cupons e não há ciclo. Um cancelamento concorrente ainda não confirmado continua contando como
+  uso ativo, o que é conservador.
+- **Limite sob concorrência:** a criação da reserva trava o cupom (`FOR UPDATE`) e conta os usos ativos numa
+  instrução separada, executada depois da trava: em READ COMMITTED, uma subconsulta na mesma instrução usaria
+  o snapshot anterior à espera e não veria o uso confirmado pela transação concorrente. Um gatilho de inserção
+  no livro repete a verificação no banco, com o instante do próprio uso como referência (o relógio da
+  aplicação), para que bloqueios vencidos não contem.
+- **Base legada:** `coupons.redemptions` fica congelado com os usos da 1.0.0 e soma-se aos usos ativos do
+  livro. O livro não é reconstruído a partir de reservas antigas e a coluna não é renomeada, o que mantém a
+  migration aditiva. Consequência para o retorno à 1.0.0: ela enxerga só o contador congelado e ignora os
+  usos registrados depois (ver `RUNBOOKS.md`, seção 13).
+- **Imutabilidade:** código, tipo e valor do cupom e código da tarifa não mudam (privilégios de coluna no
+  banco); condições negociadas só recebem o encerramento, uma vez (privilégios de coluna e gatilho); o
+  snapshot de preços de reservas e itens não é alterado (gatilho). Um preço registrado continua explicável
+  pelo cupom, pela condição e pelas tarifas gravados no snapshot. Cupom usado não é excluído, só desativado.
+- **Sem sobreposição de condições:** vigências efetivas do mesmo cliente e escopo (geral ou produto) não se
+  cruzam, por exclusion constraint sobre `[início, menor entre fim e encerramento)`. O encerramento pode ser
+  agendado, o que permite trocar a condição sem intervalo. Entre a condição do produto e a geral continua
+  valendo a maior, como na 1.0.0.
+- **Preenchimento na migração:** a 0015 preenche `coupons.updated_at` e
+  `customer_price_agreements.valid_from` com `created_at` e torna as colunas obrigatórias, o que evita
+  `COALESCE` no domínio, nas consultas e na constraint. Como a RLS é forçada também para o proprietário, as
+  duas tabelas ficam sem `FORCE` somente dentro da transação da migration (ver `ISOLAMENTO.md`). Condições
+  sobrepostas herdadas da 1.0.0 abortam a migration com mensagem clara: escolher qual manter mudaria preços
+  sem decisão de quem opera, então o ajuste é manual e anterior (ver `RUNBOOKS.md`, seção 13).
+- **Tarifas com autorização:** aplicar uma tarifa do catálogo pelo valor padrão faz parte de criar a reserva
+  ou o orçamento. Valor diferente do padrão e tarifa avulsa exigem `fees.override`. A redução é um desconto e
+  respeita o limite de desconto manual do papel sobre o valor padrão; credenciais de integração têm limite 0.
+- **Continuidade em orçamentos:** na nova versão, a tarifa idêntica a uma da versão anterior já foi
+  autorizada e é mantida sem nova autorização, mesmo inativa. Assim um atendente revisa o orçamento sem
+  perder nem reverter o ajuste de um gerente. Os ajustes vão para a auditoria do documento e nunca para o
+  snapshot de preços, que é imutável e é exibido ao cliente.
+- **Cupons somente em reservas:** orçamentos e solicitações do portal não aceitam cupom; a conversão do
+  orçamento copia o snapshot, sem cupom.
+- **Interfaces:** mutações da API exigem `Idempotency-Key` e usam somente o identificador do recurso (um
+  único escopo de idempotência por recurso); `PATCH` altera as chaves enviadas. Cupons e tarifas têm controle
+  otimista (`lock_version`), obrigatório na web e opcional na API. Alteração sem mudança e ativação ou
+  desativação no mesmo estado são operações nulas, sem auditoria, em todos os canais. Não há evento novo de
+  webhook; o uso do cupom é auditado na criação da reserva.
+- **Consequências:** a situação de cupons, condições e usos é sempre calculada no instante da consulta, com a
+  mesma regra no domínio, nas consultas SQL e no gatilho (testes de propriedade comparam as três). A contagem
+  de usos ativos custa uma consulta ao livro por cupom; o índice `(organization_id, coupon_id, redeemed_at)`
+  atende a esse acesso.
