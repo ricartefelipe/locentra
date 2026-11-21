@@ -5,9 +5,11 @@ module Locentra
     module Persistence
       class OrganizationRepository
         D = Domain::Organizations
+        ORGANIZATION_COLUMNS = "id, name, slug, timezone, status, settings, lock_version"
+        BRANCH_COLUMNS = "id, organization_id, name, code, address, active, deactivated_at, lock_version"
 
         def find(tx, id)
-          row = tx.query_one("SELECT id, name, slug, timezone, status, settings FROM organizations WHERE id = $1", [id])
+          row = tx.query_one("SELECT #{ORGANIZATION_COLUMNS} FROM organizations WHERE id = $1", [id])
           row && map_organization(row)
         end
 
@@ -37,7 +39,7 @@ module Locentra
         end
 
         def branches(tx)
-          tx.query("SELECT id, organization_id, name, code, address, active FROM branches WHERE organization_id = $1 ORDER BY name",
+          tx.query("SELECT #{BRANCH_COLUMNS} FROM branches WHERE organization_id = $1 ORDER BY name, code",
                    [tx.tenant_id!]).map { |row| map_branch(row) }
         end
 
@@ -174,12 +176,13 @@ module Locentra
 
         def map_organization(row)
           D::Organization.new(id: row["id"], name: row["name"], slug: row["slug"], timezone: row["timezone"], status: row["status"],
-                              settings: row["settings"] || {})
+                              settings: row["settings"] || {}, lock_version: row["lock_version"])
         end
 
         def map_branch(row)
           D::Branch.new(id: row["id"], organization_id: row["organization_id"], name: row["name"], code: row["code"],
-                        address: row["address"], active: row["active"])
+                        address: row["address"], active: row["active"], deactivated_at: row["deactivated_at"]&.getutc,
+                        lock_version: row["lock_version"])
         end
       end
 

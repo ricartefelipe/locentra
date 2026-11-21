@@ -38,7 +38,11 @@ module Locentra
         end
       end
 
-      Organization = Data.define(:id, :name, :slug, :timezone, :status, :settings) do
+      # Organização (tenant). As configurações ficam em `settings` (somente chaves com valor diferente do
+      # padrão; chaves desconhecidas são preservadas) e `lock_version` faz o controle otimista da edição.
+      Organization = Data.define(:id, :name, :slug, :timezone, :status, :settings, :lock_version) do
+        def initialize(lock_version: 1, **rest) = super
+
         def self.build(id:, name:, slug: nil, timezone: "America/Sao_Paulo")
           clean_name = Text.required(name, "nome", min: 2, max: 120)
           clean_slug = Text.slugify(slug.to_s.empty? ? clean_name : slug)
@@ -57,44 +61,150 @@ module Locentra
 
         def time_zone = TimeZone.new(timezone)
 
-        # Política de cancelamento padrão; cada contrato guarda o snapshot vigente.
+        # Política de cancelamento vigente para reservas e versões de orçamento novas; cada reserva, versão
+        # e contrato guarda a própria cópia.
         def cancellation_policy
           settings.fetch("cancellation_policy", CancellationPolicy::DEFAULT)
         end
 
         def hold_minutes
-          Integer(settings.fetch("hold_minutes", 30))
+          Integer(settings.fetch("hold_minutes", Settings::DEFAULT_HOLD_MINUTES).to_s, 10)
+        end
+
+        # "Padrão" pela igualdade de valor, independentemente de a chave estar gravada.
+        def default_hold_minutes? = hold_minutes == Settings::DEFAULT_HOLD_MINUTES
+        def default_cancellation_policy? = CancellationPolicy.default?(cancellation_policy)
+
+        # Revisão das configurações a partir dos campos do formulário, com todos os erros reunidos. A troca
+        # do fuso exige `confirm_timezone_change`. Sem diferença nos valores efetivos, devolve `self` (quem
+        # chama compara com `equal?`); com diferença, a nova versão.
+        def revise(name:, timezone:, hold_minutes:, cancellation_rows:, confirm_timezone_change: false)
+          values = Pricing::Input.collect do |check|
+            {
+              name: check.call("nome") { Text.required(name, "nome", min: 2, max: 120) },
+              timezone: check.call("fuso_horario") { Settings.timezone!(timezone, current: self.timezone) },
+              hold_minutes: check.call("validade_bloqueio") { Settings.hold_minutes!(hold_minutes) },
+              policy: check.call(CancellationPolicy::FIELD) { CancellationPolicy.from_form(cancellation_rows) }
+            }.tap { |data| check.call("confirmar_fuso") { confirm_timezone!(data[:timezone], confirm_timezone_change) } }
+          end
+          return self if effective == [values[:name], values[:timezone], values[:hold_minutes], values[:policy]]
+
+          with(name: values[:name], timezone: values[:timezone], lock_version: lock_version + 1,
+               settings: Settings.store(settings, hold_minutes: values[:hold_minutes], cancellation_policy: values[:policy]))
+        end
+
+        # Campos alterados, com os valores efetivos (o padrão vale mesmo sem a chave gravada).
+        def changes(after)
+          Settings::TRACKED.zip(effective, after.effective).each_with_object({}) do |(field, before_value, after_value), diff|
+            diff[field] = [before_value, after_value] unless before_value == after_value
+          end
+        end
+
+        def timezone_changed?(after) = timezone != after.timezone
+
+        # Nome, fuso, validade do bloqueio e política canônica, na ordem de Settings::TRACKED.
+        def effective = [name, timezone, hold_minutes, CancellationPolicy.canonical(cancellation_policy)]
+
+        private
+
+        def confirm_timezone!(chosen, confirmed)
+          return if chosen.nil? || chosen == timezone || confirmed
+
+          raise ValidationError.field("confirmar_fuso", "confirme a troca do fuso horário depois de ler as consequências")
         end
       end
 
-      Branch = Data.define(:id, :organization_id, :name, :code, :address, :active) do
+      BRANCH_STATUSES = { "active" => "Ativa", "inactive" => "Inativa" }.freeze
+
+      # Filial. O código não muda (é usado em --filial e nos snapshots); nome e endereço são editáveis com
+      # controle otimista, e a filial pode ser desativada e reativada (regras em docs/MAQUINAS-DE-ESTADO.md).
+      Branch = Data.define(:id, :organization_id, :name, :code, :address, :active, :deactivated_at, :lock_version) do
+        def initialize(deactivated_at: nil, lock_version: 1, **rest) = super
+
         def self.build(id:, organization_id:, name:, code:, address: nil)
-          clean_code = code.to_s.strip.upcase
-          raise ValidationError.field("codigo", "use até 12 letras, números ou hífen") unless clean_code.match?(/\A[A-Z0-9-]{1,12}\z/)
+          values = Pricing::Input.collect do |check|
+            { code: check.call("codigo") { code!(code) }, name: check.call("nome") { name!(name) },
+              address: check.call("endereco") { address!(address) } }
+          end
+          new(id: id, organization_id: organization_id, **values, active: true)
+        end
 
-          new(id: id, organization_id: organization_id, name: Text.required(name, "nome", min: 2, max: 120),
-              code: clean_code, address: Text.optional(address, max: 300), active: true)
+        def self.code!(value)
+          clean = value.to_s.strip.upcase
+          raise ValidationError.field("codigo", "use até 12 letras, números ou hífen") unless clean.match?(/\A[A-Z0-9-]{1,12}\z/)
+
+          clean
+        end
+
+        def self.name!(value) = Text.required(value, "nome", min: 2, max: 120)
+        def self.address!(value) = Text.optional!(value, "endereco", max: Branch::MAX_ADDRESS)
+
+        def status = active ? "active" : "inactive"
+        def label_with_status = active ? name : "#{name} (inativa)"
+
+        def revise(name:, address:)
+          values = Pricing::Input.collect do |check|
+            { name: check.call("nome") { Branch.name!(name) }, address: check.call("endereco") { Branch.address!(address) } }
+          end
+          return self if values[:name] == self.name && values[:address] == self.address
+
+          with(**values, lock_version: lock_version + 1)
+        end
+
+        def changes(after)
+          { "name" => [name, after.name], "address" => [address, after.address] }.reject { |_, (before, now)| before == now }
+        end
+
+        def deactivate(now)
+          return self unless active
+
+          with(active: false, deactivated_at: now, lock_version: lock_version + 1)
+        end
+
+        def reactivate
+          return self if active
+
+          with(active: true, deactivated_at: nil, lock_version: lock_version + 1)
         end
       end
 
-      # Política de cancelamento: percentual retido conforme antecedência em relação ao início.
-      module CancellationPolicy
-        DEFAULT = {
-          "tiers" => [
-            { "min_hours_before" => 72, "fee_bps" => 0 },
-            { "min_hours_before" => 24, "fee_bps" => 3000 },
-            { "min_hours_before" => 0, "fee_bps" => 10_000 }
-          ]
+      # Regras de desativação: vínculos que impedem (verificados pela aplicação sob trava da filial).
+      class Branch
+        MAX_ADDRESS = 300
+        CODES_SHOWN = 5
+        # Reservas em aberto; o bloqueio temporário só conta enquanto vigente.
+        BLOCKING_RESERVATIONS = %w[requested held confirmed in_progress].freeze
+        # Transferências pendentes que impedem quando têm a filial como destino (as de saída não impedem).
+        BLOCKING_TRANSFERS = %w[requested in_transit].freeze
+        BLOCKER_TEXTS = {
+          reservations: ["reserva em aberto", "reservas em aberto", ->(_) { "conclua ou cancele" }],
+          sent_quotes: ["orçamento enviado", "orçamentos enviados",
+                        ->(_) { "aguarde a decisão, registre a recusa ou crie nova versão em outra filial" }],
+          approved_quotes: ["orçamento aprovado", "orçamentos aprovados",
+                            lambda { |count|
+                              count == 1 ? "converta em reserva e conclua ou cancele a reserva" : "converta em reservas e conclua ou cancele as reservas"
+                            }],
+          incoming_transfers: ["transferência pendente com destino à filial", "transferências pendentes com destino à filial",
+                               ->(_) { "registre o recebimento ou cancele" }]
         }.freeze
 
-        module_function
+        # Mensagem com os vínculos que impedem a desativação (nil quando não há). `commitments` traz, por
+        # tipo, `{ count:, codes: }` com no máximo CODES_SHOWN códigos.
+        def self.deactivation_blockers(code, commitments)
+          clauses = BLOCKER_TEXTS.filter_map do |kind, (one, many, action)|
+            entry = commitments.fetch(kind, { count: 0, codes: [] })
+            count = entry[:count].to_i
+            next if count.zero?
 
-        # Retorna a multa em pontos-base para cancelamento em `now` de uma locação iniciando em `starts_at`.
-        def fee_bps(policy, starts_at:, now:)
-          hours_before = Rational(starts_at.to_i - now.to_i, 3600)
-          tiers = policy.fetch("tiers").sort_by { |tier| -tier.fetch("min_hours_before") }
-          tier = tiers.find { |candidate| hours_before >= candidate.fetch("min_hours_before") } || tiers.last
-          tier.fetch("fee_bps")
+            "#{count} #{count == 1 ? one : many} (#{codes_text(entry[:codes], count)}): #{action.call(count)}"
+          end
+          clauses.empty? ? nil : "Não é possível desativar a filial #{code}: #{clauses.join("; ")}."
+        end
+
+        def self.codes_text(codes, count)
+          shown = Array(codes).first(CODES_SHOWN)
+          rest = count - shown.size
+          rest.positive? ? "#{shown.join(", ")} e mais #{rest}" : shown.join(", ")
         end
       end
     end

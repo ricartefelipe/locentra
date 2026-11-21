@@ -16,6 +16,12 @@ module Locentra
 
       LOCAL_PATTERN = /\A(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?\z/
 
+      # Fuso registrado num snapshot (por exemplo, o fuso com que uma reserva foi precificada); sem o
+      # identificador, o fuso informado como alternativa (normalmente o atual da organização).
+      def self.snapshot_or(identifier, fallback)
+        identifier.to_s.empty? ? fallback : new(identifier)
+      end
+
       def initialize(identifier)
         @identifier = identifier.to_s
         @zone = TZInfo::Timezone.get(@identifier)
