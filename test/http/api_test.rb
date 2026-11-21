@@ -194,6 +194,19 @@ class ApiTest < HttpTest
     end
   end
 
+  # Schemas de resposta da API v1 ampliada: fechados (sem chaves extras) e com todas as propriedades
+  # obrigatórias, para que o validador acuse qualquer divergência das respostas reais.
+  CLOSED_SCHEMAS = %w[QuoteSummary QuotePage Quote QuoteVersion QuoteVersionItem QuoteHold QuoteReservationLink QuoteConversion].freeze
+
+  def test_openapi_response_schemas_are_closed
+    schemas = openapi.dig("components", "schemas")
+    CLOSED_SCHEMAS.each do |name|
+      schema = schemas.fetch(name)
+
+      assert_equal [false, schema.fetch("properties").keys.sort], [schema["additionalProperties"], Array(schema["required"]).sort], name
+    end
+  end
+
   SCHEMA_KEYWORDS = %w[$ref type format properties items required enum const description example examples default minimum maximum
                        exclusiveMinimum exclusiveMaximum minLength maxLength minItems maxItems pattern oneOf anyOf allOf not
                        additionalProperties nullable readOnly writeOnly title deprecated].freeze

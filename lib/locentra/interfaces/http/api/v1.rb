@@ -203,6 +203,29 @@ module Locentra
             Domain::Period.parse_instant(value, field)
           end
 
+          # Booleano do JSON: somente true ou false; ausente ou null vale nil.
+          def strict_boolean(data, key, field)
+            value = data[key]
+            raise Domain::ValidationError.field(field, "informe true ou false") unless value.nil? || value == true || value == false
+
+            value
+          end
+
+          # Lista de objetos do JSON (ausente ou null vale lista vazia). Outro formato é erro no campo.
+          def object_list(data, key, field, message, allow_empty: true)
+            list = data[key].nil? ? [] : data[key]
+            raise Domain::ValidationError.field(field, message) unless list.is_a?(Array) && list.all?(Hash) && (allow_empty || !list.empty?)
+
+            list
+          end
+
+          # Identificador do recurso no caminho, normalizado (minúsculas): o escopo de idempotência usa o
+          # mesmo texto para o mesmo recurso.
+          def path_id(ctx, field = "id") = Domain::Identifier.parse(ctx.param(:id), field)
+
+          # Erros de formato reunidos por campo, com os nomes de campo das validações do domínio.
+          def collect(&) = Domain::Pricing::Input.collect(&)
+
           # `location`, quando informado, recebe o corpo da resposta e devolve o endereço do recurso criado.
           def idempotent(ctx, permission, scope, payload, location: nil, &)
             fingerprint = Application::Idempotency.fingerprint(ctx.verb, ctx.path, payload)

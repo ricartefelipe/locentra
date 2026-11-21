@@ -13,6 +13,7 @@ require_relative "web/contracts_controller"
 require_relative "web/portal_controllers"
 require_relative "api/v1"
 require_relative "api/v1_finance"
+require_relative "api/v1_quotes"
 require_relative "routes_commercial_terms"
 
 module Locentra
@@ -58,6 +59,7 @@ module Locentra
           draw_staff(r, deps, w)
           draw_api(r, API::V1Controller.new(deps))
           CommercialTermsRoutes.draw_api(r, deps)
+          draw_api_quotes(r, API::QuotesV1Controller.new(deps))
         end
 
         def draw_staff(router, deps, web)
@@ -304,6 +306,19 @@ module Locentra
           r.post "/clientes/:id/portal/convites", access, :invite
           r.post "/clientes/:id/portal/convites/:convite_id/cancelar", access, :cancel_invitation
           r.post "/clientes/:id/portal/acessos/:acesso_id/revogar", access, :revoke
+        end
+
+        # Orçamentos na API v1. Toda mutação exige Idempotency-Key.
+        def draw_api_quotes(router, api)
+          r = router
+          r.get "/api/v1/quotes", api, :quotes, auth: :api
+          r.post "/api/v1/quotes", api, :create_quote, auth: :api
+          r.get "/api/v1/quotes/:id", api, :quote, auth: :api
+          r.post "/api/v1/quotes/:id/versions", api, :revise_quote, auth: :api
+          r.post "/api/v1/quotes/:id/send", api, :send_quote, auth: :api
+          r.post "/api/v1/quotes/:id/approve", api, :approve_quote, auth: :api
+          r.post "/api/v1/quotes/:id/reject", api, :reject_quote, auth: :api
+          r.post "/api/v1/quotes/:id/convert", api, :convert_quote, auth: :api
         end
 
         def draw_api(router, api)

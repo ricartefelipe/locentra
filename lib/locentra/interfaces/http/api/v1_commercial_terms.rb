@@ -131,8 +131,6 @@ module Locentra
 
           def agreement_body(agreement) = CS.price_agreement(agreement, agreement.status(now))
 
-          def collect(&) = P::Input.collect(&)
-
           # Mutações aceitam somente o identificador: o código vale nas consultas.
           def resource_id(ctx)
             id = ctx.param(:id).to_s.downcase
