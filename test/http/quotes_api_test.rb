@@ -93,6 +93,21 @@ class QuotesApiTest < ApiV1TestCase
     assert_equal "rejected", post!(200, "/quotes/#{sent.id}/reject", { "reason" => "Preço acima do orçamento" }, token: write)["status"]
   end
 
+  def test_decisions_and_new_versions_require_the_write_scope
+    quote = sent
+    read = token(%w[quotes.read])
+    [["/quotes/#{quote.id}/versions", revision(terms: "Retirada na loja.")], ["/quotes/#{draft.id}/send", {}],
+     ["/quotes/#{quote.id}/approve", { "version" => 1, "approver_name" => "Maria" }], ["/quotes/#{quote.id}/reject", { "reason" => "Caro" }]]
+      .each do |path, body|
+        post!(403, path, body, token: read)
+
+        assert_error "forbidden"
+        assert_equal "permissão necessária: quotes.write", error_message, path
+      end
+    assert_equal [%w[sent draft], 2], [owner_query("SELECT status FROM quotes ORDER BY code").map { |row| row["status"] },
+                                       count("SELECT count(*) FROM quote_versions")]
+  end
+
   def test_create_validation_errors_are_reported_by_field
     post!(422, "/quotes", payload("valid_until" => 20_260_305, "manual_discount_bps" => "5", "fees" => [{ "fee_id" => @fee.id, "amount_cents" => "100" }],
                                   "terms" => 12, "hold_minutes" => 60.5))

@@ -317,6 +317,39 @@ class OperationsApiTest < ApiV1TestCase
     post!(403, "/alerts/#{page["data"].first["id"]}/resolve", { "resolution" => "Sem escopo" }, token: token(%w[reservations.read]))
   end
 
+  # Escopos ---------------------------------------------------------------------------------------
+
+  # Cada rota confere o próprio escopo: sem ele, 403 com a permissão esperada e nada gravado.
+  def test_every_route_requires_its_scope
+    reservation = rental
+    delivered(reservation)
+    returned = post!(201, "/reservations/#{reservation.id}/returns", { "entries" => entries_for(reservation, requires_inspection: true) })
+    inspection = get!(200, "/inspections")["data"].first["id"]
+    picking = post!(201, "/reservations/#{confirmed([line(@chairs, 2)], after_rental).id}/pickups")
+    readless = token(%w[fulfillment.write inspections.write customers.read])
+    [[:get, "/pickups/#{picking["id"]}"], [:get, "/reservations/#{reservation.id}/return-items"], [:get, "/returns/#{returned["id"]}"],
+     [:get, "/inspections"], [:get, "/alerts"]].each do |_, path|
+      get!(403, path, {}, token: readless)
+
+      assert_error "forbidden"
+      assert_equal "permissão necessária: reservations.read", error_message, path
+    end
+    stock = { "items" => [{ "line_id" => picking["lines"].first["id"], "quantity" => 2 }] }
+    [["/pickups/#{picking["id"]}/check", stock, "fulfillment.write"], ["/pickups/#{picking["id"]}/deliver", { "picker" => { "kind" => "customer" } }, "fulfillment.write"],
+     ["/pickups/#{picking["id"]}/cancel", { "reason" => "Sem escopo" }, "fulfillment.write"],
+     ["/reservations/#{reservation.id}/returns", { "entries" => [{ "pickup_line_id" => returned["lines"].first["pickup_line_id"], "outcome" => "ok" }] },
+      "fulfillment.write"],
+     ["/inspections/#{inspection}/approve", {}, "inspections.write"], ["/inspections/#{inspection}/reject", { "notes" => "Sem escopo" }, "inspections.write"]]
+      .each do |path, body, permission|
+        post!(403, path, body, token: token(%w[reservations.read fulfillment.write inspections.write customers.read] - [permission]))
+
+        assert_error "forbidden"
+        assert_equal "permissão necessária: #{permission}", error_message, path
+      end
+    assert_equal ["picking", [0]], [get!(200, "/pickups/#{picking["id"]}")["status"], get!(200, "/pickups/#{picking["id"]}")["lines"].map { |row| row["checked_quantity"] }]
+    assert_equal [1, 2, 0], [count("SELECT count(*) FROM returns"), get!(200, "/inspections")["pagination"]["total"], count("SELECT count(*) FROM maintenance_orders")]
+  end
+
   # Isolamento -------------------------------------------------------------------------------------
 
   def test_other_organization_ids_are_not_found_in_every_route
