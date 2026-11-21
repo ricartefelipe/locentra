@@ -162,6 +162,21 @@ class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
     assert_equal 2, owner_query("SELECT count(*) AS n FROM reservations").first["n"].to_i
   end
 
+  # Chave nula vale como ausente, como em amount_cents: o formato devolvido em pricing.fees (fee_id nulo
+  # na tarifa avulsa) é aceito na criação.
+  def test_reservation_fees_treat_null_keys_as_absent
+    fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000)
+
+    post!(201, "/reservations", reservation_payload(fees: [{ "fee_id" => fee.id, "description" => nil, "amount_cents" => nil },
+                                                           { "fee_id" => nil, "code" => nil, "description" => "Taxa de estacionamento",
+                                                             "amount_cents" => 3000 }]))
+
+    assert_equal 108_000, json_body["total"]["amount_cents"]
+    post!(422, "/reservations", reservation_payload(fees: [{ "fee_id" => nil, "description" => nil, "amount_cents" => 100 }]))
+
+    assert_equal ["deve ser uma lista de objetos com fee_id ou description e amount_cents"], fields["fees"]
+  end
+
   def test_reservation_fees_format_and_lookup_errors
     fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000)
     ["ENTREGA", [fee.id], [{}], [{ "fee_id" => fee.id, "description" => "Duas formas" }], [{ "amount_cents" => 100 }]].each do |fees|

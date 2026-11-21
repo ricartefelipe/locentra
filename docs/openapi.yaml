@@ -817,7 +817,9 @@ components:
               default_amount_cents: { type: [integer, "null"], description: Valor padrão da tarifa na criação; nulo em tarifa avulsa }
               source: { type: string, enum: [catalog, custom] }
     ReservationFee:
-      description: Tarifa do catálogo (`fee_id`, com `amount_cents` opcional) ou tarifa avulsa (`description` e `amount_cents`).
+      description: >-
+        Tarifa do catálogo (`fee_id`, com `amount_cents` opcional) ou tarifa avulsa (`description` e `amount_cents`).
+        Chave com valor nulo vale como ausente: o formato devolvido em `pricing.fees` (`fee_id` nulo na avulsa) é aceito.
       oneOf:
         - type: object
           required: [fee_id]

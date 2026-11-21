@@ -142,7 +142,8 @@ module Locentra
           end
 
           # Tarifas da reserva: `{ fee_id, amount_cents? }` (catálogo; sem valor vale o padrão) ou
-          # `{ description, amount_cents }` (avulsa). Outro formato é erro de validação (422).
+          # `{ description, amount_cents }` (avulsa). Chave nula vale como ausente. Outro formato é erro
+          # de validação (422).
           def api_fees(fees)
             list = fees.nil? ? [] : fees
             raise Domain::ValidationError.field("fees", FEES_FORMAT) unless list.is_a?(Array) && list.all?(Hash)
@@ -151,11 +152,12 @@ module Locentra
           end
 
           def api_fee(item)
-            raise Domain::ValidationError.field("fees", FEES_FORMAT) unless item.key?("fee_id") ^ item.key?("description")
+            catalog = !item["fee_id"].nil?
+            raise Domain::ValidationError.field("fees", FEES_FORMAT) unless catalog ^ !item["description"].nil?
 
-            cents = strict_integer(item, "amount_cents", "tarifas", min: 1, max: Domain::Money::MAX_CENTS, allow_nil: item.key?("fee_id"))
+            cents = strict_integer(item, "amount_cents", "tarifas", min: 1, max: Domain::Money::MAX_CENTS, allow_nil: catalog)
             amount = cents && Domain::Money.new(cents)
-            return Domain::Pricing::FeeRequest.catalog(fee_id: item["fee_id"], amount: amount) if item.key?("fee_id")
+            return Domain::Pricing::FeeRequest.catalog(fee_id: item["fee_id"], amount: amount) if catalog
 
             Domain::Pricing::FeeRequest.custom(description: strict_text(item, "description", "tarifas"), amount: amount)
           end
