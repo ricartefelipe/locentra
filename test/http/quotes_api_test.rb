@@ -66,9 +66,10 @@ class QuotesApiTest < ApiV1TestCase
     post!(403, "/quotes", payload, token: token(%w[quotes.read]))
 
     assert_error "forbidden"
-    post!(403, "/quotes", payload(fees: [{ "description" => "Montagem", "amount_cents" => 15_000 }]), token: token(%w[quotes.write]))
+    post!(403, "/quotes", payload(fees: [{ "description" => "Montagem", "amount_cents" => 15_000 }]), token: token(%w[quotes.write quotes.read]))
 
     assert_error "forbidden"
+    assert_includes error_message, "tarifa avulsa exige a permissão de ajustar tarifas"
     post!(403, "/quotes", payload("manual_discount_bps" => 500))
 
     assert_includes error_message, "desconto manual acima do limite"
