@@ -120,7 +120,9 @@ controle otimista (`lock_version`). Pedir o estado atual é operação nula, sem
   ativa (`last_active_branch`) e não tem compromissos em aberto (`branch_in_use`):
   - reservas `requested`, `confirmed` ou `in_progress`, e `held` com o bloqueio ainda vigente
     (`Branch::BLOCKING_RESERVATIONS`);
-  - orçamentos `sent` cuja versão atual ainda está na validade, e orçamentos `approved`;
+  - orçamentos `sent` cuja versão atual ainda está na validade, e orçamentos `approved` que ainda podem ser
+    convertidos (início da versão aprovada não anterior a agora menos a tolerância de 15 minutos de
+    `Reservations::Rules.validate_start!`, `Branch.convertible_start_since`);
   - transferências `requested` ou `in_transit` com destino à filial (`Branch::BLOCKING_TRANSFERS`).
 
   Ativos, estoque, ordens de manutenção, inspeções, rascunhos, bloqueios e orçamentos vencidos e

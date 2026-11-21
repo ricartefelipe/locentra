@@ -201,6 +201,11 @@ module Locentra
           clauses.empty? ? nil : "Não é possível desativar a filial #{code}: #{clauses.join("; ")}."
         end
 
+        # Orçamento aprovado só impede enquanto ainda pode ser convertido: a conversão cria a reserva com o
+        # início da versão aprovada, recusado quando está no passado além da tolerância
+        # (Reservations::Rules.validate_start!). Depois disso nenhuma transição desfaz o vínculo com a filial.
+        def self.convertible_start_since(now) = now - Reservations::PAST_TOLERANCE_SECONDS
+
         def self.codes_text(codes, count)
           shown = Array(codes).first(CODES_SHOWN)
           rest = count - shown.size

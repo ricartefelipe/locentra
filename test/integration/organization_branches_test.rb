@@ -88,6 +88,22 @@ class OrganizationBranchesTest < DatabaseTest
     assert deactivate.changed
   end
 
+  # O aprovado só é convertido enquanto o início da versão aprovada está dentro da tolerância de
+  # Reservations::Rules.validate_start!; depois disso não há ação que desfaça o vínculo, e ele deixa de impedir.
+  def test_approved_quote_blocks_only_while_it_can_still_be_converted
+    stock(@actor, @chairs, @north, 5)
+    approved = uc(:create_quote).call(@actor, quote_input(@north, day: 14))
+    uc(:send_quote).call(@actor, approved.id)
+    uc(:approve_quote).call(@actor, approved.id, version: 1, approver_name: "Maria Compradora")
+    @clock.travel_to(Time.utc(2026, 3, 14, 8, 15, 0))
+
+    assert_includes refused { deactivate }.message, "1 orçamento aprovado (#{approved.code}): converta em reserva"
+    @clock.travel_to(Time.utc(2026, 3, 14, 8, 15, 1))
+
+    assert_raises(D::ValidationError) { uc(:convert_quote).call(@actor, approved.id) }
+    assert deactivate.changed, "aprovado que não pode mais ser convertido não impede a desativação"
+  end
+
   def test_deactivation_is_accepted_with_assets_stock_outgoing_transfers_drafts_and_expired_holds
     register_assets(@actor, @camera, @north, 2)
     stock(@actor, @chairs, @north, 5)

@@ -109,9 +109,10 @@ de orçamento com a da organização, desligando `quote_versions_protect` soment
   [`../MAQUINAS-DE-ESTADO.md`](../MAQUINAS-DE-ESTADO.md)): recusada para a última filial ativa
   (`last_active_branch`, "A organização precisa de ao menos uma filial ativa.") e para a filial com reservas
   em aberto (solicitadas, confirmadas, em andamento e bloqueios vigentes), orçamentos enviados com a versão
-  atual vigente, orçamentos aprovados ou transferências pendentes com destino a ela (`branch_in_use`, com até
-  cinco códigos por tipo e a orientação de cada um). Ativos, estoque, rascunhos, bloqueios e orçamentos
-  vencidos e transferências de saída não impedem.
+  atual vigente, orçamentos aprovados ainda conversíveis ou transferências pendentes com destino a ela
+  (`branch_in_use`, com até cinco códigos por tipo e a orientação de cada um). Ativos, estoque, rascunhos,
+  bloqueios e orçamentos vencidos, transferências de saída e orçamentos aprovados cuja retirada já passou
+  (a conversão recusa início no passado e nenhuma transição desfaz o vínculo) não impedem.
 - **Reativação:** respeita `max_branches` do plano (somente a reativação conta; as configurações não dependem
   do plano).
 - Os formulários de criação listam somente as filiais ativas; estoque (entrada, baixa e perda), origem de

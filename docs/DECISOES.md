@@ -338,8 +338,9 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
 - **Mensagens (D14):** filial inexistente responde "filial não encontrada"; existente e inativa, erro no campo
   do formulário ("filial inativa: escolha uma filial ativa").
 - **Regras de desativação:** impedem reservas em aberto (bloqueio só enquanto vigente), orçamentos enviados com
-  a versão atual vigente, orçamentos aprovados e transferências pendentes com destino à filial; ativos,
-  estoque, rascunhos e transferências de saída não impedem. A última filial ativa não é desativada. Operações
+  a versão atual vigente, orçamentos aprovados que ainda podem ser convertidos (retirada da versão aprovada
+  dentro da tolerância da conversão) e transferências pendentes com destino à filial; ativos, estoque,
+  rascunhos, aprovados com retirada já passada e transferências de saída não impedem. A última filial ativa não é desativada. Operações
   sobre o que já está na filial (baixa, perda, ajuste negativo, manutenção, transferência de saída) continuam
   aceitas; criações de vínculo exigem filial ativa.
 - **Concorrência:** criações de vínculo travam a filial com `FOR SHARE`; a desativação, com `FOR NO KEY UPDATE`,

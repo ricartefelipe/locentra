@@ -38,10 +38,11 @@ module Locentra
                WHERE q.organization_id = $1 AND v.branch_id = $2 AND q.status = 'sent' AND v.valid_until > $3
                ORDER BY q.code LIMIT #{CODES_SHOWN}
             SQL
-            approved_quotes: codes(tx, <<~SQL, [org, branch_id]),
-              SELECT code, count(*) OVER () AS total FROM quotes
-               WHERE organization_id = $1 AND branch_id = $2 AND status = 'approved'
-               ORDER BY code LIMIT #{CODES_SHOWN}
+            approved_quotes: codes(tx, <<~SQL, [org, branch_id, branch.convertible_start_since(now)]),
+              SELECT q.code, count(*) OVER () AS total
+                FROM quotes q JOIN quote_versions v ON v.organization_id = q.organization_id AND v.quote_id = q.id AND v.version = q.approved_version
+               WHERE q.organization_id = $1 AND v.branch_id = $2 AND q.status = 'approved' AND v.starts_at >= $3
+               ORDER BY q.code LIMIT #{CODES_SHOWN}
             SQL
             incoming_transfers: codes(tx, <<~SQL, [org, branch_id, branch::BLOCKING_TRANSFERS]) }
               SELECT code, count(*) OVER () AS total FROM transfers
