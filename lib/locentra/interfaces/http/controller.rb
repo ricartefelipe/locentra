@@ -13,11 +13,6 @@ module Locentra
         # caractere de controle é recusado.
         UNSAFE_PATH = /[\x00-\x20\x7F\\]/
 
-        # Percentual com até duas casas decimais ("12", "12,5", "12.34") em pontos-base, com aritmética
-        # inteira. Infinity, NaN, notação científica e casas além da segunda são recusados (não
-        # arredondados nem truncados em silêncio).
-        PERCENT = /\A(\d{1,3})(?:[.,](\d{1,2}))?\z/
-
         def self.local_path?(value)
           text = value.to_s
           text.start_with?("/") && !text.start_with?("//") && !text.match?(UNSAFE_PATH)
@@ -63,13 +58,10 @@ module Locentra
           [status, { "content-type" => "application/json; charset=utf-8" }.merge(headers), [JSON.generate(body)]]
         end
 
-        def percent_bps(value, field)
-          text = value.to_s.strip
-          return 0 if text.empty?
-
-          match = PERCENT.match(text) || raise(Domain::ValidationError.field(field, "percentual inválido (até duas casas decimais)"))
-          (match[1].to_i * 100) + match[2].to_s.ljust(2, "0").to_i
-        end
+        # Percentual com até duas casas decimais ("12", "12,5", "12.34") em pontos-base, com aritmética
+        # inteira (Domain::Percent.parse); vazio vale 0. Infinity, NaN, notação científica e casas além
+        # da segunda são recusados (não arredondados nem truncados em silêncio).
+        def percent_bps(value, field) = Domain::Percent.parse(value, field) || 0
 
         # Conversões de entrada de formulário. O erro de formato vai para o campo do formulário que
         # enviou o valor (o domínio usa a chave genérica "valor").
@@ -90,6 +82,11 @@ module Locentra
           raise Domain::ValidationError.field(field, "data e hora inválidas ou inexistentes no fuso da organização")
         end
 
+        # Instante opcional de formulário (datetime-local no fuso da organização): vazio vale nil.
+        def optional_local_time(ctx, value, field)
+          value.to_s.strip.empty? ? nil : local_time(ctx, value, field)
+        end
+
         def period_from(ctx, starts, ends)
           Domain::Period.new(local_time(ctx, starts, "inicio"), local_time(ctx, ends, "fim"))
         end
@@ -105,6 +102,35 @@ module Locentra
 
             Domain::Reservations::Line.build(product_id: product_id, quantity: quantity)
           end
+        end
+
+        # Pedidos de tarifa dos formulários de reserva e orçamento. Linha do catálogo sem tarifa escolhida
+        # é ignorada e valor em branco vale o padrão da tarifa; linha avulsa exige descrição e valor. Os
+        # erros de formato vão para o campo "tarifas".
+        def fee_requests_from(form)
+          catalog = paired(form["tarifa_id"], form["tarifa_valor"]).filter_map do |fee_id, amount|
+            next if fee_id.to_s.strip.empty?
+
+            Domain::Pricing::FeeRequest.catalog(fee_id: fee_id, amount: amount.to_s.strip.empty? ? nil : money!(amount.to_s.strip, "tarifas"))
+          end
+          catalog + custom_fee_requests(form)
+        end
+
+        def custom_fee_requests(form)
+          paired(form["avulsa_descricao"], form["avulsa_valor"]).filter_map do |description, amount|
+            blank = [description, amount].map { |value| value.to_s.strip.empty? }
+            next if blank.all?
+            raise Domain::ValidationError.field("tarifas", "informe descrição e valor da tarifa avulsa") if blank.any?
+
+            Domain::Pricing::FeeRequest.custom(description: description, amount: money!(amount.to_s.strip, "tarifas"))
+          end
+        end
+
+        # Pares de campos repetidos (nome[]) alinhados pela posição, mesmo com listas de tamanhos diferentes.
+        def paired(first, second)
+          left = Array(first)
+          right = Array(second)
+          Array.new([left.size, right.size].max) { |index| [left[index], right[index]] }
         end
 
         def session_cookie(response, token)

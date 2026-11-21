@@ -1,0 +1,24 @@
+<header class="page-header"><h1>Novo cupom</h1></header>
+<section class="panel">
+  <%= partial("shared/errors") %>
+  <form method="post" action="/cupons" class="form-grid">
+    <%= csrf_field %>
+    <div><label for="codigo">Código</label>
+      <input id="codigo" name="codigo" required maxlength="40" autocapitalize="characters" autocomplete="off" value="<%= @values["codigo"] %>"<%= invalid(@errors, "codigo", describedby: "ajuda-codigo") %>>
+      <p class="muted" id="ajuda-codigo">De 3 a 40 caracteres: letras sem acento, números, hífen ou sublinhado. Letras minúsculas são convertidas.</p>
+      <%= field_errors(@errors, "codigo") %></div>
+    <fieldset>
+      <legend>Tipo de desconto</legend>
+      <label class="radio"><input type="radio" name="tipo" value="percent"<%= checked(@values["tipo"] != "fixed") %>> Percentual</label>
+      <label class="radio"><input type="radio" name="tipo" value="fixed"<%= checked(@values["tipo"] == "fixed") %>> Valor fixo</label>
+      <%= field_errors(@errors, "tipo") %>
+    </fieldset>
+    <div><label for="valor">Desconto</label>
+      <input id="valor" name="valor" required inputmode="decimal" value="<%= @values["valor"] %>"<%= invalid(@errors, "valor", describedby: "ajuda-valor") %>>
+      <p class="muted" id="ajuda-valor">Percentual com até duas casas, por exemplo 10 ou 12,5; ou valor em reais, por exemplo 50,00.</p>
+      <%= field_errors(@errors, "valor") %></div>
+    <%= partial("coupons/fields", prefix: "") %>
+    <p class="full muted">Código, tipo e desconto não mudam depois do cadastro. Cupons valem para reservas, não para orçamentos.</p>
+    <div class="full actions"><button type="submit" class="primary">Cadastrar cupom</button> <a href="/cupons">Cancelar</a></div>
+  </form>
+</section>

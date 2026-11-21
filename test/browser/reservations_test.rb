@@ -11,7 +11,10 @@ class ReservationsBrowserTest < BrowserTest
     login_as("dona@alfa.test", organization: "Locadora Alfa")
   end
 
-  def lines = @page.css("[data-lines] [data-line]")
+  # O formulário tem outros grupos de linhas (tarifas); estes testes exercitam o grupo de itens.
+  ITEMS = '[data-line-group="itens"]'
+
+  def lines = @page.css("#{ITEMS} [data-lines] [data-line]")
 
   def test_new_reservation_uses_the_line_items_module
     visit "/reservas/nova"
@@ -93,7 +96,7 @@ class ReservationsBrowserTest < BrowserTest
 
   # Cada campo das linhas tem identificador único e rótulo associado (for = id).
   def assert_accessible_lines
-    ids = @page.css("[data-lines] select, [data-lines] input").map { |field| field.attribute("id") }
+    ids = @page.css("#{ITEMS} [data-lines] select, #{ITEMS} [data-lines] input").map { |field| field.attribute("id") }
 
     assert_equal ids.uniq, ids, "identificadores únicos em cada linha"
     lines.each do |row|
@@ -104,7 +107,7 @@ class ReservationsBrowserTest < BrowserTest
   end
 
   def add_line(expected)
-    click("[data-add-line]")
+    click("#{ITEMS} [data-add-line]")
     wait_until("linha #{expected} de item") { lines.size == expected }
     lines.last
   end

@@ -100,6 +100,37 @@ class TenantIsolationTest < DatabaseTest
     end
   end
 
+  # Cupons, usos, condições negociadas e tarifas de uma organização não aparecem no contexto de outra,
+  # nem pela RLS (consulta direta com o papel de aplicação) nem pelos casos de uso.
+  def test_commercial_terms_are_invisible_to_other_tenants
+    chairs = create_product(@b[:actor], sku: "CAD-B", tracking: "bulk")
+    customer_b = create_customer(@b[:actor], name: "Cliente da Beta")
+    coupon = uc(:create_coupon).call(@b[:actor], { code: "SOBETA", kind: "percent", value: 1000 })
+    fee = uc(:create_fee).call(@b[:actor], { code: "ENTREGA", name: "Entrega", default_amount: D::Money.new(15_000) })
+    agreement = uc(:create_price_agreement).call(@b[:actor], customer_b.id, { discount_bps: 800 })
+    reserve(@b[:actor], customer_b, @b[:branch], period("2026-03-10T08:00:00Z", "2026-03-11T08:00:00Z"), [line(chairs, 1)], mode: "request",
+                                                                                                                            coupon_code: "SOBETA")
+    tables = %w[coupons coupon_redemptions customer_price_agreements additional_fees]
+    counts = lambda do |organization|
+      @system.transactor.call(tenant_id: organization[:organization_id]) do |tx|
+        tables.map { |table| tx.query_value("SELECT count(*) FROM #{table}") }
+      end
+    end
+
+    assert_equal [[0, 0, 0, 0], [1, 1, 1, 1]], [counts.call(@a), counts.call(@b)]
+    app_connection.exec("BEGIN")
+    without_context = tables.map { |table| app_connection.exec("SELECT count(*) FROM #{table}").getvalue(0, 0) }
+    app_connection.exec("ROLLBACK")
+
+    assert_equal %w[0 0 0 0], without_context
+    assert_raises(D::NotFound) { uc(:get_coupon).call(@a[:actor], coupon.id) }
+    assert_raises(D::NotFound) { uc(:get_coupon).call(@a[:actor], "SOBETA") }
+    assert_raises(D::NotFound) { uc(:get_fee).call(@a[:actor], fee.id) }
+    assert_raises(D::NotFound) { uc(:list_price_agreements).call(@a[:actor], customer_b.id) }
+    assert_raises(D::NotFound) { uc(:end_price_agreement).call(@a[:actor], agreement.id, reason: "Tentativa indevida") }
+    assert_equal [0, 0], [uc(:list_coupons).call(@a[:actor]).total, uc(:list_fees).call(@a[:actor]).total]
+  end
+
   def test_tenant_from_parameters_is_not_authorization
     forged = A::Actor.user(user_id: @b[:user_id], organization_id: @a[:organization_id], role: "owner")
 

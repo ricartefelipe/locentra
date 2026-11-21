@@ -5,20 +5,21 @@
 
 ## Última verificação completa
 
-Executada na branch `release/1.0.0`, depois das correções da estabilização (segurança das rotas públicas,
-webhooks, fila, financeiro, backup, configuração e interface), em 20/11/2026:
+Executada na branch `release/1.1.0` (cadastro de cupons, condições negociadas e tarifas adicionais, migration
+0015), em 21/11/2026:
 
 | Verificação | Resultado |
 |---|---|
-| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 624 testes, 0 falhas |
-| Cobertura de domínio + aplicação | 99,10% de linhas, 92,10% de branches (metas 90% / 80%) |
-| `rake test:browser` (Ferrum, Chrome headless) | 9 testes, 0 falhas |
-| `rubocop` (árvore da branch, com os modos de arquivo do repositório), actionlint | sem ofensas |
-| Backup e restauração com o esquema final (14 migrations) | exercitados; registro em `RUNBOOKS.md` |
-| `bin/setup` completo a partir de diretório limpo, com healthchecks e parada graciosa | exercitado; registro em `RUNBOOKS.md` §1 |
-| CI do PR da release (#11) | 7 checks aprovados |
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 819 testes, 0 falhas |
+| Cobertura de domínio + aplicação | 99,25% de linhas, 93,14% de branches (metas 90% / 80%) |
+| `rake test:browser` (Ferrum, Chrome headless) | 11 testes, 0 falhas |
+| `rubocop` (árvore da branch, com os modos de arquivo do repositório) | sem ofensas |
+| Atualização de um banco da 1.0.0 para a 0015 (verificação prévia, aborto por condições sobrepostas, ajuste, migration com a 1.0.0 em execução, troca para a 1.1.0, retorno à 1.0.0) | exercitada; registro em `RUNBOOKS.md` §13.5 |
+| Backup e restauração com o esquema final (15 migrations, 71 tabelas) | exercitados; registro em `RUNBOOKS.md` §4 |
+| `bin/setup` completo a partir de diretório limpo | exercitado na 1.0.0 (`RUNBOOKS.md` §1); na 1.1.0, web e worker `healthy` e parada com código 0 conferidos na atualização |
 
-Verificação anterior, na integração do PR #9: 553 testes, 0 falhas; 7 checks de CI aprovados.
+Verificação anterior, na `release/1.0.0` (20/11/2026): 624 testes, 0 falhas; 9 testes de navegador; backup,
+restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprovados no PR #11.
 
 ## Entregas por incremento
 
@@ -34,7 +35,8 @@ Verificação anterior, na integração do PR #9: 553 testes, 0 falhas; 7 checks
 | #8 | CLI operacional e correção do detalhe de reserva na API | Integrado e testado |
 | #9 | Testes de navegador, métricas, correlação de logs, demonstração de ponta a ponta | Integrado e testado |
 | #10 | Documentação consolidada, backup e restauração, publicação de imagem por tag | Integrado; backup e restauração exercitados (ver `RUNBOOKS.md`) |
-| release/1.0.0 | Estabilização: correções de segurança, concorrência, operação, documentação e interface | Testado (ver acima) |
+| #11 | Estabilização da versão 1.0.0: correções de segurança, concorrência, operação, documentação e interface | Integrado e testado; versão 1.0.0 |
+| #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 (ver acima) |
 
 ## Casos obrigatórios cobertos por testes
 
@@ -44,7 +46,15 @@ invade outra reserva; retirada e devolução duplicadas (sequencial e concorrent
 indisponibilidade; isolamento entre organizações e entre clientes; revogação de acesso; cálculos e
 arredondamentos (inclusive propriedades); caução e reembolso (inclusive concorrente); timeout após sucesso no
 provedor; recuperação de tarefas e worker com lease vencido; downloads não autorizados; XSS e CSRF;
-contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
+contrato Rack (`Rack::Lint`); roteiro de demonstração de 15 passos; condições comerciais: dois resgates do
+último uso de um cupom, uso liberado por cancelamento e por expiração (inclusive bloqueio vencido ainda não
+varrido), confirmação de bloqueio em andamento no vencimento contra o último uso e contra a redução do
+máximo, criação com cupom
+concorrente com o alocador sem impasse, condições negociadas sobrepostas simultâneas, ajuste de tarifa sem
+permissão ou acima do limite do papel, repetição de tarifa mantida na nova versão do orçamento e
+atualização do esquema da 0014 para a 0015 (inclusive cupons legados fora dos limites novos); texto com
+caractere nulo ou UTF-8 inválido em JSON, query string, parâmetros aninhados e partes multipart respondido
+como erro do cliente.
 
 ## Limitações conhecidas
 
@@ -65,11 +75,13 @@ contrato Rack (`Rack::Lint`); roteiro de demonstração de 14 passos.
   por e-mail (ADR-026); uma política de bloqueio até a confirmação fica para versão futura.
 - Configurações da organização (`settings`: política de cancelamento e validade padrão do bloqueio
   temporário) são lidas com valores padrão, mas não há tela nem comando para alterá-las nesta versão.
-- Cupons, condições negociadas por cliente e tarifas adicionais: o motor de preços os aplica
-  (`Domain::Pricing`, `Reservations::Pricer`) e há testes, mas não existe caso de uso, tela, endpoint nem
-  comando para cadastrar cupons e condições ou informar tarifas na reserva. Numa instalação nova, o campo
-  "Cupom" da reserva responde "cupom inexistente". Fica para uma versão com funcionalidade nova (branches
-  `release/*` aceitam somente correções).
+- Cupons não se aplicam a orçamentos nem a solicitações do portal: valem somente na criação de reserva pela
+  equipe ou pela API. A reserva convertida de um orçamento copia os preços do orçamento, sem cupom.
+- Tarifas adicionais pela API somente na criação de reserva (sem API de orçamentos). A CLI cadastra cupons e
+  condições negociadas, mas não edita cupons nem gerencia tarifas (ficam na interface web e na API).
+- Os usos de cupom anteriores à migration 0015 não são reconstruídos no livro de usos: aparecem somente no
+  contador legado do cupom. O retorno à versão 1.0.0 depois de usar cupons com limite ou de encerrar
+  condições negociadas tem restrições (`RUNBOOKS.md`, seção 13).
 - Sem medições de desempenho publicadas.
 - Proteções de branch exigem os checks; aprovação de revisão não é exigida porque o repositório tem um único
   mantenedor (revisões independentes não são simuladas).

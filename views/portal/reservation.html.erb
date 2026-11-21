@@ -22,17 +22,18 @@
     <h2 id="itens-titulo">Itens e valores</h2>
     <table class="table">
       <caption class="sr-only">Itens da reserva <%= r.code %></caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col" class="num">Total</th></tr></thead>
+      <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th></tr></thead>
       <tbody>
         <% @items.each do |item| %>
-          <tr><td><%= item["name"] %></td><td><%= item["quantity"] %></td><td><%= item["pricing"]["description"] %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
+          <tr><td><%= item["name"] %></td><td><%= item["quantity"] %></td><td><%= item["pricing"]["description"] %></td>
+            <td><%= negotiated_discount(item) %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
         <% end %>
       </tbody>
     </table>
     <dl class="details">
-      <dt>Total</dt><dd><strong><%= money(r.total) %></strong></dd>
+      <%= partial("shared/pricing_summary", pricing: @pricing, items: @items, audience: :customer, total: r.total) %>
       <dt>Caução prevista</dt><dd><%= money(r.deposit) %></dd>
     </dl>
-    <p class="muted">Valores calculados pela tabela de preços vigente no registro da reserva.</p>
+    <p class="muted">Valores calculados pela tabela de preços e pelas condições vigentes no registro da reserva.</p>
   </section>
 </div>

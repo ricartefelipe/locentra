@@ -202,12 +202,12 @@ class ReservationFlowTest < DatabaseTest
     register_assets(@actor, camera, @branch, 2)
     register_assets(@actor, lens, @branch, 1)
     rental = period("2026-03-10T08:00:00Z", "2026-03-12T08:00:00Z")
-    priced, summary = @system.transactor.call(tenant_id: @org[:organization_id]) do |tx|
+    priced = @system.transactor.call(tenant_id: @org[:organization_id]) do |tx|
       products = @system.services[:allocator].products_for(tx, [camera.id])
       @system.services[:pricer].price(tx, products: products, lines: [line(camera, 1)], period: rental, zone: D::TimeZone.new("America/Sao_Paulo"),
                                           customer_id: @customer.id, now: @clock.now)
     end
-    snapshot = { items: priced, summary: summary }
+    snapshot = { items: priced.items, summary: priced.summary }
     cases = {
       "quantidade" => [rental, [line(camera, 2)], "itens"],
       "produto" => [rental, [line(lens, 1)], "itens"],

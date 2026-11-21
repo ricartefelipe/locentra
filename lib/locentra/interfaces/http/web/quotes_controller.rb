@@ -103,7 +103,15 @@ module Locentra
             customers = data ? [] : uc(:list_customers).call(ctx.actor, status: "active", limit: 100).items
             products = uc(:list_products).call(ctx.actor, limit: 100).items.select(&:active)
             render(ctx, template, title: title, status: status, branches: org[:branches], customers: customers, products: products, values: values,
-                                  errors: errors, data: data, hold_minutes: org[:organization].hold_minutes)
+                                  errors: errors, data: data, hold_minutes: org[:organization].hold_minutes, fees: form_fees(ctx, data))
+          end
+
+          # Tarifas do formulário: as ativas e, na nova versão, também as da versão anterior que foram
+          # desativadas (podem ser mantidas como estavam).
+          def form_fees(ctx, data)
+            active = uc(:list_fees).call(ctx.actor, status: "active", limit: 100).items
+            previous = data ? Array(data[:current].pricing["fees"]).filter_map { |entry| entry["fee_id"] } : []
+            active + (previous.uniq - active.map(&:id)).map { |id| uc(:get_fee).call(ctx.actor, id)[:fee] }
           end
 
           def defaults(ctx)
@@ -117,14 +125,26 @@ module Locentra
               "validade" => fmt.call(version.valid_until), "produto" => version.items.map { |i| i["product_id"] },
               "quantidade" => version.items.map { |i| i["quantity"].to_s }, "condicoes" => version.terms.to_s,
               "desconto" => percent_text(version.manual_discount_bps), "politica_bloqueio" => quote.hold_policy,
-              "validade_bloqueio" => quote.hold_minutes.to_s }
+              "validade_bloqueio" => quote.hold_minutes.to_s }.merge(fee_values(version))
           end
+
+          # Tarifas da versão anterior nos campos do formulário. O valor só é preenchido quando difere do
+          # padrão registrado: em branco, a nova versão usa o padrão vigente da tarifa.
+          def fee_values(version)
+            catalog, custom = Array(version.pricing["fees"]).partition { |entry| entry["fee_id"] }
+            { "tarifa_id" => catalog.map { |entry| entry["fee_id"] },
+              "tarifa_valor" => catalog.map { |entry| entry["amount_cents"] == entry["default_amount_cents"] ? "" : money_text(entry["amount_cents"]) },
+              "avulsa_descricao" => custom.map { |entry| entry["description"] },
+              "avulsa_valor" => custom.map { |entry| money_text(entry["amount_cents"]) } }
+          end
+
+          def money_text(cents) = Domain::Money.new(cents).to_decimal_string.tr(".", ",")
 
           def input_from(ctx, customer:)
             f = ctx.form
             input = { branch_id: f["filial_id"], period: period_from(ctx, f["inicio"], f["fim"]), lines: lines_from(f["produto"], f["quantidade"]),
                       valid_until: local_time(ctx, f["validade"], "validade"), terms: f["condicoes"], manual_discount_bps: discount_bps(f["desconto"]),
-                      hold_policy: f["politica_bloqueio"].to_s, hold_minutes: blank(f["validade_bloqueio"]) }
+                      hold_policy: f["politica_bloqueio"].to_s, hold_minutes: blank(f["validade_bloqueio"]), fees: fee_requests_from(f) }
             input[:customer_id] = f["cliente_id"] if customer
             input.compact
           end

@@ -26,9 +26,10 @@ plataforma é separada dos contratos de locação entre a organização e seus c
   confirmação com revalidação atômica, reagendamento, extensão, reservas com vários itens (tudo ou nada).
   [Motor de disponibilidade](docs/DISPONIBILIDADE.md)
 - **Precificação:** hora, diária de 24 h, dia de calendário, semana, mínimo, arredondamento, tolerância,
-  faixas por quantidade, descontos por papel, multa por atraso, snapshots. O motor aplica cupons, condições
-  negociadas e tarifas adicionais, mas nesta versão não há tela, API nem comando para cadastrá-los (ver
-  limitações em [`docs/STATUS.md`](docs/STATUS.md)). [Política](docs/PRECIFICACAO.md)
+  faixas por quantidade, descontos por papel, multa por atraso, snapshots. Cadastro de cupons (com usos por
+  reserva), condições negociadas por cliente e tarifas adicionais, pela interface web, pela API e pela CLI,
+  aplicados em reservas e orçamentos. [Política](docs/PRECIFICACAO.md) ·
+  [Condições comerciais](docs/modulos/condicoes-comerciais.md)
 - **Orçamentos e contratos:** versões, aprovação da versão aceita, conversão idempotente, contrato em PDF com
   versão e SHA-256, aceite eletrônico simples, aditivos e cancelamento com política explícita.
 - **Operação:** separação, conferência, retirada, devolução total ou parcial, inspeção, avarias e faltas com

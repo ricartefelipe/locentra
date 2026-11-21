@@ -209,12 +209,13 @@ module Locentra
           pricing = item.fetch("pricing")
           { "product_id" => item.fetch("product_id"), "sku" => item.fetch("sku"), "name" => item.fetch("name"),
             "quantity" => item.fetch("quantity"), "description" => pricing["description"], "unit_amount_cents" => pricing["unit_amount_cents"].to_i,
-            "total_cents" => item.fetch("total_cents"), "deposit_unit_cents" => pricing["deposit_unit_cents"].to_i }
+            "total_cents" => item.fetch("total_cents"), "deposit_unit_cents" => pricing["deposit_unit_cents"].to_i,
+            "negotiated_discount_bps" => pricing["negotiated_discount_bps"].to_i, "negotiated_discount_cents" => pricing["negotiated_discount_cents"].to_i }
         end
 
         def pricing_snapshot(pricing)
-          pricing.slice("subtotal_cents", "coupon_code", "coupon_discount_cents", "manual_discount_bps", "manual_discount_cents", "fees",
-                        "fees_cents", "total_cents", "deposit_cents", "priced_at", "quote_code", "quote_version")
+          pricing.slice("subtotal_cents", "coupon_code", "coupon", "coupon_discount_cents", "agreements", "manual_discount_bps",
+                        "manual_discount_cents", "fees", "fees_cents", "total_cents", "deposit_cents", "priced_at", "quote_code", "quote_version")
         end
 
         # Dados usados para gerar uma versão do documento: termos da emissão, aditivos até a versão

@@ -12,6 +12,7 @@ require_relative "web/contracts_controller"
 require_relative "web/portal_controllers"
 require_relative "api/v1"
 require_relative "api/v1_finance"
+require_relative "routes_commercial_terms"
 
 module Locentra
   module Interfaces
@@ -55,6 +56,7 @@ module Locentra
           draw_portal(r, deps, w)
           draw_staff(r, deps, w)
           draw_api(r, API::V1Controller.new(deps))
+          CommercialTermsRoutes.draw_api(r, deps)
         end
 
         def draw_staff(router, deps, web)
@@ -70,6 +72,7 @@ module Locentra
           r.post "/clientes/:id", customers, :update
           r.post "/clientes/:id/contatos", customers, :add_contact
           r.post "/clientes/:id/enderecos", customers, :add_address
+          CommercialTermsRoutes.draw_web(r, deps, customers: customers)
 
           catalog = w::CatalogController.new(deps)
           r.get "/produtos", catalog, :index

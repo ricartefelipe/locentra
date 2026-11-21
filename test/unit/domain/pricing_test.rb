@@ -117,8 +117,18 @@ class PricingTest < UnitTest
     refute coupon.applicable?(subtotal, t("2026-03-10T00:00:00Z"))
     refute P::Coupon.new(**base, redemptions: 2).applicable?(subtotal, t("2026-03-05T00:00:00Z"))
     refute coupon.applicable?(Locentra::Domain::Money.new(500), t("2026-03-05T00:00:00Z"))
-    assert_raises(Locentra::Domain::ValidationError) do
-      P::Totals.compose(lines: [{ "total_cents" => 100 }], coupon: P::Coupon.new(**base, active: false), now: t("2026-03-05T00:00:00Z"))
+    lines = [{ "total_cents" => 2000 }]
+    rejections = {
+      "cupom desativado" => [P::Coupon.new(**base, active: false), t("2026-03-05T00:00:00Z"), lines],
+      "cupom expirado" => [coupon, t("2026-03-10T00:00:00Z"), lines],
+      "cupom ainda não está vigente" => [coupon, t("2026-02-28T23:59:59Z"), lines],
+      "cupom esgotado" => [P::Coupon.new(**base, redemptions: 2), t("2026-03-05T00:00:00Z"), lines],
+      "subtotal abaixo do mínimo do cupom (R$ 10,00)" => [coupon, t("2026-03-05T00:00:00Z"), [{ "total_cents" => 999 }]]
+    }
+    rejections.each do |message, (candidate, at, priced)|
+      error = assert_raises(Locentra::Domain::ValidationError) { P::Totals.compose(lines: priced, coupon: candidate, now: at) }
+
+      assert_equal({ "cupom" => [message] }, error.errors)
     end
   end
 

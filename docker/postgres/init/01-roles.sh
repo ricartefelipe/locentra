@@ -4,8 +4,9 @@
 # - locentra_owner: proprietário do schema; usado somente por migrations.
 # - locentra_app: papel da aplicação web/CLI. Sem superuser, sem BYPASSRLS, sem propriedade de tabelas.
 # - locentra_worker: papel do worker. Mesmas restrições; políticas próprias apenas na fila.
-# - locentra_backup: somente leitura com BYPASSRLS, usado exclusivamente por pg_dump (a RLS é forçada
-#   inclusive para o proprietário; sem bypass o backup não enxergaria as linhas).
+# - locentra_backup: somente leitura com BYPASSRLS, usado por pg_dump (a RLS é forçada inclusive para o
+#   proprietário; sem bypass o backup não enxergaria as linhas) e, por operador, nas consultas de
+#   verificação somente leitura de docs/RUNBOOKS.md; nunca pela aplicação.
 set -eu
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<SQL

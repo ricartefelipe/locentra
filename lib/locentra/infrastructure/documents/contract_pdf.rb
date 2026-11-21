@@ -84,10 +84,15 @@ module Locentra
           line(pdf, "Horários no fuso #{current["timezone"]}.", size: 9)
         end
 
+        # Valores negativos usam o hífen ASCII: o sinal de menos (U+2212) não existe em Windows-1252.
         def items(pdf, terms)
           section(pdf, "3. Itens locados")
           terms.fetch("items").each do |item|
-            bullet(pdf, "#{item["quantity"]} x #{item["name"]} (#{item["sku"]}) · #{item["description"]} · #{money(item["total_cents"])}")
+            negotiated = item["negotiated_discount_cents"].to_i
+            condition = if negotiated.positive?
+                          " · condição negociada -#{Domain::Percent.label(item["negotiated_discount_bps"].to_i)} (-#{money(negotiated)})"
+                        end
+            bullet(pdf, "#{item["quantity"]} x #{item["name"]} (#{item["sku"]}) · #{item["description"]}#{condition} · #{money(item["total_cents"])}")
           end
         end
 
@@ -95,13 +100,38 @@ module Locentra
           section(pdf, "4. Valores")
           pricing = terms.fetch("pricing")
           line(pdf, "Subtotal dos itens: #{money(pricing["subtotal_cents"])}") if pricing["subtotal_cents"]
-          line(pdf, "Desconto por cupom #{pricing["coupon_code"]}: -#{money(pricing["coupon_discount_cents"])}") if pricing["coupon_code"]
+          agreements = agreements_text(pricing, terms.fetch("items"))
+          line(pdf, "Condição negociada do cliente: #{agreements}") if agreements
+          line(pdf, "#{coupon_label(pricing)}: -#{money(pricing["coupon_discount_cents"])}") if pricing["coupon_code"]
           line(pdf, "Desconto manual: -#{money(pricing["manual_discount_cents"])}") if pricing["manual_discount_cents"].to_i.positive?
           Array(pricing["fees"]).each { |fee| line(pdf, "#{fee["description"]}: #{money(fee["amount_cents"])}") }
           line(pdf, "Valor da locação na emissão: #{money(terms.fetch("total_cents"))}")
           line(pdf, "Ajustes anteriores à emissão: #{money(terms.fetch("adjustments_cents"))}") if terms.fetch("adjustments_cents").positive?
           line(pdf, "Total contratado vigente: #{money(snapshot.fetch("current_total_cents"))}", style: :bold)
           line(pdf, "Caução prevista: #{money(terms.fetch("deposit_cents"))} (separada do valor da locação e devolvida após a conferência)")
+        end
+
+        # "8% em todos os produtos; 10% em LEN-2470" (snapshots anteriores não têm a chave).
+        def agreements_text(pricing, items)
+          list = Array(pricing["agreements"])
+          return nil if list.empty?
+
+          list.map do |agreement|
+            scope = if agreement["product_id"]
+                      "em #{items.find { |i| i["product_id"] == agreement["product_id"] }&.fetch("sku", nil) || "produto específico"}"
+                    else
+                      "em todos os produtos"
+                    end
+            "#{Domain::Percent.label(agreement["discount_bps"].to_i)} #{scope}"
+          end.join("; ")
+        end
+
+        def coupon_label(pricing)
+          coupon = pricing["coupon"]
+          return "Desconto por cupom #{pricing["coupon_code"]}" unless coupon
+
+          kind = coupon["kind"] == "percent" ? Domain::Percent.label(coupon["value"].to_i) : "valor fixo"
+          "Desconto por cupom #{pricing["coupon_code"]} (#{kind})"
         end
 
         def amendments(pdf, snapshot)

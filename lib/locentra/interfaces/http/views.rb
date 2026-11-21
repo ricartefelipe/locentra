@@ -111,6 +111,20 @@ module Locentra
           Domain::Money.new(cents).format_brl
         end
 
+        # Texto de campo monetário exibido como valor ("1600,00" → "R$ 1.600,00"); texto que não é valor
+        # válido (reenvio de formulário com erro) aparece como veio.
+        def money_text(text)
+          Domain::Money.parse(text).format_brl
+        rescue Domain::ValidationError
+          "R$ #{text}"
+        end
+
+        # Valor de campo monetário: decimal com vírgula, sem símbolo nem separador de milhar ("1234,50").
+        def money_input(value)
+          cents = value.is_a?(Domain::Money) ? value.cents : value.to_i
+          Domain::Money.new(cents).to_decimal_string.tr(".", ",")
+        end
+
         def time_zone = request.time_zone
 
         def datetime(value, pattern = "%d/%m/%Y %H:%M")
@@ -143,7 +157,8 @@ module Locentra
           "partial" => "info", "not_delivered" => "muted", "pending" => "warning", "checked" => "info", "approved" => "success",
           "rejected" => "danger", "open" => "warning", "dismissed" => "muted", "received" => "success", "resolved" => "muted",
           "overdue" => "danger", "affected_by_overdue" => "warning", "asset_unavailable" => "danger", "draft" => "neutral",
-          "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted"
+          "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted", "scheduled" => "info",
+          "exhausted" => "warning", "ended" => "muted", "released_cancelled" => "muted", "released_expired" => "muted"
         }.freeze
 
         # Rótulo em português de um código interno (ver Labels::GROUPS).
@@ -152,6 +167,25 @@ module Locentra
         # Percentual a partir de pontos-base, com aritmética inteira (Domain::Percent).
         def percent(bps) = Domain::Percent.label(bps)
         def percent_value(bps) = Domain::Percent.value(bps)
+
+        # Vigência semiaberta [início, fim) no fuso da organização: "desde …", "até …" ou "sem prazo".
+        def validity(from, to)
+          parts = []
+          parts << "desde #{datetime(from)}" if from
+          parts << "até #{datetime(to)}" if to
+          parts.empty? ? "sem prazo" : parts.join(" ")
+        end
+
+        # Desconto de um cupom (cadastro ou snapshot): percentual em pontos-base ou valor fixo em centavos.
+        def coupon_discount(kind, value) = kind == "percent" ? percent(value) : money(value)
+
+        # Condição negociada aplicada a uma linha de reserva (snapshot em "pricing"), de orçamento ou de
+        # contrato: "−8% (−R$ 72,00)"; sem condição (inclusive em snapshots antigos), "—".
+        def negotiated_discount(item)
+          data = item["pricing"].is_a?(Hash) ? item["pricing"] : item
+          cents = data["negotiated_discount_cents"].to_i
+          cents.positive? ? "−#{percent(data["negotiated_discount_bps"].to_i)} (−#{money(cents)})" : "—"
+        end
 
         def asset_status(status) = Domain::Catalog::ASSET_STATUSES.fetch(status.to_s) { Labels.label(:field, status) }
 
@@ -202,6 +236,13 @@ module Locentra
           bucket.is_a?(Hash) ? bucket[key] : nil
         end
 
+        # Linhas de campos repetidos (nome[]) reenviados, alinhadas pela posição: uma lista de valores por
+        # linha, na ordem dos nomes informados.
+        def value_rows(values, *names)
+          columns = names.map { |name| Array(values[name]) }
+          Array.new(columns.map(&:size).max.to_i) { |index| columns.map { |column| column[index] } }
+        end
+
         # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.
         def open_if(errors, *fields) = raw(fields.any? { |field| errors&.key?(field.to_s) } ? " open" : "")
 
@@ -233,6 +274,8 @@ module Locentra
           ["Financeiro", "/financeiro", "finance.read"],
           ["Produtos e kits", "/produtos", "catalog.read"],
           ["Ativos", "/ativos", "catalog.read"],
+          ["Cupons", "/cupons", "coupons.read"],
+          ["Tarifas adicionais", "/tarifas", "fees.read"],
           ["Retiradas e devoluções", "/operacao", "fulfillment.write"],
           ["Manutenção", "/manutencao", "maintenance.write"],
           ["Usuários e permissões", "/usuarios", "members.read"],

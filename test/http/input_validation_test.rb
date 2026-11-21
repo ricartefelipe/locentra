@@ -91,6 +91,68 @@ class InputValidationTest < HttpTest
     assert_equal 422, last_response.status
   end
 
+  # O banco não armazena U+0000 e o Ruby recusa operar texto com UTF-8 inválido: os dois casos são erro
+  # do cliente, no campo, e não falha interna.
+  def test_null_characters_and_invalid_encoding_are_client_errors
+    token = uc(:create_credential).call(@org[:actor], name: "ERP", scopes: %w[coupons.read coupons.write customers.read], expires_in_days: 1)["token"]
+    headers = { "HTTP_AUTHORIZATION" => "Bearer #{token}", "CONTENT_TYPE" => "application/json", "HTTP_IDEMPOTENCY_KEY" => "texto-nulo-01" }
+    post "/api/v1/coupons", JSON.generate("code" => "NULO10", "kind" => "percent", "discount_bps" => 1000, "description" => "a\u0000b"), headers
+
+    assert_equal [422, { "description" => ["texto com codificação inválida ou caractere nulo"] }],
+                 [last_response.status, json_body.dig("error", "details", "fields")]
+    post "/api/v1/coupons", JSON.generate("code" => "NULO10", "kind" => "percent", "discount_bps" => 1000, "a\u0000" => 1),
+         headers.merge("HTTP_IDEMPOTENCY_KEY" => "texto-nulo-02")
+
+    assert_equal [422, ["corpo"]], [last_response.status, json_body.dig("error", "details", "fields").keys]
+    %w[/api/v1/coupons?q=%FF /api/v1/customers?q=%00].each do |path|
+      get path, {}, headers
+
+      assert_equal [422, ["q"]], [last_response.status, json_body.dig("error", "details", "fields").keys], path
+    end
+    login("dona@alfa.test")
+    get "/clientes?busca=%FF"
+
+    assert_equal 422, last_response.status
+    post_form "/clientes", { "tipo" => "individual", "nome" => "Cliente\u0000Nulo", "documento" => "52998224725" }
+
+    assert_equal 400, last_response.status
+  end
+
+  BOUNDARY = "----limite"
+
+  def multipart_part(name, value, type = nil)
+    header = type ? "Content-Type: #{type}\r\n" : ""
+    "--#{BOUNDARY}\r\nContent-Disposition: form-data; name=\"#{name}\"\r\n#{header}\r\n".b + value.b + "\r\n".b
+  end
+
+  # Cadastro de cliente em multipart com o nome numa parte text/plain do charset informado.
+  def post_multipart_customer(name, charset)
+    body = [["_csrf", csrf], %w[tipo individual], %w[documento 11144477735]].map { |field, value| multipart_part(field, value) }.join.b
+    body << multipart_part("nome", name, "text/plain; charset=#{charset}") << "--#{BOUNDARY}--\r\n".b
+    post "/clientes", {}, { input: body, "CONTENT_TYPE" => "multipart/form-data; boundary=#{BOUNDARY}" }
+  end
+
+  # Parâmetros aninhados (nome[chave], nome[chave][]) e partes multipart de texto em outra codificação
+  # passam pela mesma verificação dos parâmetros simples.
+  def test_nested_parameters_and_non_utf8_multipart_text_are_client_errors
+    login("dona@alfa.test")
+    customer = { "tipo" => "individual", "nome" => "Cliente Aninhado", "documento" => "11144477735" }
+    [{ "observacoes" => { "linha" => "lente\u0000riscada" } }, { "observacoes" => { "linha\u0000" => "riscada" } },
+     { "inspecao" => { "linha" => ["ok", "a\u0000"] } }].each do |nested|
+      post_form "/clientes", customer.merge(nested)
+
+      assert_equal 400, last_response.status, nested.inspect
+    end
+    { "binary" => "Cliente \xFF Teste", "iso-8859-1" => "Cliente Jos\xE9" }.each do |charset, name|
+      post_multipart_customer(name, charset)
+
+      assert_equal 400, last_response.status, charset
+    end
+    post_multipart_customer("Cliente Ascii", "iso-8859-1")
+
+    assert_equal 303, last_response.status, "texto só ASCII em outra codificação é aceito"
+  end
+
   def test_body_size_limits
     big = "a" * (1_048_576 + 1)
     post "/entrar", { "email" => big }

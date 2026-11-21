@@ -1,0 +1,11 @@
+<%# Eventos de auditoria de um cadastro. Locais: history. Alterações (`changes`) citam os campos alterados. %>
+<% if @history.empty? %><p class="empty">Sem eventos.</p><% else %>
+  <ol class="timeline">
+    <% @history.each do |event| %>
+      <% changes = event["details"].is_a?(Hash) ? event["details"]["changes"] : nil %>
+      <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= label(:audit_action, event["action"]) %></strong>
+        <% if changes.is_a?(Hash) && !changes.empty? %>(<%= changes.keys.map { |field| label(:changed_field, field) }.join(", ") %>)<% end %>
+        <span class="muted"><%= event["actor_name"] || label(:actor_type, event["actor_type"]) %></span></li>
+    <% end %>
+  </ol>
+<% end %>

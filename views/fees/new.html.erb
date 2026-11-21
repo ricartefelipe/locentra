@@ -1,0 +1,13 @@
+<header class="page-header"><h1>Nova tarifa</h1></header>
+<section class="panel">
+  <%= partial("shared/errors") %>
+  <form method="post" action="/tarifas" class="form-grid">
+    <%= csrf_field %>
+    <div class="full"><label for="codigo">Código</label>
+      <input id="codigo" name="codigo" required maxlength="30" autocapitalize="characters" autocomplete="off" value="<%= @values["codigo"] %>"<%= invalid(@errors, "codigo", describedby: "ajuda-codigo") %>>
+      <p class="muted" id="ajuda-codigo">De 2 a 30 caracteres: letras sem acento, números, hífen ou sublinhado. Letras minúsculas são convertidas. O código não muda depois do cadastro.</p>
+      <%= field_errors(@errors, "codigo") %></div>
+    <%= partial("fees/fields", prefix: "") %>
+    <div class="full actions"><button type="submit" class="primary">Cadastrar tarifa</button> <a href="/tarifas">Cancelar</a></div>
+  </form>
+</section>

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Locentra API
-  version: "1.0"
+  version: "1.1"
   description: |
     API versionada do Locentra. Autenticação por credencial de integração (`Authorization: Bearer lcn_...`)
     com escopos por permissão. O tenant é determinado pela credencial, nunca por parâmetros.
@@ -11,6 +11,14 @@ info:
 
     Operações de reserva e financeiras exigem `Idempotency-Key`. A mesma chave com o mesmo conteúdo
     devolve o resultado gravado (cabeçalho `Idempotent-Replayed: true`); com conteúdo diferente, `409`.
+    Operações de condições comerciais (POST e PATCH) também exigem `Idempotency-Key`.
+
+    Nas condições comerciais (cupons, tarifas adicionais e condições negociadas), percentuais são inteiros
+    em pontos-base (`800` = 8%) e valores são centavos inteiros: números com casas decimais e números
+    enviados como texto são recusados com `422`. As alterações usam o identificador do recurso; as consultas
+    de cupom e de tarifa aceitam também o código. Os erros de validação vêm em `error.details.fields`, com os
+    nomes de campo das regras de negócio (por exemplo `codigo`, `valor`, `valido_ate`, `maximo_usos`,
+    `subtotal_minimo`, `desconto`, `motivo`, `encerrar_em`, `valor_padrao`, `tarifas`).
 servers:
   - url: /api/v1
 security:
@@ -119,6 +127,7 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/Product" } }
                   pagination: { $ref: "#/components/schemas/Pagination" }
+        "422": { $ref: "#/components/responses/Error" }
   /reservations:
     get:
       summary: Lista reservas
@@ -139,8 +148,15 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: "#/components/schemas/Reservation" } }
                   pagination: { $ref: "#/components/schemas/Pagination" }
+        "422": { $ref: "#/components/responses/Error" }
     post:
       summary: Cria reserva (solicitação, bloqueio temporário ou confirmação imediata)
+      description: >-
+        Escopo `reservations.write`. `coupon_code` aplica um cupom vigente (o uso é registrado para a reserva e
+        liberado se ela for cancelada ou expirar). `fees` aplica tarifas adicionais: tarifa do catálogo pelo valor
+        padrão não exige outro escopo; valor diferente do padrão e tarifa avulsa exigem `fees.override` (`403`).
+        Credenciais não reduzem tarifas abaixo do valor padrão. As condições negociadas vigentes do cliente são
+        aplicadas automaticamente.
       operationId: createReservation
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -161,7 +177,12 @@ paths:
                   default: hold
                   description: "request não garante disponibilidade; hold bloqueia até expirar; confirm aloca e confirma."
                 hold_minutes: { type: integer, minimum: 5, maximum: 1440 }
-                coupon_code: { type: string }
+                coupon_code: { type: string, description: Código do cupom (maiúsculas e minúsculas são equivalentes) }
+                fees:
+                  type: array
+                  maxItems: 10
+                  description: Tarifas adicionais; a mesma tarifa do catálogo não se repete
+                  items: { $ref: "#/components/schemas/ReservationFee" }
                 notes: { type: string }
                 items:
                   type: array
@@ -179,6 +200,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Reservation" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
   /reservations/{id}:
@@ -310,6 +333,299 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /coupons:
+    get:
+      summary: Lista cupons com a situação no instante da consulta
+      description: Escopo `coupons.read`. A busca considera o início do código e qualquer trecho da descrição.
+      operationId: listCoupons
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, scheduled, expired, exhausted, inactive] } }
+        - { name: q, in: query, schema: { type: string, maxLength: 40 } }
+        - { name: sort, in: query, schema: { type: string, enum: [code, -created_at, valid_until], default: code } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de cupons
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CouponPage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Cadastra cupom
+      description: >-
+        Escopo `coupons.write`. O código é convertido para maiúsculas e é único na organização, inclusive entre
+        cupons desativados (`409 coupon_code_taken`). Código, tipo e desconto não mudam depois do cadastro.
+      operationId: createCoupon
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CouponInput" }
+      responses:
+        "201":
+          description: Cupom cadastrado
+          headers:
+            Location: { description: Endereço do cupom (pelo identificador), schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Coupon" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /coupons/{id}:
+    get:
+      summary: Detalha cupom pelo identificador ou pelo código
+      operationId: getCoupon
+      parameters: [{ $ref: "#/components/parameters/Reference" }]
+      responses:
+        "200":
+          description: Cupom
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Coupon" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      summary: Altera os campos editáveis do cupom
+      description: >-
+        Escopo `coupons.write`. Somente as chaves presentes são alteradas; `null` limpa o campo (em
+        `min_subtotal_cents`, vale 0). Alteração sem mudança devolve o cupom como está, sem registro de auditoria.
+        Com `lock_version` informado e diferente do atual, responde `409 stale_coupon`. `code`, `kind`,
+        `discount_bps` e `discount_cents` não são aceitos. A rota exige o identificador (o código responde 422).
+      operationId: updateCoupon
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CouponPatch" }
+      responses:
+        "200":
+          description: Cupom atualizado (ou inalterado)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Coupon" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /coupons/{id}/deactivate:
+    post:
+      summary: Desativa cupom
+      description: >-
+        Escopo `coupons.write`. Reservas já registradas não mudam. Cupom já desativado é devolvido como está.
+        Não há exclusão pela API.
+      operationId: deactivateCoupon
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200":
+          description: Cupom desativado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Coupon" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /coupons/{id}/reactivate:
+    post:
+      summary: Reativa cupom
+      description: Escopo `coupons.write`. Cupom já ativo é devolvido como está.
+      operationId: reactivateCoupon
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200":
+          description: Cupom reativado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Coupon" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /coupons/{id}/redemptions:
+    get:
+      summary: Lista os usos do cupom, mais recentes primeiro
+      description: >-
+        Escopo `coupons.read`. Cada uso pertence a uma reserva e o estado é derivado da situação dela: o uso é
+        liberado quando a reserva é cancelada ou o bloqueio temporário expira.
+      operationId: listCouponRedemptions
+      parameters:
+        - { $ref: "#/components/parameters/Reference" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de usos
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CouponRedemptionPage" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /fees:
+    get:
+      summary: Lista as tarifas adicionais do catálogo
+      description: Escopo `fees.read`. A busca considera o código e o nome.
+      operationId: listFees
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+        - { name: q, in: query, schema: { type: string, maxLength: 40 } }
+        - { name: sort, in: query, schema: { type: string, enum: [name, code, -created_at], default: name } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de tarifas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeePage" }
+        "422": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Cadastra tarifa adicional
+      description: Escopo `fees.write`. O código é único na organização (`409 fee_code_taken`) e não muda depois do cadastro.
+      operationId: createFee
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeeInput" }
+      responses:
+        "201":
+          description: Tarifa cadastrada
+          headers:
+            Location: { description: Endereço da tarifa (pelo identificador), schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Fee" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /fees/{id}:
+    get:
+      summary: Detalha tarifa pelo identificador ou pelo código
+      operationId: getFee
+      parameters: [{ $ref: "#/components/parameters/Reference" }]
+      responses:
+        "200":
+          description: Tarifa
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Fee" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      summary: Altera nome, descrição ou valor padrão da tarifa
+      description: >-
+        Escopo `fees.write`. Somente as chaves presentes são alteradas; `description: null` limpa a descrição.
+        Alterar o valor padrão não muda reservas, orçamentos e contratos já registrados. Com `lock_version`
+        informado e diferente do atual, responde `409 stale_fee`. A rota exige o identificador.
+      operationId: updateFee
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FeePatch" }
+      responses:
+        "200":
+          description: Tarifa atualizada (ou inalterada)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Fee" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /fees/{id}/deactivate:
+    post:
+      summary: Desativa tarifa
+      description: >-
+        Escopo `fees.write`. A tarifa deixa de ser aceita em novas reservas e orçamentos; documentos já
+        registrados não mudam.
+      operationId: deactivateFee
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200":
+          description: Tarifa desativada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Fee" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /fees/{id}/reactivate:
+    post:
+      summary: Reativa tarifa
+      description: Escopo `fees.write`.
+      operationId: reactivateFee
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200":
+          description: Tarifa reativada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Fee" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /customers/{id}/price-agreements:
+    get:
+      summary: Lista as condições negociadas do cliente
+      description: >-
+        Escopo `price_agreements.read`. Condições não encerradas primeiro, depois as de início mais recente.
+        `product` (SKU e nome) acompanha as condições de produto somente com o escopo `catalog.read`.
+      operationId: listPriceAgreements
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200":
+          description: Página de condições negociadas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PriceAgreementPage" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Cadastra condição negociada para o cliente
+      description: >-
+        Escopo `price_agreements.write`. Sem `product_id`, a condição vale para todos os produtos. Sem
+        `valid_from`, vale a partir do cadastro; início até 24 horas no passado é ajustado para o instante atual.
+        Vigências do mesmo cliente e escopo não se sobrepõem (`409 price_agreement_overlap`): encerre a condição
+        vigente, ou agende o encerramento, antes de cadastrar a próxima. A condição não é alterada depois de criada.
+      operationId: createPriceAgreement
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PriceAgreementInput" }
+      responses:
+        "201":
+          description: Condição cadastrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PriceAgreement" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /price-agreements/{id}/end:
+    post:
+      summary: Encerra condição negociada (imediatamente ou em instante agendado)
+      description: >-
+        Escopo `price_agreements.write`. O encerramento é único: condição já encerrada, com encerramento agendado
+        ou expirada responde `409 invalid_transition`. Reservas e orçamentos já registrados não mudam.
+      operationId: endPriceAgreement
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PriceAgreementEnd" }
+      responses:
+        "200":
+          description: Condição com o encerramento registrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PriceAgreement" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearer:
@@ -321,6 +637,12 @@ components:
         e de organização suspensa ou encerrada recebem 401.
   parameters:
     Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    Reference:
+      name: id
+      in: path
+      required: true
+      description: Identificador (UUID) ou código do recurso
+      schema: { type: string, maxLength: 64 }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
     Offset: { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 } }
     IdempotencyKey:
@@ -404,6 +726,153 @@ components:
         total: { $ref: "#/components/schemas/Money" }
         deposit: { $ref: "#/components/schemas/Money" }
         version: { type: integer }
+        items:
+          type: array
+          description: Itens com o snapshot de preço da linha (presente no detalhe)
+          items:
+            type: object
+            properties:
+              product_id: { type: string, format: uuid }
+              sku: { type: string }
+              quantity: { type: integer }
+              pricing: { $ref: "#/components/schemas/ReservationItemPricing" }
+        allocations:
+          type: object
+          description: Alocações ativas da reserva (presente no detalhe)
+          properties:
+            assets:
+              type: array
+              description: Ativos serializados alocados
+              items:
+                type: object
+                properties:
+                  asset_id: { type: string, format: uuid }
+                  tag: { type: string, description: Patrimônio do ativo }
+            stock:
+              type: array
+              description: Quantidades alocadas de produtos controlados por quantidade
+              items:
+                type: object
+                properties:
+                  product_id: { type: string, format: uuid }
+                  quantity: { type: integer }
+        pricing: { $ref: "#/components/schemas/ReservationPricing" }
+        adjustments:
+          type: array
+          description: Ajustes de valor registrados depois da criação, em ordem cronológica (presente no detalhe)
+          items: { $ref: "#/components/schemas/ReservationAdjustment" }
+    ReservationAdjustment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reservation_item_id: { type: [string, "null"], format: uuid, description: Item ao qual o ajuste se refere; nulo quando vale para a reserva }
+        kind: { type: string, enum: [extension, amendment, late_fee, damage, missing, cancellation_fee] }
+        amount_cents: { type: integer, description: Valor do ajuste; negativo reduz o total }
+        details: { type: object, description: Dados do ajuste conforme o tipo }
+        created_at: { type: string, description: "Instante do registro em UTC, no formato `2026-03-02 12:00:00 +0000` (não ISO 8601)" }
+    ReservationItemPricing:
+      type: object
+      description: >-
+        Snapshot de preço da linha, congelado na criação. `total_cents` já descontou as faixas de quantidade e a
+        condição negociada. Linhas anteriores ao cadastro de condições comerciais podem não ter
+        `negotiated_agreement_id`.
+      properties:
+        product_id: { type: string, format: uuid }
+        sku: { type: string }
+        name: { type: string }
+        tracking: { type: string, enum: [serialized, bulk, kit] }
+        description: { type: string, description: "Unidades cobradas, por exemplo \"2 diárias (24 h)\"" }
+        table: { type: object, description: Tabela de preços do produto no instante da precificação }
+        units:
+          type: object
+          description: >-
+            Unidades cobradas, conforme a tabela: `minutes` (minutos, na cobrança por hora), `days` (diárias ou dias de
+            calendário), `weeks` (semanas) e `rest_days` (dias além das semanas completas, quando a tabela tem diária e
+            semanal)
+        quantity: { type: integer }
+        unit_amount_cents: { type: integer }
+        gross_cents: { type: integer }
+        tier_discount_bps: { type: integer }
+        tier_discount_cents: { type: integer }
+        negotiated_agreement_id: { type: [string, "null"], format: uuid, description: Condição negociada aplicada à linha }
+        negotiated_discount_bps: { type: integer }
+        negotiated_discount_cents: { type: integer }
+        total_cents: { type: integer }
+        deposit_unit_cents: { type: integer }
+    ReservationPricing:
+      type: object
+      description: >-
+        Resumo de preços congelado na criação da reserva (presente no detalhe). Vale
+        `subtotal_cents - coupon_discount_cents - manual_discount_cents + fees_cents = total_cents`; o subtotal já
+        considera as faixas de quantidade e as condições negociadas. Reservas anteriores ao cadastro de condições
+        comerciais podem não ter `coupon` e `agreements`.
+      properties:
+        subtotal_cents: { type: integer }
+        coupon_code: { type: [string, "null"] }
+        coupon_discount_cents: { type: integer }
+        manual_discount_bps: { type: integer }
+        manual_discount_cents: { type: integer }
+        fees_cents: { type: integer }
+        total_cents: { type: integer }
+        deposit_cents: { type: integer }
+        period: { $ref: "#/components/schemas/Period" }
+        timezone: { type: string, example: America/Sao_Paulo, description: Fuso da organização usado no cálculo das unidades }
+        priced_at: { type: string, format: date-time, description: Instante da precificação (vigência de cupons e condições) }
+        coupon:
+          type: [object, "null"]
+          description: Cupom aplicado, como estava no instante da precificação
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            kind: { type: string, enum: [percent, fixed] }
+            value: { type: integer, description: Pontos-base (percent) ou centavos (fixed) }
+            description: { type: [string, "null"] }
+            valid_from: { type: [string, "null"], format: date-time }
+            valid_until: { type: [string, "null"], format: date-time }
+        agreements:
+          type: array
+          description: Condições negociadas aplicadas aos itens (cada item informa `negotiated_agreement_id` no próprio snapshot)
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              scope: { type: string, enum: [general, product] }
+              product_id: { type: [string, "null"], format: uuid }
+              discount_bps: { type: integer }
+              valid_from: { type: string, format: date-time }
+              valid_until: { type: [string, "null"], format: date-time }
+              ended_at: { type: [string, "null"], format: date-time }
+        fees:
+          type: array
+          description: Tarifas adicionais aplicadas
+          items:
+            type: object
+            properties:
+              fee_id: { type: [string, "null"], format: uuid, description: Nulo em tarifa avulsa }
+              code: { type: [string, "null"] }
+              description: { type: string, description: Nome da tarifa do catálogo ou texto da tarifa avulsa }
+              amount_cents: { type: integer }
+              default_amount_cents: { type: [integer, "null"], description: Valor padrão da tarifa na criação; nulo em tarifa avulsa }
+              source: { type: string, enum: [catalog, custom] }
+    ReservationFee:
+      description: >-
+        Tarifa do catálogo (`fee_id`, com `amount_cents` opcional) ou tarifa avulsa (`description` e `amount_cents`);
+        `fee_id` e `description` juntos são recusados (422). Chave com valor nulo vale como ausente, e as demais chaves
+        (`code`, `source`, `default_amount_cents`) são ignoradas. Das entradas devolvidas em `pricing.fees`, somente a
+        entrada avulsa pode ser reenviada como está (`fee_id` nulo). A entrada do catálogo traz `description` com o nome
+        da tarifa e deve ser reenviada só com `fee_id` e, para manter um valor ajustado, `amount_cents`; sem o valor,
+        vale o padrão vigente.
+      oneOf:
+        - type: object
+          required: [fee_id]
+          properties:
+            fee_id: { type: string, format: uuid }
+            amount_cents: { type: integer, minimum: 1, description: "Sem o campo, vale o valor padrão; valor diferente exige `fees.override`" }
+        - type: object
+          required: [description, amount_cents]
+          properties:
+            description: { type: string, minLength: 2, maxLength: 120 }
+            amount_cents: { type: integer, minimum: 1 }
     Payment:
       type: object
       properties:
@@ -432,3 +901,148 @@ components:
         amount: { $ref: "#/components/schemas/Money" }
         reason: { type: string }
         confirmed_at: { type: [string, "null"], format: date-time }
+    Coupon:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: BEMVINDO10 }
+        description: { type: [string, "null"] }
+        kind: { type: string, enum: [percent, fixed] }
+        discount_bps: { type: [integer, "null"], description: "Desconto percentual em pontos-base (1000 = 10%); nulo em cupom de valor fixo" }
+        discount:
+          description: Desconto de valor fixo; nulo em cupom percentual
+          oneOf: [{ $ref: "#/components/schemas/Money" }, { type: "null" }]
+        valid_from: { type: [string, "null"], format: date-time, description: Início da vigência (inclusivo); nulo vale imediatamente }
+        valid_until: { type: [string, "null"], format: date-time, description: Fim da vigência (exclusivo); nulo é sem prazo }
+        max_redemptions: { type: [integer, "null"] }
+        redemptions: { type: integer, description: Usos ativos (reservas não canceladas nem expiradas e usos anteriores à versão 1.1.0) }
+        total_redemptions: { type: integer, description: "Todos os usos registrados, inclusive os liberados" }
+        remaining: { type: [integer, "null"], description: Usos restantes; nulo sem limite }
+        min_subtotal: { $ref: "#/components/schemas/Money" }
+        active: { type: boolean }
+        status: { type: string, enum: [active, scheduled, expired, exhausted, inactive] }
+        lock_version: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CouponInput:
+      type: object
+      required: [code, kind]
+      description: Informe exatamente um entre `discount_bps` (tipo `percent`) e `discount_cents` (tipo `fixed`).
+      properties:
+        code: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$", description: Convertido para maiúsculas; não use o formato de UUID }
+        kind: { type: string, enum: [percent, fixed] }
+        discount_bps: { type: integer, minimum: 1, maximum: 10000 }
+        discount_cents: { type: integer, minimum: 1 }
+        description: { type: [string, "null"], maxLength: 200 }
+        valid_from: { type: [string, "null"], format: date-time }
+        valid_until: { type: [string, "null"], format: date-time, description: Posterior ao início e ao instante atual }
+        max_redemptions: { type: [integer, "null"], minimum: 1, maximum: 1000000 }
+        min_subtotal_cents: { type: [integer, "null"], minimum: 0, description: Subtotal mínimo da reserva depois das faixas e das condições negociadas }
+    CouponPatch:
+      type: object
+      properties:
+        description: { type: [string, "null"], maxLength: 200 }
+        valid_from: { type: [string, "null"], format: date-time }
+        valid_until: { type: [string, "null"], format: date-time }
+        max_redemptions: { type: [integer, "null"], minimum: 1, maximum: 1000000, description: Não pode ficar abaixo dos usos ativos }
+        min_subtotal_cents: { type: [integer, "null"], minimum: 0 }
+        lock_version: { type: integer, minimum: 1, description: "Versão lida pelo cliente (controle otimista, opcional)" }
+    CouponPage:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Coupon" } }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    CouponRedemption:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reservation_id: { type: string, format: uuid, description: Presente somente com o escopo `reservations.read` }
+        reservation_code: { type: string, description: Presente somente com o escopo `reservations.read` }
+        customer_name: { type: string, description: Presente somente com o escopo `customers.read` }
+        subtotal: { $ref: "#/components/schemas/Money" }
+        discount: { $ref: "#/components/schemas/Money" }
+        redeemed_at: { type: string, format: date-time }
+        state: { type: string, enum: [active, released_cancelled, released_expired] }
+        released_at: { type: [string, "null"], format: date-time }
+    CouponRedemptionPage:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/CouponRedemption" } }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    Fee:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: ENTREGA }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        default_amount: { $ref: "#/components/schemas/Money" }
+        active: { type: boolean }
+        status: { type: string, enum: [active, inactive] }
+        lock_version: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FeeInput:
+      type: object
+      required: [code, name, default_amount_cents]
+      properties:
+        code: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{1,29}$", description: Convertido para maiúsculas }
+        name: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: [string, "null"], maxLength: 500 }
+        default_amount_cents: { type: integer, minimum: 1 }
+    FeePatch:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: [string, "null"], maxLength: 500 }
+        default_amount_cents: { type: integer, minimum: 1 }
+        lock_version: { type: integer, minimum: 1 }
+    FeePage:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/Fee" } }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    PriceAgreement:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        scope: { type: string, enum: [general, product] }
+        product_id: { type: [string, "null"], format: uuid }
+        product:
+          type: object
+          description: Presente nas listagens, em condição de produto, somente com o escopo `catalog.read`
+          properties:
+            sku: { type: string }
+            name: { type: string }
+        discount_bps: { type: integer, minimum: 1, maximum: 9000 }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: [string, "null"], format: date-time }
+        notes: { type: [string, "null"] }
+        ended_at: { type: [string, "null"], format: date-time, description: Instante do encerramento; no futuro quando agendado }
+        end_reason: { type: [string, "null"] }
+        status: { type: string, enum: [active, scheduled, expired, ended] }
+        created_at: { type: string, format: date-time }
+    PriceAgreementInput:
+      type: object
+      required: [discount_bps]
+      properties:
+        product_id: { type: [string, "null"], format: uuid, description: Produto ativo; nulo ou ausente cadastra a condição geral }
+        discount_bps: { type: integer, minimum: 1, maximum: 9000 }
+        valid_from: { type: [string, "null"], format: date-time }
+        valid_until: { type: [string, "null"], format: date-time }
+        notes: { type: [string, "null"], maxLength: 500 }
+    PriceAgreementEnd:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+        effective_at:
+          type: [string, "null"]
+          format: date-time
+          description: Instante do encerramento, anterior ao fim da vigência; nulo ou ausente encerra agora
+    PriceAgreementPage:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/PriceAgreement" } }
+        pagination: { $ref: "#/components/schemas/Pagination" }

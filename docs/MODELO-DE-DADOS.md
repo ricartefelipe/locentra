@@ -27,6 +27,11 @@ erDiagram
   products ||--o{ assets : "unidades individuais"
   products ||--o{ stock_pools : "estoque por filial"
   customers ||--o{ reservations : solicita
+  customers ||--o{ customer_price_agreements : "condições negociadas"
+  organizations ||--o{ coupons : oferece
+  organizations ||--o{ additional_fees : "tarifas adicionais"
+  coupons ||--o{ coupon_redemptions : "livro de usos"
+  reservations ||--o| coupon_redemptions : "usa cupom"
   reservations ||--o{ reservation_items : contém
   reservations ||--o{ asset_allocations : aloca
   reservations ||--o{ stock_allocations : aloca
@@ -62,6 +67,15 @@ erDiagram
 | Entrega de webhook única por evento | `UNIQUE (endpoint_id, event_id)` |
 | Agendamento único por janela | índice único `jobs (unique_key)` |
 | Idempotência de API | `UNIQUE (organization_id, scope, key)` |
+| Código de cupom e de tarifa único por organização | `UNIQUE (organization_id, code)` em `coupons` e `additional_fees`, com `CHECK` do formato |
+| Código, tipo e valor do cupom e código da tarifa não mudam | `UPDATE` concedido a `locentra_app` somente nas colunas editáveis e, em `coupons`, também no contador legado `redemptions` (mantido apenas para o retorno à 1.0.0; a 1.1.0 não grava a coluna, e o congelamento é regra da aplicação); `DELETE` de tarifa revogado |
+| No máximo um uso de cupom por reserva; uso imutável | `UNIQUE (organization_id, reservation_id)` em `coupon_redemptions`; `UPDATE` e `DELETE` revogados |
+| Usos ativos do cupom ≤ `max_redemptions` | Gatilho `coupon_redemptions_enforce_limit` (`BEFORE INSERT`): trava o cupom e conta os usos ativos no instante do uso (bloqueio vencido conta durante a carência de 5 minutos); a aplicação faz a mesma verificação sob `FOR UPDATE` |
+| Vigência do cupom com fim posterior ao início e máximo de usos até 1.000.000 | Gatilho `coupons_enforce_limits` (`BEFORE INSERT OR UPDATE`): verifica a inserção e as colunas alteradas, para que cupons da 1.0.0 fora desses limites continuem desativáveis e reativáveis |
+| Cupom com uso registrado não é excluído | FK composta de `coupon_redemptions` para `coupons`, sem cascata |
+| Condições negociadas do mesmo cliente e escopo sem vigências sobrepostas | `customer_price_agreements_no_overlap EXCLUDE USING gist` sobre `price_agreement_window(valid_from, valid_until, ended_at)` |
+| Condição negociada imutável, com encerramento único | `UPDATE` concedido somente em `ended_at`, `ended_by` e `end_reason`; gatilho `customer_price_agreements_end_once`; `CHECK` de coerência entre instante, motivo e autor; `DELETE` revogado |
+| Snapshot de preços da reserva e dos itens imutável | Gatilhos `reservations_pricing_immutable` e `reservation_items_pricing_immutable` (`BEFORE UPDATE OF pricing`) |
 
 ## Dicionário de tabelas
 
@@ -104,7 +118,7 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 | `customers` | sim/sim | id:uuid!, organization_id:uuid!, kind:text!, name:text!, trade_name:text, document:text!, email:text, phone:text, notes:text, status:text!, created_at:timestamptz!, updated_at:timestamptz! |
 | `customer_contacts` | sim/sim | id:uuid!, organization_id:uuid!, customer_id:uuid!, name:text!, email:text, phone:text, role:text, document:text, authorized_pickup:boolean!, created_at:timestamptz! |
 | `customer_addresses` | sim/sim | id:uuid!, organization_id:uuid!, customer_id:uuid!, label:text!, street:text!, number:text, complement:text, district:text, city:text!, state:text!, postal_code:text, created_at:timestamptz! |
-| `customer_price_agreements` | sim/sim | id:uuid!, organization_id:uuid!, customer_id:uuid!, product_id:uuid, discount_bps:integer!, valid_until:timestamptz, notes:text, created_by:uuid, created_at:timestamptz! |
+| `customer_price_agreements` | sim/sim | id:uuid!, organization_id:uuid!, customer_id:uuid!, product_id:uuid, discount_bps:integer!, valid_until:timestamptz, notes:text, created_by:uuid, created_at:timestamptz!, valid_from:timestamptz!, ended_at:timestamptz, ended_by:uuid, end_reason:text |
 
 ### Catálogo e ativos
 
@@ -126,7 +140,26 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 | `asset_allocations` | sim/sim | id:uuid!, organization_id:uuid!, asset_id:uuid!, product_id:uuid!, reservation_id:uuid, reservation_item_id:uuid, kind:text!, reason:text, period:tstzrange!, active:boolean!, created_by:uuid, created_at:timestamptz!, released_at:timestamptz |
 | `stock_allocations` | sim/sim | id:uuid!, organization_id:uuid!, stock_pool_id:uuid!, product_id:uuid!, reservation_id:uuid, reservation_item_id:uuid, kind:text!, reason:text, quantity:integer!, period:tstzrange!, active:boolean!, created_by:uuid, created_at:timestamptz!, released_at:timestamptz |
 | `reservation_adjustments` | sim/sim | id:uuid!, organization_id:uuid!, reservation_id:uuid!, reservation_item_id:uuid, kind:text!, amount_cents:bigint!, details:jsonb!, created_by:uuid, created_at:timestamptz! |
-| `coupons` | sim/sim | id:uuid!, organization_id:uuid!, code:text!, kind:text!, value:bigint!, valid_from:timestamptz, valid_until:timestamptz, max_redemptions:integer, redemptions:integer!, min_subtotal_cents:bigint!, active:boolean!, created_at:timestamptz! |
+| `coupons` | sim/sim | id:uuid!, organization_id:uuid!, code:text!, kind:text!, value:bigint!, valid_from:timestamptz, valid_until:timestamptz, max_redemptions:integer, redemptions:integer!, min_subtotal_cents:bigint!, active:boolean!, created_at:timestamptz!, description:text, created_by:uuid, updated_at:timestamptz!, deactivated_at:timestamptz, lock_version:integer! |
+| `coupon_redemptions` | sim/sim | id:uuid!, organization_id:uuid!, coupon_id:uuid!, reservation_id:uuid!, subtotal_cents:bigint!, discount_cents:bigint!, redeemed_by:uuid, redeemed_at:timestamptz! |
+| `additional_fees` | sim/sim | id:uuid!, organization_id:uuid!, code:text!, name:text!, description:text, default_amount_cents:bigint!, active:boolean!, lock_version:integer!, created_by:uuid, created_at:timestamptz!, updated_at:timestamptz!, deactivated_at:timestamptz |
+
+Condições comerciais (migration 0015; regras em [`PRECIFICACAO.md`](PRECIFICACAO.md) e
+[`modulos/condicoes-comerciais.md`](modulos/condicoes-comerciais.md)):
+
+- `coupons.value` está em pontos-base (`kind = percent`) ou em centavos (`kind = fixed`).
+  `coupons.redemptions` é o contador da versão 1.0.0, congelado: os usos posteriores são linhas de
+  `coupon_redemptions`, e os usos ativos são o contador legado mais os usos do livro cuja reserva está
+  solicitada, confirmada, em andamento ou concluída, ou em bloqueio temporário ainda válido. `lock_version`
+  serve ao controle otimista das edições.
+- `coupon_redemptions` não guarda situação: o uso é liberado pelo cancelamento ou pela expiração da reserva,
+  sem gravação. `subtotal_cents` e `discount_cents` são os valores da reserva no instante do uso.
+- `customer_price_agreements`: `product_id` nulo é a condição geral; a vigência efetiva é
+  `[valid_from, menor entre valid_until e ended_at)`. `ended_at` no futuro é um encerramento agendado.
+  `valid_from` foi preenchida com `created_at` nas linhas anteriores à migration 0015.
+- `additional_fees`: catálogo de tarifas; `default_amount_cents` é o valor aplicado quando o documento não
+  informa outro. As tarifas aplicadas ficam no snapshot de preços da reserva ou da versão do orçamento, não
+  em tabela própria.
 
 ### Orçamentos e contratos
 

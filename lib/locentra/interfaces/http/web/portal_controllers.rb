@@ -66,8 +66,10 @@ module Locentra
 
           def show(ctx)
             data = uc(:get_reservation).call(ctx.actor, ctx.param(:id))
-            # Somente reserva e itens chegam à tela: alocações de ativos e estoques são dados internos.
-            render(ctx, "portal/reservation", title: "Reserva #{data[:reservation].code}", reservation: data[:reservation], items: data[:items])
+            # Somente reserva, itens e resumo de valores chegam à tela: alocações de ativos e estoques são
+            # dados internos, e a tela não mostra a origem das tarifas nem o valor padrão.
+            render(ctx, "portal/reservation", title: "Reserva #{data[:reservation].code}", reservation: data[:reservation], items: data[:items],
+                                              pricing: data[:pricing][:summary])
           end
 
           private

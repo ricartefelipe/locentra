@@ -44,6 +44,62 @@ Ver [`modulos/orcamentos-contratos.md`](modulos/orcamentos-contratos.md#máquina
 `draft → sent → approved | rejected | expired`, `approved → converted`; contrato
 `issued → active | closed | cancelled`, `active → closed | cancelled`.
 
+## Condições comerciais
+
+As situações de cupom, condição negociada e uso de cupom são **derivadas** dos dados e do instante da
+consulta (não há coluna de situação), com a mesma regra no domínio (`Domain::Pricing`) e nas consultas SQL.
+Detalhes em [`modulos/condicoes-comerciais.md`](modulos/condicoes-comerciais.md).
+
+**Cupom** (`Coupon#status`), na ordem de precedência:
+
+| Situação | Condição |
+|---|---|
+| `inactive` (desativado) | `active = false` |
+| `expired` (expirado) | `valid_until <= agora` |
+| `scheduled` (agendado) | `valid_from > agora` |
+| `exhausted` (esgotado) | usos ativos `>= max_redemptions` |
+| `active` (vigente) | nenhuma das anteriores |
+
+Desativação e reativação são as únicas transições comandadas (`coupon.deactivated`, `coupon.reactivated`);
+as demais acontecem com o tempo, com os usos e com a edição da vigência ou do máximo. Um cupom esgotado volta
+a vigente quando um uso é liberado ou o máximo aumenta.
+
+**Condição negociada** (`Agreement#status`), na ordem de precedência:
+
+| Situação | Condição |
+|---|---|
+| `ended` (encerrada) | `ended_at <= agora` |
+| `expired` (expirada) | `valid_until <= agora` |
+| `scheduled` (agendada) | `valid_from > agora` |
+| `active` (vigente) | nenhuma das anteriores |
+
+```
+scheduled ──(início)──► active ──(fim da vigência)──► expired
+    │                      │
+    └──────────────────────┴──(encerramento: imediato, ou agendado e chegado o instante)──► ended
+```
+
+O encerramento é registrado uma única vez. Com `ended_at` no futuro, a condição continua vigente (ou
+agendada) com **encerramento agendado** e passa a encerrada quando o instante chega, sem nova gravação;
+um encerramento já registrado, mesmo agendado, não é alterado nem repetido. Condição expirada não é
+encerrada. Encerrar uma condição agendada antes do início deixa a vigência vazia.
+
+**Tarifa adicional:** `active` (ativa) ⇄ `inactive` (inativa), por desativação e reativação. Tarifa inativa
+não entra em documentos novos; continua nas entradas mantidas de uma nova versão de orçamento.
+
+**Uso de cupom** (`Redemptions.state`), derivado da reserva que usou o cupom:
+
+| Estado | Situação da reserva |
+|---|---|
+| `active` (ativo) | solicitada, confirmada, em andamento ou concluída; ou em bloqueio temporário com `hold_expires_at > agora` |
+| `released_cancelled` (liberado: reserva cancelada) | cancelada |
+| `released_expired` (liberado: bloqueio temporário expirado) | expirada, ou em bloqueio temporário já vencido e ainda não varrido |
+
+A liberação não grava nada no cupom nem no livro de usos. Como um bloqueio vencido nunca volta a valer e
+reservas canceladas ou expiradas são finais, um uso liberado não volta a ativo. Para o limite de usos, o
+bloqueio vencido ainda conta durante a carência de 5 minutos (`Redemptions.counts_toward_limit?`), porque
+uma confirmação iniciada antes do vencimento pode estar em andamento.
+
 ## Operação (retirada, devolução, inspeção, manutenção, transferência, alertas)
 
 Ver [`modulos/retirada-devolucao-manutencao.md`](modulos/retirada-devolucao-manutencao.md#máquinas-de-estado).

@@ -4,8 +4,8 @@ module Locentra
   module Interfaces
     module HTTP
       # Rótulos em português de códigos internos exibidos nas telas (origem da reserva, tipos de ajuste e
-      # de evento, situações sem mapa no domínio) e dos campos citados no resumo de erros. Código sem
-      # rótulo aparece legível (sublinhado vira espaço), nunca como chave técnica crua.
+      # de evento, situações de cupons, condições negociadas e tarifas) e dos campos citados no resumo de
+      # erros. Código sem rótulo aparece legível (sublinhado vira espaço), nunca como chave técnica crua.
       module Labels
         GROUPS = {
           reservation_source: { "staff" => "Equipe", "quote" => "Orçamento", "api" => "API", "portal" => "Portal do cliente" },
@@ -31,8 +31,19 @@ module Locentra
             "quote.approved" => "Orçamento aprovado", "quote.rejected" => "Orçamento recusado", "quote.expired" => "Orçamento expirado",
             "quote.converted" => "Orçamento convertido em reserva", "contract.issued" => "Contrato emitido",
             "contract.accepted" => "Aceite do contrato", "contract.amended" => "Aditivo emitido", "contract.cancelled" => "Contrato cancelado",
-            "contract.closed" => "Contrato encerrado"
+            "contract.closed" => "Contrato encerrado", "coupon.created" => "Cupom cadastrado", "coupon.updated" => "Cupom alterado",
+            "coupon.deactivated" => "Cupom desativado", "coupon.reactivated" => "Cupom reativado", "coupon.deleted" => "Cupom excluído",
+            "fee.created" => "Tarifa cadastrada", "fee.updated" => "Tarifa alterada", "fee.deactivated" => "Tarifa desativada",
+            "fee.reactivated" => "Tarifa reativada", "price_agreement.created" => "Condição negociada cadastrada",
+            "price_agreement.ended" => "Condição negociada encerrada"
           },
+          coupon_kind: Domain::Pricing::COUPON_KINDS, coupon_status: Domain::Pricing::COUPON_STATUSES,
+          agreement_status: Domain::Pricing::AGREEMENT_STATUSES, fee_status: Domain::Pricing::FEE_STATUSES,
+          redemption_state: Domain::Pricing::REDEMPTION_STATES,
+          # Campos alterados registrados na auditoria de cupons e tarifas (`changes`).
+          changed_field: { "description" => "descrição", "valid_from" => "início da vigência", "valid_until" => "fim da vigência",
+                           "max_redemptions" => "máximo de usos", "min_subtotal_cents" => "subtotal mínimo", "active" => "situação",
+                           "name" => "nome", "default_amount_cents" => "valor padrão" },
           actor_type: { "user" => "Usuário", "api" => "Integração (API)", "cli" => "CLI", "system" => "Sistema", "customer" => "Cliente (portal)" },
           field: {
             "nome" => "Nome", "email" => "E-mail", "senha" => "Senha", "organizacao" => "Nome da empresa", "plano" => "Plano",
@@ -49,7 +60,9 @@ module Locentra
             "provedor" => "Provedor", "escopos" => "Escopos", "papel" => "Papel", "token" => "Link", "items" => "Itens",
             "deslocamento" => "Deslocamento", "limite" => "Limite", "paginacao" => "Paginação", "arquivo" => "Arquivo",
             "severidade" => "Severidade", "patrimonio" => "Patrimônio", "codigo" => "Código", "endereco" => "Endereço",
-            "telefone" => "Telefone", "periodo" => "Período"
+            "telefone" => "Telefone", "periodo" => "Período", "tarifas" => "Tarifas adicionais", "maximo_usos" => "Máximo de usos",
+            "subtotal_minimo" => "Subtotal mínimo", "valido_de" => "Início da vigência", "valido_ate" => "Fim da vigência",
+            "valor_padrao" => "Valor padrão", "encerrar_em" => "Encerrar em", "busca" => "Busca", "ordenacao" => "Ordenação"
           }
         }.freeze
 

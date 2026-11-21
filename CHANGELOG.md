@@ -3,6 +3,71 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versões seguem
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [1.1.0] — 2026-11-21
+
+### Adicionado
+
+- **Cupons:** cadastro com código único por organização, desconto percentual ou de valor fixo, vigência,
+  máximo de usos e subtotal mínimo; edição com controle otimista, desativação, reativação e exclusão somente
+  de cupom nunca usado; lista com situação (vigente, agendado, expirado, esgotado, desativado), usos por
+  reserva e histórico.
+- **Condições negociadas por cliente:** desconto geral ou por produto, com vigência, sem sobreposição no
+  mesmo cliente e escopo, e encerramento único, imediato ou agendado, com motivo.
+- **Tarifas adicionais:** catálogo da organização com valor padrão; aplicação em reservas, orçamentos e
+  novas versões de orçamento (até 10 por documento), com tarifa avulsa e valor ajustado para quem tem a
+  permissão, e continuidade das tarifas já autorizadas na nova versão do orçamento.
+- **Permissões:** `coupons.read`, `coupons.write`, `price_agreements.read`, `price_agreements.write`,
+  `fees.read`, `fees.write` e `fees.override`. A redução de tarifa respeita o limite de desconto manual do
+  papel; credenciais de integração não reduzem tarifas.
+- **API v1:** cupons, tarifas e condições negociadas (`/coupons`, `/fees`,
+  `/customers/{id}/price-agreements`, `/price-agreements/{id}/end`), com `PATCH`, `Idempotency-Key` em toda
+  mutação e inteiros estritos; `fees` em `POST /reservations`.
+- **CLI:** `coupons list|show|create|deactivate|reactivate`, `fees list|show` e
+  `agreements list|create|end`.
+- **Seed:** tarifas, cupons e condições negociadas de demonstração nas duas organizações, criados somente
+  quando nunca existiram; passo 15 do roteiro de demonstração.
+- **Auditoria** de todas as alterações de cadastro (`coupon.*`, `fee.*`, `price_agreement.*`).
+
+### Alterado
+
+- O uso de cupom passa a ser registrado por reserva (livro de usos) e é liberado quando a reserva é
+  cancelada ou o bloqueio temporário expira. Na 1.0.0 o contador só aumentava. Para o limite de usos, o
+  bloqueio vencido continua contando por 5 minutos, porque uma confirmação iniciada antes do vencimento
+  pode estar em andamento.
+- O snapshot de preços de reservas, orçamentos e contratos identifica o cupom (`coupon`), as condições
+  negociadas aplicadas (`agreements` e `negotiated_agreement_id` em cada item) e, em cada tarifa, a origem e o
+  valor padrão. O contrato em PDF descreve cupom, condições e tarifas.
+- A recusa de cupom informa o motivo (inexistente, desativado, expirado, ainda não vigente, esgotado ou
+  subtotal abaixo do mínimo), em vez da mensagem única "cupom inválido ou expirado".
+- Vigências de condições negociadas do mesmo cliente e escopo não podem mais se sobrepor, e as condições não
+  são alteradas depois de criadas (somente encerradas).
+- O portal do cliente mostra o detalhamento de valores (condição negociada, cupom, tarifas e total) antes da
+  aprovação do orçamento, na reserva e no contrato.
+- O snapshot de preços de reservas e itens não pode ser alterado no banco.
+
+### Corrigido
+
+- Texto com caractere nulo (U+0000) ou UTF-8 inválido, em qualquer endpoint da API v1 e da web, passa a ser
+  erro do cliente em vez de erro interno (500): a API responde 422 no campo (corpo JSON, em qualquer nível, e
+  query string) e os formulários respondem 400, inclusive em parâmetros aninhados (`nome[chave]`) e em partes
+  multipart de texto com outra codificação que não seja ASCII puro.
+- O OpenAPI descreve `allocations` e `adjustments` do detalhe da reserva (`GET /reservations/{id}`), que já
+  eram devolvidos na 1.0.0.
+
+### Atualização
+
+- **Migration 0015** (`0015_condicoes_comerciais.sql`). Antes de migrar, execute a verificação prévia de
+  `docs/RUNBOOKS.md`, seção 13: condições negociadas sobrepostas herdadas da 1.0.0 abortam a migration, com
+  mensagem que identifica a organização e o cliente, e precisam ser ajustadas antes. A migration altera
+  `coupons`, `customer_price_agreements`, `reservations` e `reservation_items` com travas exclusivas de curta
+  duração; aplique-a antes de substituir web e worker. Cupons da 1.0.0 com fim de vigência anterior ao início
+  ou máximo acima de 1.000.000 continuam aceitos e podem ser desativados; a edição exige corrigir o campo.
+- Credenciais de integração existentes não recebem os escopos novos; crie credenciais novas para usá-los.
+- **Retorno à versão 1.0.0:** o esquema continua compatível, mas a 1.0.0 conta somente o contador antigo de
+  usos (ignora os usos registrados depois da migration) e ignora o início e o encerramento das condições
+  negociadas. Desative os cupons com limite que foram usados antes de voltar, e não volte depois de
+  encerrar ou agendar condições (`docs/RUNBOOKS.md`, seção 13).
+
 ## [1.0.0] — 2026-11-20
 
 Primeira versão estável da plataforma.
