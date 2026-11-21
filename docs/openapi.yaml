@@ -21,10 +21,23 @@ info:
     `subtotal_minimo`, `desconto`, `motivo`, `encerrar_em`, `valor_padrao`, `tarifas`).
 
     A organização do token (configurações e filiais) é consultada em `GET /organization`, com o escopo
-    `organization.read`. Não há alteração das configurações nem das filiais pela API: a troca do fuso horário
-    exige leitura das consequências e confirmação por uma pessoa na interface web, e a auditoria liga cada
-    alteração a um usuário. Credenciais criadas antes desta versão não recebem `organization.read`: é preciso
-    criar outra credencial com o escopo.
+    `organization.read`. Credenciais criadas antes da versão 1.2 não recebem `organization.read`: é preciso
+    criar outra credencial com o escopo. A alteração das configurações é feita por sessão de usuário com
+    `organization.manage` (cookie de sessão + `X-CSRF-Token`) em `PATCH /organization/settings`; credenciais
+    recebem 403, mesmo com o escopo (ADR-029). As filiais não são geridas pela API.
+
+    Orçamentos (`/quotes`, escopos `quotes.read` e `quotes.write`; a conversão exige também
+    `reservations.write`), contratos (`/contracts`, escopos `contracts.read` e `contracts.write`; o aditivo exige
+    também `reservations.write` e o cancelamento, `reservations.cancel`), retirada e devolução
+    (`/reservations/{id}/pickups`, `/pickups`, `/reservations/{id}/returns`, `/returns`, escopo
+    `fulfillment.write`), inspeções (`/inspections`, escopo `inspections.write`) e alertas (`/alerts`, escopo
+    `fulfillment.write`) são lidos com os escopos de leitura indicados em cada operação (`reservations.read` na
+    operação). Toda mutação exige `Idempotency-Key`, roda na mesma transação da chave e devolve o recurso
+    atualizado. A criação que pode encontrar o recurso existente (emissão de contrato, separação e conversão de
+    orçamento) responde `201` quando cria e `200` quando devolve o existente, com `Location` nos dois casos.
+    Credenciais não aplicam desconto manual. Os detalhes trazem o cliente pelo identificador, sem nome nem
+    documento. Portal do cliente, aceite e encerramento de contrato, avarias, manutenção e transferências não
+    estão na API.
 servers:
   - url: /api/v1
 security:
@@ -38,7 +51,7 @@ paths:
         bloqueio temporário (usada quando `hold_minutes` não é informado na criação de reserva), a política de
         cancelamento vigente para reservas e versões de orçamento novas e o texto de cada faixa. Os indicadores
         `*_default` comparam o valor com o padrão do sistema. As filiais incluem as inativas, com `active` e
-        `deactivated_at`. Somente leitura: as configurações são alteradas pela interface web.
+        `deactivated_at`. A alteração é feita em `PATCH /organization/settings`, somente por sessão de usuário.
       operationId: getOrganization
       responses:
         "200":
@@ -48,6 +61,36 @@ paths:
               schema: { $ref: "#/components/schemas/Organization" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /organization/settings:
+    patch:
+      summary: Altera as configurações da organização (somente sessão de usuário)
+      description: >-
+        Permissão `organization.manage` de um usuário autenticado por sessão (cookie de sessão e `X-CSRF-Token`, o token
+        `_csrf` das páginas da interface). Credenciais recebem `403` `forbidden`, mesmo com o escopo
+        `organization.manage` (ADR-029). PATCH parcial: chave presente altera o campo e chave ausente mantém o valor
+        atual. `lock_version` é obrigatório e precisa ser a versão atual (`409` `stale_organization`). A troca de fuso
+        exige `confirm_time_zone_change: true` (`422` em `confirmar_fuso`). A política usa o formato de `GET
+        /organization`, com as mesmas regras e mensagens da interface em `faixas_cancelamento`. Chave desconhecida ou
+        não editável (`slug`, `status`, `settings`, `branches`...) responde `422` no próprio nome da chave. Sem mudança
+        efetiva, `200` com `changed: false` e sem auditoria; com mudança, a auditoria registra `via: api`.
+      operationId: updateOrganizationSettings
+      security: [{ session: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/CsrfToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrganizationSettingsPatch" }
+      responses:
+        "200":
+          description: Configurações após a operação
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrganizationSettingsResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /availability:
     get:
       summary: Disponibilidade por período
@@ -1323,8 +1366,21 @@ components:
         Token `lcn_<organização>_<segredo>` criado em Usuários e permissões, com escopos e validade. Somente
         credenciais do tipo `api` de organização ativa são aceitas; credenciais da CLI operacional (tipo `cli`)
         e de organização suspensa ou encerrada recebem 401.
+    session:
+      type: apiKey
+      in: cookie
+      name: locentra_session
+      description: >-
+        Sessão de usuário da interface web (cookie `locentra_session`; em produção, com cookies seguros, o nome é
+        `__Host-locentra`). Aceita somente em `PATCH /organization/settings`, com `X-CSRF-Token`.
   parameters:
     Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      description: Token CSRF da sessão (o campo `_csrf` das páginas da interface web); obrigatório nas mutações por sessão
+      schema: { type: string }
     Reference:
       name: id
       in: path
@@ -2345,3 +2401,26 @@ components:
       properties:
         data: { type: array, items: { $ref: "#/components/schemas/Alert" } }
         pagination: { $ref: "#/components/schemas/Pagination" }
+    OrganizationSettingsPatch:
+      type: object
+      additionalProperties: false
+      required: [lock_version]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        time_zone: { type: string, example: America/Manaus, description: Fuso IANA da lista do Brasil (o atual é sempre aceito) }
+        hold_minutes: { type: integer, minimum: 5, maximum: 1440 }
+        cancellation_policy:
+          type: object
+          additionalProperties: false
+          required: [tiers]
+          properties:
+            tiers: { type: array, minItems: 1, maxItems: 6, items: { $ref: "#/components/schemas/CancellationTier" } }
+        confirm_time_zone_change: { type: boolean, default: false, description: Obrigatório (true) para trocar o fuso }
+        lock_version: { type: integer, minimum: 1, description: Versão atual das configurações (`lock_version` de `GET /organization`) }
+    OrganizationSettingsResult:
+      type: object
+      additionalProperties: false
+      required: [organization, changed]
+      properties:
+        organization: { $ref: "#/components/schemas/Organization" }
+        changed: { type: boolean, description: Falso quando os valores enviados já eram os atuais (nada gravado nem auditado) }

@@ -199,7 +199,7 @@ class ApiTest < HttpTest
   CLOSED_SCHEMAS = %w[QuoteSummary QuotePage Quote QuoteVersion QuoteVersionItem QuoteHold QuoteReservationLink QuoteConversion
                       ContractSummary ContractPage Contract ContractDocument ContractAmendment ContractCancellationPreview
                       ContractAmendmentResult ContractCancellationResult ReservationLink Pickup PickupLine PickupPicker ReturnItems Return
-                      ReturnLine ReturnLateFee Inspection InspectionPage InspectionRejection Alert AlertPage].freeze
+                      ReturnLine ReturnLateFee Inspection InspectionPage InspectionRejection Alert AlertPage OrganizationSettingsResult].freeze
 
   def test_openapi_response_schemas_are_closed
     schemas = openapi.dig("components", "schemas")

@@ -16,6 +16,7 @@ require_relative "api/v1_finance"
 require_relative "api/v1_quotes"
 require_relative "api/v1_contracts"
 require_relative "api/v1_operations"
+require_relative "api/v1_organization"
 require_relative "routes_commercial_terms"
 
 module Locentra
@@ -59,7 +60,7 @@ module Locentra
 
           draw_portal(r, deps, w)
           draw_staff(r, deps, w)
-          draw_api(r, API::V1Controller.new(deps))
+          draw_api(r, deps)
           CommercialTermsRoutes.draw_api(r, deps)
           draw_api_quotes(r, API::QuotesV1Controller.new(deps))
           draw_api_contracts(r, API::ContractsV1Controller.new(deps))
@@ -354,10 +355,14 @@ module Locentra
           r.post "/api/v1/alerts/:id/resolve", api, :resolve_alert, auth: :api
         end
 
-        def draw_api(router, api)
+        # A alteração das configurações aceita somente sessão de usuário (ADR-029): a credencial recebe 403 no
+        # caso de uso, e a sessão exige X-CSRF-Token.
+        def draw_api(router, deps)
           r = router
+          api = API::V1Controller.new(deps)
           r.get "/api/v1/openapi.yaml", api, :openapi, auth: :public
           r.get "/api/v1/organization", api, :organization, auth: :api
+          r.patch "/api/v1/organization/settings", API::OrganizationV1Controller.new(deps), :update_settings, auth: :api
           r.get "/api/v1/availability", api, :availability, auth: :api
           r.get "/api/v1/customers", api, :customers, auth: :api
           r.post "/api/v1/customers", api, :create_customer, auth: :api

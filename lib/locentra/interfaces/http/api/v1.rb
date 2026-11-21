@@ -63,8 +63,8 @@ module Locentra
             end })
           end
 
-          # Organização do token (escopo `organization.read`): configurações e filiais. Não há alteração pela
-          # API: a troca de fuso exige confirmação humana na interface web.
+          # Organização do token (escopo `organization.read`): configurações e filiais. A alteração é feita em
+          # `PATCH /organization/settings`, somente por sessão de usuário (OrganizationV1Controller, ADR-029).
           def organization(ctx)
             data = uc(:read_organization).call(ctx.actor)
             json(200, OrganizationSerializers.organization(data[:organization], data[:branches]))
