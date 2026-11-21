@@ -138,11 +138,43 @@ module Locentra
             list.map { |i| Domain::Reservations::Line.build(product_id: i["product_id"], quantity: i["quantity"]) }
           end
 
-          def idempotent(ctx, permission, scope, payload, &)
+          # Inteiro do JSON: somente Integer é aceito. Números com casas decimais, textos numéricos e
+          # booleanos são recusados (nada é convertido nem arredondado em silêncio).
+          def strict_integer(data, key, field, min: nil, max: nil, allow_nil: true)
+            value = data[key]
+            return nil if value.nil? && allow_nil
+            raise Domain::ValidationError.field(field, "informe um número inteiro") unless value.is_a?(Integer)
+            raise Domain::ValidationError.field(field, "mínimo #{min}") if min && value < min
+            raise Domain::ValidationError.field(field, "máximo #{max}") if max && value > max
+
+            value
+          end
+
+          # Texto do JSON: somente String ou null.
+          def strict_text(data, key, field)
+            value = data[key]
+            raise Domain::ValidationError.field(field, "informe um texto") unless value.nil? || value.is_a?(String)
+
+            value
+          end
+
+          # Instante opcional do JSON: ISO 8601 com fuso ou null.
+          def api_instant(data, key, field)
+            value = data[key]
+            return nil if value.nil?
+            raise Domain::ValidationError.field(field, "use ISO 8601 com fuso (ex.: 2026-03-01T08:00:00Z)") unless value.is_a?(String) && !value.strip.empty?
+
+            Domain::Period.parse_instant(value, field)
+          end
+
+          # `location`, quando informado, recebe o corpo da resposta e devolve o endereço do recurso criado.
+          def idempotent(ctx, permission, scope, payload, location: nil, &)
             fingerprint = Application::Idempotency.fingerprint(ctx.verb, ctx.path, payload)
             result = uc(:idempotency).call(ctx.actor, permission: permission, scope: scope, key: ctx.env["HTTP_IDEMPOTENCY_KEY"],
                                                       fingerprint: fingerprint, &)
-            json(result.status, result.body, result.replayed ? { "idempotent-replayed" => "true" } : {})
+            headers = result.replayed ? { "idempotent-replayed" => "true" } : {}
+            headers["location"] = location.call(result.body) if location
+            json(result.status, result.body, headers)
           end
         end
       end

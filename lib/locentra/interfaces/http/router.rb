@@ -31,6 +31,7 @@ module Locentra
 
         def get(pattern, controller, action, **) = add("GET", pattern, controller, action, **)
         def post(pattern, controller, action, **) = add("POST", pattern, controller, action, **)
+        def patch(pattern, controller, action, **) = add("PATCH", pattern, controller, action, **)
 
         # Retorna [rota, parâmetros] ou [nil, métodos permitidos] para 404/405.
         def recognize(verb, path)

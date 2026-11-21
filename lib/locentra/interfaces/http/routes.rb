@@ -56,6 +56,7 @@ module Locentra
           draw_portal(r, deps, w)
           draw_staff(r, deps, w)
           draw_api(r, API::V1Controller.new(deps))
+          CommercialTermsRoutes.draw_api(r, deps)
         end
 
         def draw_staff(router, deps, web)
