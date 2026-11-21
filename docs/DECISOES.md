@@ -265,7 +265,8 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   ou o orçamento. Valor diferente do padrão e tarifa avulsa exigem `fees.override`. A redução é um desconto e
   respeita o limite de desconto manual do papel sobre o valor padrão; credenciais de integração têm limite 0.
 - **Continuidade em orçamentos:** na nova versão, a tarifa idêntica a uma da versão anterior já foi
-  autorizada e é mantida sem nova autorização, mesmo inativa. Assim um atendente revisa o orçamento sem
+  autorizada e é mantida sem nova autorização, mesmo inativa. Cada entrada anterior autoriza uma única
+  entrada da nova versão: cópias repetidas são ajustes novos. Assim um atendente revisa o orçamento sem
   perder nem reverter o ajuste de um gerente. Os ajustes vão para a auditoria do documento e nunca para o
   snapshot de preços, que é imutável e é exibido ao cliente.
 - **Cupons somente em reservas:** orçamentos e solicitações do portal não aceitam cupom; a conversão do

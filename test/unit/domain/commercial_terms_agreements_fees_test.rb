@@ -225,4 +225,29 @@ class CommercialTermsAgreementsFeesTest < UnitTest
     assert_equal 18_000, resolve([catalog_request], catalog: { FEE_ID => fee(amount: 18_000) }, previous: default_kept).entries.first["amount_cents"],
                  "sem valor, vale o padrão vigente"
   end
+
+  # Cada entrada da versão anterior autoriza no máximo um pedido idêntico: a cópia excedente é um
+  # ajuste novo (exige fees.override e aparece nos ajustes).
+  def test_each_previous_entry_authorizes_a_single_identical_request
+    parking = { "fee_id" => nil, "code" => nil, "description" => "Taxa de estacionamento", "amount_cents" => 3_000,
+                "default_amount_cents" => nil, "source" => "custom" }
+    copy = -> { P::FeeRequest.custom(description: "Taxa de estacionamento", amount: M.new(3_000)) }
+
+    assert_raises(Domain::AccessDenied) { resolve([copy.call, copy.call], previous: [parking]) }
+    assert_raises(Domain::AccessDenied) { resolve(Array.new(10) { copy.call }, previous: [parking]) }
+    assert_empty resolve([copy.call, copy.call], previous: [parking, parking]).overrides, "duas entradas anteriores autorizam duas cópias"
+    authorized = resolve([copy.call, copy.call], previous: [parking], may_override: true)
+
+    assert_equal 1, authorized.overrides.size, "a cópia excedente entra nos ajustes"
+    assert_equal 2, authorized.entries.size
+  end
+
+  # A avulsa só é mantida a partir de outra avulsa: o texto e o valor de uma tarifa do catálogo da
+  # versão anterior não autorizam uma avulsa idêntica.
+  def test_catalog_entry_of_the_previous_version_does_not_authorize_a_custom_fee
+    delivery = { "fee_id" => FEE_ID, "code" => "ENTREGA", "description" => "Entrega", "amount_cents" => 15_000,
+                 "default_amount_cents" => 15_000, "source" => "catalog" }
+
+    assert_raises(Domain::AccessDenied) { resolve([P::FeeRequest.custom(description: "Entrega", amount: M.new(15_000))], previous: [delivery]) }
+  end
 end

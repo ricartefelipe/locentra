@@ -417,13 +417,15 @@ module Locentra
         # catalog: { fee_id => Fee } da organização (inclui as tarifas da versão anterior, mesmo inativas).
         # previous: entradas "fees" do snapshot da versão anterior do orçamento; uma entrada idêntica
         # (mesma tarifa e valor, ou avulsa com a mesma descrição e valor) já foi autorizada e é mantida
-        # sem nova autorização, mesmo com a tarifa inativa.
+        # sem nova autorização, mesmo com a tarifa inativa. Cada entrada anterior autoriza no máximo um
+        # pedido: a cópia excedente é um ajuste novo.
         # may_override: permissão fees.override do ator; reduction_limit_bps: limite de desconto do papel.
         def resolve(requests, catalog:, may_override:, reduction_limit_bps:, previous: [])
           Input.fail!("tarifas", "no máximo #{MAX_FEES} tarifas") if requests.size > MAX_FEES
           seen = {}
+          remaining = previous.dup
           resolved = requests.map do |request|
-            request.custom? ? custom_entry(request, previous) : catalog_entry(request, catalog, previous, seen)
+            request.custom? ? custom_entry(request, remaining) : catalog_entry(request, catalog, remaining, seen)
           end
           overrides = resolved.filter_map { |entry, override| override && entry }
           authorize!(overrides, may_override, reduction_limit_bps)
@@ -435,7 +437,7 @@ module Locentra
           Input.fail!("tarifas", "a tarifa #{fee.code} foi informada mais de uma vez") if seen[fee.id]
           seen[fee.id] = true
           amount = request.amount || fee.default_amount
-          kept = previous.any? { |p| p["fee_id"] == fee.id && p["amount_cents"] == amount.cents }
+          kept = take!(previous) { |p| p["fee_id"] == fee.id && p["amount_cents"] == amount.cents }
           Input.fail!("tarifas", "a tarifa #{fee.code} está inativa") unless fee.active || kept
           entry = { "fee_id" => fee.id, "code" => fee.code, "description" => fee.name, "amount_cents" => amount.cents,
                     "default_amount_cents" => fee.default_amount.cents, "source" => "catalog" }
@@ -443,12 +445,21 @@ module Locentra
         end
 
         def custom_entry(request, previous)
-          kept = previous.any? do |p|
+          kept = take!(previous) do |p|
             p["fee_id"].nil? && p["description"] == request.description && p["amount_cents"] == request.amount.cents
           end
           entry = { "fee_id" => nil, "code" => nil, "description" => request.description, "amount_cents" => request.amount.cents,
                     "default_amount_cents" => nil, "source" => "custom" }
           [entry, !kept]
+        end
+
+        # Remove de `remaining` a primeira entrada que satisfaz o bloco; verdadeiro quando havia uma.
+        def take!(remaining, &)
+          index = remaining.index(&)
+          return false if index.nil?
+
+          remaining.delete_at(index)
+          true
         end
 
         def authorize!(overrides, may_override, limit_bps)

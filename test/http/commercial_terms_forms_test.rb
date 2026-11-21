@@ -171,6 +171,10 @@ class CommercialTermsFormsTest < CommercialTermsHttpTest
     assert_equal 422, last_response.status
     assert_includes last_response.body, "#{DENIED}: Entrega e retirada no local R$ 180,00 (padrão R$ 150,00)"
     assert_includes last_response.body, %(name="tarifa_valor[]" value="180,00")
+    post_form "/orcamentos/#{quote.id}/versoes", quote_form(**kept, avulsa_descricao: ["Taxa de estacionamento"] * 3, avulsa_valor: ["30,00"] * 3)
+
+    assert_equal 422, last_response.status, "cada tarifa mantida vale uma vez; as cópias são ajustes novos"
+    assert_includes last_response.body, "#{DENIED}: Taxa de estacionamento R$ 30,00 (avulsa); Taxa de estacionamento R$ 30,00 (avulsa)"
     post_form "/orcamentos/#{quote.id}/versoes", quote_form(**kept, condicoes: "Entrega no período da manhã")
 
     assert_equal 303, last_response.status, last_response.body[0, 600]

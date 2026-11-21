@@ -75,7 +75,8 @@ bancos com condições sobrepostas herdadas da 1.0.0 (ver [`../RUNBOOKS.md`](../
 - Valor diferente do padrão e tarifa avulsa exigem `fees.override`; a redução fica limitada ao desconto manual
   do papel sobre o valor padrão, e credenciais não reduzem. Tarifa inativa é recusada.
 - Na nova versão de orçamento, a entrada idêntica a uma da versão anterior é mantida sem nova autorização,
-  mesmo com a tarifa inativa. A impressão digital da versão inclui as tarifas: uma versão que só muda
+  mesmo com a tarifa inativa; cada entrada anterior autoriza uma única entrada (cópias repetidas são ajustes
+  novos). A impressão digital da versão inclui as tarifas: uma versão que só muda
   tarifas é uma versão nova.
 - Erros de tarifa saem sempre no campo `tarifas`.
 

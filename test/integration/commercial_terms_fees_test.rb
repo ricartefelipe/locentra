@@ -180,6 +180,18 @@ class CommercialTermsFeesTest < DatabaseTest
     stored_pricing.each { |pricing| refute_match(/override/, pricing) }
   end
 
+  def test_attendant_cannot_multiply_a_custom_fee_kept_from_the_previous_version
+    quote = uc(:create_quote).call(@manager, quote_input([parking]))
+
+    assert_includes denied { uc(:revise_quote).call(@attendant, quote.id, quote_input(Array.new(10) { parking })) }, "R$ 30,00 (avulsa)"
+    assert_includes denied { uc(:revise_quote).call(@attendant, quote.id, quote_input([parking, parking])) }, "R$ 30,00 (avulsa)"
+    assert_equal 1, current_version(quote).number
+    uc(:revise_quote).call(@manager, quote.id, quote_input([parking, parking]))
+
+    assert_equal([2, 16_000], current_version(quote).then { |version| [version.number, version.total.cents] })
+    assert_equal 1, audit_events("quote.revised").last["details"]["fee_overrides"].size, "somente a cópia excedente é ajuste novo"
+  end
+
   def test_default_amount_change_applies_to_new_versions_unless_the_fee_was_kept_adjusted
     quote = uc(:create_quote).call(@attendant, quote_input([catalog_fee(@delivery)]))
     result = uc(:update_fee).call(@actor, @delivery.id, { default_amount: D::Money.new(18_000), description: "Até 30 km" }, lock_version: 1)

@@ -119,8 +119,9 @@ R$ 895,20.
   credenciais de integração não reduzem tarifas.
 - **Continuidade na nova versão de orçamento:** a entrada idêntica a uma da versão anterior (mesma tarifa e
   mesmo valor, ou avulsa com a mesma descrição e o mesmo valor) já foi autorizada e é mantida sem nova
-  autorização, mesmo que a tarifa tenha sido desativada. Uma tarifa do catálogo escolhida de novo sem valor
-  usa o valor padrão vigente.
+  autorização, mesmo que a tarifa tenha sido desativada. Cada entrada anterior autoriza uma única entrada da
+  nova versão: a cópia repetida de uma avulsa mantida é um ajuste novo. Uma tarifa do catálogo escolhida de
+  novo sem valor usa o valor padrão vigente.
 - Tarifas inativas não são aceitas em documentos novos. Os ajustes de tarifa são registrados na auditoria
   da reserva ou do orçamento e não fazem parte do snapshot de preços.
 - Pela API, as tarifas são informadas somente na criação de reserva (não há API de orçamentos).

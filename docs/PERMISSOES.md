@@ -66,7 +66,8 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
     mesmo com o escopo `fees.override`, não reduzem tarifas;
   - na nova versão de um orçamento, as tarifas mantidas da versão anterior (mesma tarifa e mesmo valor, ou
     tarifa avulsa com a mesma descrição e o mesmo valor) não exigem `fees.override`: um atendente revisa o
-    orçamento sem perder nem alterar ajustes autorizados por um gerente;
+    orçamento sem perder nem alterar ajustes autorizados por um gerente. Cada entrada anterior vale para uma
+    única entrada da nova versão; repetir uma tarifa avulsa mantida é um ajuste novo e exige `fees.override`;
   - nas consultas, os dados de outros cadastros seguem as permissões deles: os usos de um cupom mostram a
     reserva somente com `reservations.read` e o cliente somente com `customers.read`; as condições
     negociadas mostram SKU e nome do produto somente com `catalog.read`;
