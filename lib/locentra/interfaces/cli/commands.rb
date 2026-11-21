@@ -3,6 +3,7 @@
 require_relative "output"
 require_relative "command_support"
 require_relative "commercial_terms_commands"
+require_relative "organization_commands"
 
 module Locentra
   module Interfaces
@@ -26,9 +27,11 @@ module Locentra
           @actor = actor
         end
 
-        # Os comandos de condições comerciais (cupons, tarifas e condições negociadas) ficam em classe própria.
+        # Os comandos de condições comerciais (cupons, tarifas e condições negociadas) e de consulta da
+        # organização ficam em classes próprias.
         def run(invocation)
           return CommercialTermsCommands.new(system: @system, actor: @actor).run(invocation) if CommercialTermsCommands.handles?(invocation.command.handler)
+          return OrganizationCommands.new(system: @system, actor: @actor).run(invocation) if OrganizationCommands.handles?(invocation.command.handler)
 
           options = invocation.options
           argument = invocation.argument

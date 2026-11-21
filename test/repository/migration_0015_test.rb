@@ -7,6 +7,10 @@ require_relative "repository_helper"
 # Atualização de um banco da versão 1.0.0 (migrations 0001 a 0014) para a 0015: preenchimento das
 # colunas novas com a RLS forçada restaurada, contador legado de cupons preservado como base dos usos
 # e recusa de condições negociadas sobrepostas. O esquema completo é recriado ao final.
+#
+# O "banco da 1.0.0" é montado com todas as migrations exceto a 0015, inclusive as posteriores: a 0016
+# (configurações da organização) é aplicada antes da 0015, que não depende dela, e os casos de uso
+# atuais montam os dados. A ordem registrada em schema_migrations documenta essa independência.
 class Migration0015Test < Minitest::Test
   include TimeHelpers
 
@@ -80,6 +84,10 @@ class Migration0015Test < Minitest::Test
     id
   end
 
+  def applied_order
+    TestDatabase.owner_connection.exec("SELECT version FROM schema_migrations ORDER BY applied_at, version").column_values(0)
+  end
+
   def forced_rls(table)
     TestDatabase.owner_connection.exec_params("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid = $1::regclass", [table]).getvalue(0, 0)
   end
@@ -96,6 +104,7 @@ class Migration0015Test < Minitest::Test
     inverted_id = legacy_agreement(900, valid_until: "2026-01-01T00:00:00Z")
 
     assert_equal ["0015"], migrator(MIGRATIONS).migrate
+    assert_equal %w[0016 0015], applied_order.last(2), "a 0016 foi aplicada antes da 0015, que não depende dela"
     assert_equal(%w[t t t t], %w[coupons customer_price_agreements coupon_redemptions additional_fees].map { |table| forced_rls(table) })
     coupon = owner_query("SELECT updated_at = created_at AS filled, lock_version, redemptions FROM coupons WHERE id = $1", [coupon_id]).first
 
@@ -167,7 +176,7 @@ class Migration0015Test < Minitest::Test
     assert_includes error.message, "docs/RUNBOOKS.md"
     conn = TestDatabase.owner_connection
 
-    assert_equal "0014", conn.exec("SELECT max(version) FROM schema_migrations").getvalue(0, 0), "a transação da migration é desfeita por inteiro"
+    refute_includes conn.exec("SELECT version FROM schema_migrations").column_values(0), "0015", "a transação da migration é desfeita por inteiro"
     assert_nil conn.exec("SELECT to_regclass('public.coupon_redemptions')").getvalue(0, 0)
     assert_equal(%w[t t], %w[coupons customer_price_agreements].map { |table| forced_rls(table) })
     owner_query("UPDATE customer_price_agreements SET valid_until = created_at WHERE discount_bps = 500")

@@ -3,7 +3,7 @@
   <%= partial("shared/errors") %>
   <form method="get" action="/disponibilidade/consulta" class="filters">
     <label for="filial">Filial</label>
-    <select id="filial" name="filial"><% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@values["filial"], b.id) %>><%= b.name %></option><% end %></select>
+    <select id="filial" name="filial"><%= branch_options(@branches, @values["filial"], active_only: true) %></select>
     <label for="inicio">Início</label><input id="inicio" name="inicio" type="datetime-local" required value="<%= @values["inicio"] %>">
     <label for="fim">Fim</label><input id="fim" name="fim" type="datetime-local" required value="<%= @values["fim"] %>">
     <button type="submit" class="primary">Consultar</button>

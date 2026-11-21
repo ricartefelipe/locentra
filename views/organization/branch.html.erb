@@ -1,0 +1,62 @@
+<% b = @data[:branch] -%>
+<% usage = @data[:usage] -%>
+<% commitments = @data[:commitments] -%>
+<% path = "/organizacao/filiais/#{b.id}" -%>
+<% current = { "nome" => b.name, "endereco" => b.address, "versao" => b.lock_version } -%>
+<% form = @values || current -%>
+<% editing = !@values.nil? -%>
+<header class="page-header">
+  <h1>Filial <%= b.code %> <%= status_badge(b.status, Locentra::Domain::Organizations::BRANCH_STATUSES.fetch(b.status)) %></h1>
+  <p class="muted"><a href="/organizacao">Voltar para a organização</a></p>
+</header>
+<%= partial("shared/errors") %>
+<div class="grid-2">
+  <section class="panel" aria-labelledby="filial-dados">
+    <h2 id="filial-dados">Dados da filial</h2>
+    <dl class="details">
+      <dt>Código (não muda)</dt><dd><code><%= b.code %></code></dd>
+      <dt>Nome</dt><dd><%= b.name %></dd>
+      <dt>Endereço</dt><dd class="pre"><%= b.address || "—" %></dd>
+      <dt>Situação</dt><dd><%= b.active ? "Ativa" : "Inativa desde #{datetime(b.deactivated_at)}" %></dd>
+    </dl>
+    <h3>Vínculos</h3>
+    <% links = [count_text(usage[:assets], "ativo", "ativos"), count_text(usage[:stock_units], "unidade em estoque", "unidades em estoque"),
+                count_text(commitments[:reservations][:count], "reserva em aberto", "reservas em aberto"),
+                count_text(commitments[:sent_quotes][:count] + commitments[:approved_quotes][:count], "orçamento enviado ou aprovado", "orçamentos enviados ou aprovados"),
+                count_text(commitments[:incoming_transfers][:count], "transferência pendente com destino à filial", "transferências pendentes com destino à filial")] -%>
+    <p><%= links.join(" · ") %></p>
+    <p class="muted">Ativos, estoque e transferências de saída não impedem a desativação; reservas em aberto, orçamentos enviados vigentes ou aprovados e transferências pendentes com destino à filial impedem.</p>
+  </section>
+  <% if can?("organization.manage") -%>
+    <section class="panel" aria-labelledby="filial-acoes">
+      <h2 id="filial-acoes">Ações</h2>
+      <details<%= raw(editing ? " open" : "") %>>
+        <summary>Editar filial</summary>
+        <form method="post" action="<%= path %>" class="form-grid">
+          <%= csrf_field %>
+          <input type="hidden" name="versao" value="<%= form["versao"] %>">
+          <div class="full"><label for="nome">Nome</label>
+            <input id="nome" name="nome" required maxlength="120" value="<%= form["nome"] %>"<%= invalid(editing ? @errors : {}, "nome") %>><%= field_errors(editing ? @errors : {}, "nome") %></div>
+          <div class="full"><label for="endereco">Endereço</label>
+            <textarea id="endereco" name="endereco" rows="2" maxlength="300"<%= invalid(editing ? @errors : {}, "endereco") %>><%= form["endereco"] %></textarea>
+            <%= field_errors(editing ? @errors : {}, "endereco") %></div>
+          <div class="full"><button type="submit">Salvar alterações</button></div>
+        </form>
+      </details>
+      <div class="action-row">
+        <% if b.active -%>
+          <form method="post" action="<%= path %>/desativar" data-confirm="Desativar a filial <%= b.code %>? Novas reservas, orçamentos, cadastros de ativos, entradas de estoque e transferências com destino a ela deixam de ser aceitos.">
+            <%= csrf_field %><button type="submit" class="danger">Desativar filial</button></form>
+        <% else -%>
+          <form method="post" action="<%= path %>/reativar"><%= csrf_field %><button type="submit">Reativar filial</button></form>
+        <% end -%>
+      </div>
+    </section>
+  <% end -%>
+</div>
+<% if @data[:history] -%>
+  <section class="panel" aria-labelledby="filial-historico">
+    <h2 id="filial-historico">Histórico</h2>
+    <%= partial("shared/history", history: @data[:history]) %>
+  </section>
+<% end -%>

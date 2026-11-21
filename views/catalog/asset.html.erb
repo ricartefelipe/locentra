@@ -31,7 +31,7 @@
       <details<%= open_after_failure("/ativos/#{a.id}/bloqueios") %>>
         <summary>Bloquear período (preparação ou manutenção programada)</summary>
         <form method="post" action="/ativos/<%= a.id %>/bloqueios" class="stack">
-          <%= csrf_field %>
+          <%= csrf_field %><%= time_zone_field %>
           <label for="b-inicio">Início</label><input id="b-inicio" name="inicio" type="datetime-local" required>
           <label for="b-fim">Fim</label><input id="b-fim" name="fim" type="datetime-local" required>
           <label for="b-motivo">Motivo</label><input id="b-motivo" name="motivo" required>
@@ -47,7 +47,7 @@
       <p class="notice" role="status">Situação controlada pela operação: <%= managed %>.</p>
     <% elsif can?("assets.write") %>
       <form method="post" action="/ativos/<%= a.id %>/situacao" class="stack">
-        <%= csrf_field %>
+        <%= csrf_field %><%= time_zone_field %>
         <label for="situacao">Nova situação</label>
         <select id="situacao" name="situacao">
           <% Locentra::Domain::Catalog::ASSET_TRANSITIONS.fetch(a.status).select { |s| Locentra::Application::Catalog::ChangeAssetStatus::TARGETS.include?(s) }.each do |s| %>

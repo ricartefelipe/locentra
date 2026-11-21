@@ -279,8 +279,7 @@ module Locentra
 
           requested = lines.empty? ? {} : Domain::Reservations::Rules.normalize_lines(lines).to_h { |l| [l.product_id, l.quantity] }
           @uow.run(Portal.customer!(actor), PERMISSION) do |tx, current|
-            branch = Domain::Identifier.parse(branch_id, "filial")
-            raise Domain::NotFound, "filial" unless @organizations.branch_active?(tx, branch)
+            branch = Organizations::BranchGuard.active!(@organizations, tx, branch_id, field: "filial", lock: false).id
 
             @check.call(current, branch_id: branch, period: period, tx: tx).map { |row| present(row, requested) }
           end

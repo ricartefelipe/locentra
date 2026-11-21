@@ -10,7 +10,7 @@ dados de outra organização.
 | Consultas | Toda consulta de tenant filtra `organization_id` explicitamente (inclusive atualizações por `id`), além da RLS. |
 | Banco: contexto | `set_config('app.tenant_id', ..., true)` local à transação; sem contexto, `app_tenant_id()` é nulo e nenhuma linha é visível. O contexto desaparece no fim da transação e a conexão volta ao pool sem transação aberta. |
 | Banco: RLS | `ENABLE` e `FORCE ROW LEVEL SECURITY` em todas as tabelas de tenant, com `USING` e `WITH CHECK`. `TenantIsolationTest#test_every_table_with_organization_id_has_forced_row_level_security` percorre o catálogo e falha se alguma tabela com `organization_id`, fora das exceções abaixo, ficar sem RLS forçada. |
-| Banco: papéis | `locentra_app` e `locentra_worker` sem superuser, sem `BYPASSRLS` e sem propriedade de tabelas; `locentra_owner` só para migrations; `locentra_backup` somente leitura, com `BYPASSRLS` e `pg_read_all_data`, usado pelo `pg_dump` (ADR-024) e, por operador, nas consultas de verificação somente leitura dos runbooks que precisam enxergar todas as organizações (contagem de linhas na restauração e verificações da migration 0015, `RUNBOOKS.md` §4 e §13); nunca pela aplicação. |
+| Banco: papéis | `locentra_app` e `locentra_worker` sem superuser, sem `BYPASSRLS` e sem propriedade de tabelas; `locentra_owner` só para migrations; `locentra_backup` somente leitura, com `BYPASSRLS` e `pg_read_all_data`, usado pelo `pg_dump` (ADR-024) e, por operador, nas consultas de verificação somente leitura dos runbooks que precisam enxergar todas as organizações (contagem de linhas na restauração e verificações das migrations 0015 e 0016, `RUNBOOKS.md` §4, §13 e §14); nunca pela aplicação. |
 | Banco: integridade | Chaves estrangeiras compostas `(organization_id, id)` impedem relacionamentos entre tenants. |
 | Respostas | Recurso de outra organização (ou de outro cliente, no portal) retorna "não encontrado" (sem enumeração). |
 | Áreas | Sessões de portal não acessam rotas da equipe nem a API sem credencial, e vice-versa. |
@@ -46,6 +46,29 @@ dados de outra organização.
   não são proprietários. `TenantIsolationTest` confirma a RLS forçada depois da migration, e
   `test/repository/migration_0015_test.rb` confere o preenchimento e o `FORCE` restaurado numa atualização a
   partir do esquema da 0014.
+
+## Configurações da organização e filiais (migration 0016)
+
+- As consultas novas do repositório de organizações (filiais ativas, vínculos e compromissos da filial,
+  impacto da troca de fuso, política e fuso de referência da reserva) filtram `organization_id` pelo tenant da
+  transação, além da RLS. A trava da organização (`FOR NO KEY UPDATE`) e a leitura de filial com trava
+  (`FOR SHARE` ou `FOR NO KEY UPDATE`) também filtram o tenant: uma filial de outra organização responde
+  "filial não encontrada".
+- **Privilégios de coluna:** `locentra_app` só atualiza `name`, `timezone`, `settings`, `lock_version` e
+  `updated_at` em `organizations` (o `slug`, a situação e o documento não mudam pela aplicação) e `name`,
+  `address`, `active`, `deactivated_at`, `lock_version` e `updated_at` em `branches` (o código não muda);
+  `DELETE` está revogado nas duas. `locentra_worker` não tem `UPDATE` nelas e, por isso, não consegue travar
+  filiais (`FOR SHARE` exige o privilégio): as travas de filial são só da aplicação.
+- **`NO FORCE` pontual na migration 0016:** `organizations`, `branches`, `reservations`, `quote_versions` e
+  `contracts` ficam com `NO FORCE ROW LEVEL SECURITY` **somente dentro da transação da migration**, para a
+  verificação prévia de `settings` e o preenchimento da política em todas as organizações (`contracts` só é
+  lida). A migration termina com `FORCE` restaurado nas cinco tabelas; se falha, nada muda.
+  `test/repository/migration_0016_test.rb` confere `relforcerowsecurity` depois da migration.
+- **Ordem de travas:** filial → organização (desativação de filial); filial → assinatura (reativação de filial,
+  cadastro de ativo e entrada de estoque); só assinatura (criação de filial); só organização (alteração das
+  configurações). Criações ligadas a uma filial travam a filial com `FOR SHARE`, que conflita com a desativação
+  (`FOR NO KEY UPDATE`). Não há ciclo. A trava `FOR NO KEY UPDATE` da organização não conflita com as chaves
+  estrangeiras (`FOR KEY SHARE`) das inserções do tenant.
 
 ## Exceções globais documentadas
 

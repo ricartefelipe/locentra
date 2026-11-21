@@ -14,14 +14,15 @@ Comandos administrativos de banco (migrations, status, seed) continuam separados
 |---|---|
 | Aplicação | `application/jobs.rb` (`Jobs::ListFailures`, `Jobs::RetryJob`, `Jobs::ErrorText`), `application/integrations.rb` (`WhoAmI`; filtro `kind:` em `AuthenticateCredential`), `GetReservation#by_reference`, `GetAsset#by_reference`, filtro `skus:` em `CheckAvailability` |
 | Persistência | `Jobs::Queue#lock`, `CredentialRepository#find`, `AvailabilityRepository#product_ids_by_sku`; `AccessRepository#active_credential` passa a devolver o tipo e, como `CredentialRepository#find_active`, exige organização ativa; `ReservationRepository#search` aceita `customer_names:`; `Jobs::Queue` identifica cada tentativa por `attempt_id` |
-| Interface | `interfaces/cli/operational.rb` (entrada, autenticação, erros e códigos de saída), `invocation.rb` (comandos, opções e ajuda), `commands.rb` (execução e apresentação), `commercial_terms_commands.rb` (cupons, tarifas e condições negociadas), `command_support.rb` (resultado, instantes e paginação comuns às classes de comandos), `token_source.rb` (origem da credencial), `output.rb` (redação, formatação humana e JSON), `interfaces/commercial_terms_serializers.rb` (JSON das condições comerciais, o mesmo da API v1) |
+| Interface | `interfaces/cli/operational.rb` (entrada, autenticação, erros e códigos de saída), `invocation.rb` (comandos, opções e ajuda), `commands.rb` (execução e apresentação), `commercial_terms_commands.rb` (cupons, tarifas e condições negociadas), `organization_commands.rb` (consulta da organização), `command_support.rb` (resultado, instantes e paginação comuns às classes de comandos), `token_source.rb` (origem da credencial), `output.rb` (redação, formatação humana e JSON), `interfaces/commercial_terms_serializers.rb` (JSON das condições comerciais, o mesmo da API v1), `interfaces/organization_serializers.rb` (JSON da organização, o mesmo de `GET /api/v1/organization`) |
 | Executável | `bin/locentra` |
 | Composição | `System#build_cli_use_cases` (`whoami`, `list_failed_jobs`, `retry_job`) |
 
 Os demais comandos usam casos de uso já existentes: `get_organization`, `check_availability`,
 `list_reservations`, `get_reservation`, `get_customer`, `get_asset`, `reconcile_payments` e `finance`
 (relatório de conciliação). Os comandos de condições comerciais usam os casos de uso de
-`Application::CommercialTerms` (ver [condicoes-comerciais.md](condicoes-comerciais.md)).
+`Application::CommercialTerms` (ver [condicoes-comerciais.md](condicoes-comerciais.md)); `organization show` usa
+`read_organization` (ver [configuracoes-organizacao.md](configuracoes-organizacao.md)).
 
 ## Identidade e credencial
 
@@ -58,6 +59,7 @@ Os demais comandos usam casos de uso já existentes: `get_organization`, `check_
 | Comando | Caso(s) de uso | Escopo(s) | Observações |
 |---|---|---|---|
 | `whoami` | `whoami` | nenhum além de credencial válida | Credencial (nome, tipo, validade, último uso), organização e escopos atuais |
+| `organization show` | `read_organization` | `organization.read` | Nome e identificador, fuso horário com o rótulo, validade padrão do bloqueio temporário e política de cancelamento (com "(padrão)" quando for o caso) e a tabela de filiais com a situação ("Inativa desde …"). As alterações são feitas somente pela interface web. Credenciais anteriores não têm o escopo: crie outra |
 | `availability --inicio I --fim F [--filial F] [--produto P]` | `get_organization`, `check_availability` | `availability.read` | Filial por código ou id (padrão: a única filial ativa); produtos por SKU ou id, repetidos ou separados por vírgula (padrão: todos os ativos). SKU ou id inexistente é erro de validação |
 | `reservations list [--situacao S] [--cliente ID] [--busca T] [--de I] [--ate I] [--ordem=O] [--limite N] [--deslocamento N]` | `list_reservations` | `reservations.read` (+ `customers.read` para o nome do cliente) | `--de`: reservas que terminam depois do instante; `--ate`: que começam antes. Ordens: `-starts_at` (padrão), `starts_at`, `-created_at`, `created_at`, `code` (use `--ordem=-created_at`). Limite de 1 a 100. Sem `customers.read`, a regra é aplicada em `ListReservations` (vale para qualquer interface): o nome não é devolvido (a coluna mostra o identificador do cliente e o JSON omite `customer_name`) e `--busca` considera apenas o código da reserva |
 | `reservations show CÓDIGO\|ID` | `get_reservation` (`by_reference`), `get_customer` | `reservations.read` (+ `customers.read` para o nome do cliente) | Sem `customers.read`, o cliente aparece apenas pelo identificador |
@@ -110,6 +112,7 @@ validação (1) no campo da opção.
 | Comando | Chaves de primeiro nível |
 |---|---|
 | `whoami` | `actor_type`, `organization` (`id`, `name`, `slug`, `time_zone`), `credential` (`id`, `name`, `kind`, `created_at`, `expires_at`, `last_used_at`, `scopes`) |
+| `organization show` | o objeto `Organization` da API v1, exatamente (`id`, `name`, `slug`, `time_zone`, `time_zone_label`, `status`, `lock_version`, `settings`, `branches[]`) |
 | `availability` | `branch` (`id`, `code`, `name`), `period`, `time_zone`, `data[]` (`product_id`, `sku`, `name`, `tracking`, `available`, `total`) |
 | `reservations list` | `data[]` (campos da reserva da API v1 + `status_label` e, com `customers.read`, `customer_name`), `pagination` (`limit`, `offset`, `total`, `next_offset`) |
 | `reservations show` | `reservation` (+ `notes`), `customer` (`id` e, com `customers.read`, `name`), `branch`, `items[]`, `allocations` (`assets[]`, `stock[]`) |

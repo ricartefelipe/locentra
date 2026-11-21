@@ -11,7 +11,7 @@ module Locentra
                   "hold_reservation_id, reservation_id, sent_at, approved_at, approved_by_type, approved_by_user_id, approved_by_name, " \
                   "approved_ip, rejected_at, rejection_reason, expired_at, converted_at, lock_version"
         VERSION_COLUMNS = "id, quote_id, version, branch_id, starts_at, ends_at, valid_until, items, pricing, terms, manual_discount_bps, " \
-                          "deposit_cents, total_cents, created_at, sent_at"
+                          "deposit_cents, total_cents, created_at, sent_at, cancellation_policy"
         SORTS = { "-created_at" => "q.created_at DESC, q.id", "created_at" => "q.created_at ASC, q.id", "code" => "q.code ASC" }.freeze
         # Versão exibida na lista: a atual para a equipe; para o cliente, a última enviada (orçamentos
         # sem versão enviada ficam fora da junção).
@@ -33,11 +33,15 @@ module Locentra
           tx.execute("UPDATE quotes SET code = $3 WHERE organization_id = $1 AND id = $2", [tx.tenant_id!, id, code])
         end
 
+        # A política de cancelamento da versão é sempre informada (o gatilho de preenchimento existe só para
+        # instâncias 1.1.0 durante a atualização).
         def insert_version(tx, version, created_by)
-          tx.execute(<<~SQL, [version.id, tx.tenant_id!, version.quote_id, version.number, version.branch_id, version.period.starts_at, version.period.ends_at, version.valid_until, Infrastructure::Database::Params.json(version.items), version.pricing, version.terms, version.manual_discount_bps, version.deposit.cents, version.total.cents, created_by, version.created_at])
+          raise ArgumentError, "versão sem política de cancelamento" if version.cancellation_policy.nil?
+
+          tx.execute(<<~SQL, [version.id, tx.tenant_id!, version.quote_id, version.number, version.branch_id, version.period.starts_at, version.period.ends_at, version.valid_until, Infrastructure::Database::Params.json(version.items), version.pricing, version.terms, version.manual_discount_bps, version.deposit.cents, version.total.cents, created_by, version.created_at, version.cancellation_policy])
             INSERT INTO quote_versions (id, organization_id, quote_id, version, branch_id, starts_at, ends_at, valid_until, items, pricing, terms,
-                                        manual_discount_bps, deposit_cents, total_cents, created_by, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16)
+                                        manual_discount_bps, deposit_cents, total_cents, created_by, created_at, cancellation_policy)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17)
           SQL
         end
 
@@ -152,7 +156,7 @@ module Locentra
                          period: Domain::Period.new(row["starts_at"], row["ends_at"]), valid_until: row["valid_until"].utc,
                          items: row["items"], pricing: row["pricing"], terms: row["terms"], manual_discount_bps: row["manual_discount_bps"],
                          deposit: Domain::Money.new(row["deposit_cents"]), total: Domain::Money.new(row["total_cents"]),
-                         created_at: row["created_at"].utc, sent_at: row["sent_at"]&.utc)
+                         created_at: row["created_at"].utc, sent_at: row["sent_at"]&.utc, cancellation_policy: row["cancellation_policy"])
         end
 
         private

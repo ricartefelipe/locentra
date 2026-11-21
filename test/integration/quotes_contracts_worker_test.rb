@@ -56,6 +56,7 @@ class QuotesContractsWorkerTest < DatabaseTest
     assert_includes mail[:text], "não garante a disponibilidade"
     assert_includes mail[:text], "04/03/2026 09:00"
     assert_includes mail[:text], "R$ 90,00"
+    assert_includes mail[:text], "Horários no fuso horário America/Sao_Paulo."
   end
 
   def test_sent_quote_with_hold_and_issued_contract_send_emails
@@ -72,6 +73,7 @@ class QuotesContractsWorkerTest < DatabaseTest
 
     assert_includes contract_mail[:text], "aceite eletrônico simples"
     assert_includes contract_mail[:text], "10/03/2026 05:00"
+    assert_includes contract_mail[:text], "Horários no fuso horário America/Sao_Paulo."
     assert_includes subjects, "Reserva #{reservation.code} confirmada"
   end
 

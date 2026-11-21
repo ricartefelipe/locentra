@@ -20,6 +20,7 @@ module Locentra
 
       # Matriz de permissões por papel. Fonte única para a interface, a API, a CLI e o worker.
       PERMISSIONS = {
+        "organization.read" => ALL,
         "organization.manage" => %w[owner admin],
         "members.read" => %w[owner admin manager auditor],
         "members.manage" => %w[owner admin],

@@ -76,6 +76,10 @@ erDiagram
 | Condições negociadas do mesmo cliente e escopo sem vigências sobrepostas | `customer_price_agreements_no_overlap EXCLUDE USING gist` sobre `price_agreement_window(valid_from, valid_until, ended_at)` |
 | Condição negociada imutável, com encerramento único | `UPDATE` concedido somente em `ended_at`, `ended_by` e `end_reason`; gatilho `customer_price_agreements_end_once`; `CHECK` de coerência entre instante, motivo e autor; `DELETE` revogado |
 | Snapshot de preços da reserva e dos itens imutável | Gatilhos `reservations_pricing_immutable` e `reservation_items_pricing_immutable` (`BEFORE UPDATE OF pricing`) |
+| Política de cancelamento congelada na reserva e na versão do orçamento | Gatilhos `reservations_cancellation_policy_immutable` e `quote_versions_cancellation_policy_immutable` (`BEFORE UPDATE OF cancellation_policy`, `check_violation`, inclusive para o proprietário); a aplicação não tem `UPDATE` em `quote_versions` além de `sent_at` |
+| Política de cancelamento sempre presente e com formato mínimo | `NOT NULL` e `CHECK (app_cancellation_policy_shape_ok(cancellation_policy))` em `reservations` e `quote_versions`; gatilhos `reservations_cancellation_policy_fill` e `quote_versions_cancellation_policy_fill` (`BEFORE INSERT`) preenchem a coluna omitida (inserções da 1.1.0) com a política de `settings` ou `app_default_cancellation_policy()` |
+| Nome, fuso e configurações da organização são as únicas colunas alteráveis pela aplicação | `UPDATE` de `locentra_app` somente em `name`, `timezone`, `settings`, `lock_version` e `updated_at`; `DELETE` revogado; o worker não tem `UPDATE`; `CHECK organizations_settings_object` |
+| Código da filial não muda; situação coerente | `UPDATE` de `locentra_app` somente em `name`, `address`, `active`, `deactivated_at`, `lock_version` e `updated_at`; `DELETE` revogado; `CHECK branches_active_coherent` (`active = (deactivated_at IS NULL)`); o worker não tem `UPDATE` (e, por isso, não consegue `FOR SHARE`) |
 
 ## Dicionário de tabelas
 
@@ -91,7 +95,7 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 | `sessions` | não | id:uuid!, token_digest:text!, kind:text!, user_id:uuid!, organization_id:uuid, csrf_token:text!, ip:text, user_agent:text, created_at:timestamptz!, last_seen_at:timestamptz!, idle_expires_at:timestamptz!, absolute_expires_at:timestamptz!, revoked_at:timestamptz, revoked_reason:text |
 | `user_tokens` | não | id:uuid!, user_id:uuid!, purpose:text!, token_digest:text!, expires_at:timestamptz!, used_at:timestamptz, created_at:timestamptz! |
 | `rate_limits` | não | bucket:text!, window_start:timestamptz!, hits:integer! |
-| `organizations` | sim/sim | id:uuid!, name:text!, slug:text!, legal_document:text, timezone:text!, status:text!, settings:jsonb!, created_at:timestamptz!, updated_at:timestamptz! |
+| `organizations` | sim/sim | id:uuid!, name:text!, slug:text!, legal_document:text, timezone:text!, status:text!, settings:jsonb!, created_at:timestamptz!, updated_at:timestamptz!, lock_version:integer! |
 | `queue_stats` | não | queue:text!, status:text!, size:integer!, oldest_age_seconds:numeric!, updated_at:timestamptz! |
 | `job_outcome_totals` | não | queue:text!, kind:text!, outcome:text!, total:bigint!, updated_at:timestamptz! |
 | `schema_migrations` | não | version:text!, name:text!, checksum:text!, applied_at:timestamptz! |
@@ -100,7 +104,7 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 
 | Tabela | RLS | Colunas |
 |---|---|---|
-| `branches` | sim/sim | id:uuid!, organization_id:uuid!, name:text!, code:text!, address:text, active:boolean!, created_at:timestamptz!, updated_at:timestamptz! |
+| `branches` | sim/sim | id:uuid!, organization_id:uuid!, name:text!, code:text!, address:text, active:boolean!, created_at:timestamptz!, updated_at:timestamptz!, deactivated_at:timestamptz, lock_version:integer! |
 | `memberships` | sim/sim | id:uuid!, organization_id:uuid!, user_id:uuid!, role:text!, status:text!, created_at:timestamptz!, updated_at:timestamptz!, revoked_at:timestamptz, revoked_by:uuid |
 | `invitations` | sim/sim | id:uuid!, organization_id:uuid!, email:text!, role:text!, token_digest:text!, invited_by:uuid!, expires_at:timestamptz!, accepted_at:timestamptz, accepted_user_id:uuid, revoked_at:timestamptz, created_at:timestamptz! |
 | `subscriptions` | sim/sim | id:uuid!, organization_id:uuid!, plan_id:text!, status:text!, started_at:timestamptz!, trial_ends_at:timestamptz, current_period_start:date!, current_period_end:date!, implementation_fee_cents:bigint!, extra_features:array!, cancelled_at:timestamptz, created_at:timestamptz!, updated_at:timestamptz! |
@@ -135,7 +139,7 @@ Gerado a partir do banco migrado (`information_schema`). `!` indica `NOT NULL`. 
 
 | Tabela | RLS | Colunas |
 |---|---|---|
-| `reservations` | sim/sim | id:uuid!, organization_id:uuid!, branch_id:uuid!, customer_id:uuid!, code:text!, status:text!, source:text!, starts_at:timestamptz!, ends_at:timestamptz!, hold_expires_at:timestamptz, quote_id:uuid, notes:text, pricing:jsonb!, total_cents:bigint!, deposit_cents:bigint!, overdue_since:timestamptz, created_by:uuid, confirmed_at:timestamptz, cancelled_at:timestamptz, cancellation_reason:text, expired_at:timestamptz, version:integer!, created_at:timestamptz!, updated_at:timestamptz! |
+| `reservations` | sim/sim | id:uuid!, organization_id:uuid!, branch_id:uuid!, customer_id:uuid!, code:text!, status:text!, source:text!, starts_at:timestamptz!, ends_at:timestamptz!, hold_expires_at:timestamptz, quote_id:uuid, notes:text, pricing:jsonb!, total_cents:bigint!, deposit_cents:bigint!, overdue_since:timestamptz, created_by:uuid, confirmed_at:timestamptz, cancelled_at:timestamptz, cancellation_reason:text, expired_at:timestamptz, version:integer!, created_at:timestamptz!, updated_at:timestamptz!, cancellation_policy:jsonb! |
 | `reservation_items` | sim/sim | id:uuid!, organization_id:uuid!, reservation_id:uuid!, product_id:uuid!, quantity:integer!, position:integer!, pricing:jsonb!, total_cents:bigint!, created_at:timestamptz! |
 | `asset_allocations` | sim/sim | id:uuid!, organization_id:uuid!, asset_id:uuid!, product_id:uuid!, reservation_id:uuid, reservation_item_id:uuid, kind:text!, reason:text, period:tstzrange!, active:boolean!, created_by:uuid, created_at:timestamptz!, released_at:timestamptz |
 | `stock_allocations` | sim/sim | id:uuid!, organization_id:uuid!, stock_pool_id:uuid!, product_id:uuid!, reservation_id:uuid, reservation_item_id:uuid, kind:text!, reason:text, quantity:integer!, period:tstzrange!, active:boolean!, created_by:uuid, created_at:timestamptz!, released_at:timestamptz |
@@ -161,12 +165,25 @@ Condições comerciais (migration 0015; regras em [`PRECIFICACAO.md`](PRECIFICAC
   informa outro. As tarifas aplicadas ficam no snapshot de preços da reserva ou da versão do orçamento, não
   em tabela própria.
 
+Configurações da organização e filiais (migration 0016; regras em
+[`modulos/configuracoes-organizacao.md`](modulos/configuracoes-organizacao.md)):
+
+- `organizations.settings` guarda `hold_minutes` e `cancellation_policy` somente quando diferentes do padrão
+  (30 minutos e `app_default_cancellation_policy()`); chaves desconhecidas são preservadas.
+  `organizations.lock_version` faz o controle otimista das configurações.
+- `branches.deactivated_at` é o instante da desativação (nulo na filial ativa); foi preenchida com
+  `updated_at` nas filiais inativas anteriores à migration 0016. `branches.lock_version` faz o controle
+  otimista da edição, da desativação e da reativação.
+- `reservations.cancellation_policy` e `quote_versions.cancellation_policy` são a política congelada na
+  criação, na forma `{"tiers": [{"min_hours_before", "fee_bps"}]}`. Na migration 0016, a reserva com contrato
+  recebeu a política dos termos do contrato; as demais e as versões receberam a de `settings` ou a padrão.
+
 ### Orçamentos e contratos
 
 | Tabela | RLS | Colunas |
 |---|---|---|
 | `quotes` | sim/sim | id:uuid!, organization_id:uuid!, code:text!, customer_id:uuid!, branch_id:uuid!, status:text!, current_version:integer!, approved_version:integer, hold_policy:text!, hold_minutes:integer, hold_reservation_id:uuid, reservation_id:uuid, sent_at:timestamptz, approved_at:timestamptz, approved_by_type:text, approved_by_user_id:uuid, approved_by_name:text, approved_ip:text, rejected_at:timestamptz, rejection_reason:text, expired_at:timestamptz, converted_at:timestamptz, created_by:uuid, created_at:timestamptz!, updated_at:timestamptz!, lock_version:integer! |
-| `quote_versions` | sim/sim | id:uuid!, organization_id:uuid!, quote_id:uuid!, version:integer!, branch_id:uuid!, starts_at:timestamptz!, ends_at:timestamptz!, valid_until:timestamptz!, items:jsonb!, pricing:jsonb!, terms:text, manual_discount_bps:integer!, deposit_cents:bigint!, total_cents:bigint!, created_by:uuid, created_at:timestamptz!, sent_at:timestamptz |
+| `quote_versions` | sim/sim | id:uuid!, organization_id:uuid!, quote_id:uuid!, version:integer!, branch_id:uuid!, starts_at:timestamptz!, ends_at:timestamptz!, valid_until:timestamptz!, items:jsonb!, pricing:jsonb!, terms:text, manual_discount_bps:integer!, deposit_cents:bigint!, total_cents:bigint!, created_by:uuid, created_at:timestamptz!, sent_at:timestamptz, cancellation_policy:jsonb! |
 | `contracts` | sim/sim | id:uuid!, organization_id:uuid!, code:text!, reservation_id:uuid!, customer_id:uuid!, quote_id:uuid, status:text!, terms_snapshot:jsonb!, current_document_version:integer!, issued_by:uuid, issued_at:timestamptz!, activated_at:timestamptz, closed_at:timestamptz, cancelled_at:timestamptz, cancellation_reason:text, cancellation_fee_cents:bigint, updated_at:timestamptz!, lock_version:integer! |
 | `contract_documents` | sim/sim | id:uuid!, organization_id:uuid!, contract_id:uuid!, version:integer!, reason:text!, attachment_id:uuid!, sha256:text!, data_snapshot:jsonb!, generated_by:uuid, generated_at:timestamptz!, accepted_at:timestamptz, accepted_by_name:text, accepted_by_document:text, accepted_ip:text, user_agent:text, accepted_via:text, accepted_by_user_id:uuid, acceptance_statement:text |
 | `contract_amendments` | sim/sim | id:uuid!, organization_id:uuid!, contract_id:uuid!, number:integer!, kind:text!, description:text!, changes:jsonb!, amount_delta_cents:bigint!, document_version:integer!, created_by:uuid, created_at:timestamptz! |

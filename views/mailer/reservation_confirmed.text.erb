@@ -4,6 +4,9 @@ Olá, <%= v["customer_name"] %>.
 Sua reserva <%= v["code"] %> está confirmada.
 Retirada: <%= v["starts_at_local"] %>
 Devolução: <%= v["ends_at_local"] %>
+<% if v["time_zone"] -%>
+Horários no fuso horário <%= v["time_zone"] %>.
+<% end -%>
 Valor contratado: <%= v["total"] %>
 
 Em caso de dúvidas, responda a esta mensagem ou fale com a equipe da locadora.

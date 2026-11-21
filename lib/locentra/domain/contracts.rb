@@ -76,6 +76,9 @@ module Locentra
 
         def cancellation_policy = terms.fetch("cancellation_policy")
 
+        # Fuso do contrato: o do período registrado na emissão (o mesmo da precificação da reserva).
+        def time_zone_identifier = terms.dig("period", "timezone")
+
         # O primeiro aceite registrado torna o contrato vigente; aceites de versões posteriores
         # (aditivos) mantêm a situação.
         def accept(now)
@@ -137,19 +140,8 @@ module Locentra
                       policy: policy)
         end
 
-        # Descrição legível das faixas, da maior para a menor antecedência.
-        def describe(policy)
-          tiers = policy.fetch("tiers").sort_by { |tier| -tier.fetch("min_hours_before") }
-          tiers.each_with_index.map do |tier, index|
-            min = tier.fetch("min_hours_before")
-            upper = index.zero? ? nil : tiers[index - 1].fetch("min_hours_before")
-            range = if upper.nil? then "#{min} h ou mais antes do início"
-                    elsif min.zero? then "menos de #{upper} h antes do início (ou após o início)"
-                    else "de #{min} h a menos de #{upper} h antes do início"
-                    end
-            "#{range}: multa de #{percent_label(tier.fetch("fee_bps"))} do valor contratado"
-          end
-        end
+        # Descrição legível das faixas, da maior para a menor antecedência (Organizations::CancellationPolicy).
+        def describe(policy) = Organizations::CancellationPolicy.describe(policy)
 
         def percent_label(bps) = Percent.label(bps)
       end

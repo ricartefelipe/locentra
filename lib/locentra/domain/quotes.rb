@@ -84,10 +84,13 @@ module Locentra
         end
       end
 
-      # Versão imutável: itens precificados, período, validade, condições e totais. `sent_at` registra
-      # o envio da versão ao cliente (no máximo uma vez); versões nunca enviadas são internas.
+      # Versão imutável: itens precificados, período, validade, condições, totais e a política de
+      # cancelamento vigente na criação da versão (congelada com os preços). `sent_at` registra o envio da
+      # versão ao cliente (no máximo uma vez); versões nunca enviadas são internas.
       Version = Data.define(:id, :quote_id, :number, :branch_id, :period, :valid_until, :items, :pricing, :terms,
-                            :manual_discount_bps, :deposit, :total, :created_at, :sent_at) do
+                            :manual_discount_bps, :deposit, :total, :created_at, :sent_at, :cancellation_policy) do
+        def initialize(cancellation_policy: nil, **rest) = super
+
         def expired?(now) = now >= valid_until
         def sent? = !sent_at.nil?
 
@@ -101,9 +104,10 @@ module Locentra
           items.map { |item| Reservations::Line.new(product_id: item.fetch("product_id"), quantity: item.fetch("quantity")) }
         end
 
-        # Conteúdo comparável: duas versões iguais não justificam nova versão.
+        # Conteúdo comparável: duas versões iguais não justificam nova versão. A política de cancelamento
+        # entra na comparação: depois de uma troca de política, a revisão sem outra mudança gera versão nova.
         def fingerprint
-          [branch_id, period, valid_until.to_i, terms, manual_discount_bps, total.cents, deposit.cents,
+          [branch_id, period, valid_until.to_i, terms, manual_discount_bps, total.cents, deposit.cents, cancellation_policy,
            items.map { |i| [i.fetch("product_id"), i.fetch("quantity"), i.fetch("total_cents")] }.sort,
            pricing.fetch("fees", []).map { |f| [f["fee_id"], f["description"], f["amount_cents"]] }.sort_by(&:inspect)]
         end

@@ -88,8 +88,9 @@ module Locentra
           [rows.map { |row| self.class.map_product(row) }, total]
         end
 
+        # Filial do tenant, ativa ou não (operações sobre o que já está na filial).
         def branch_exists?(tx, id)
-          !tx.query_one("SELECT 1 FROM branches WHERE organization_id = $1 AND id = $2 AND active", [tx.tenant_id!, id]).nil?
+          !tx.query_one("SELECT 1 FROM branches WHERE organization_id = $1 AND id = $2", [tx.tenant_id!, id]).nil?
         end
 
         def insert_asset(tx, asset, now)

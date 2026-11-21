@@ -35,7 +35,8 @@ module Locentra
       end
 
       # Monta e precifica o conteúdo de uma versão, sem gravar. Os preços vêm do catálogo vigente e
-      # do Pricer sem cupom (orçamentos não aplicam cupons) e sem alterar disponibilidade. Devolve a
+      # do Pricer sem cupom (orçamentos não aplicam cupons) e sem alterar disponibilidade; a política de
+      # cancelamento vigente da organização é congelada na versão, com os preços. Devolve a
       # versão e as tarifas ajustadas (para a auditoria; não entram no snapshot gravado). Na revisão,
       # `previous_fees` são as tarifas da versão anterior: as entradas mantidas iguais já foram
       # autorizadas e não exigem nova autorização.
@@ -51,7 +52,7 @@ module Locentra
           period = input.fetch(:period)
           Domain::Reservations::Rules.validate_start!(period, now)
           lines = Domain::Reservations::Rules.normalize_lines(input.fetch(:lines))
-          branch_id = active_branch!(tx, input.fetch(:branch_id))
+          branch_id = Organizations::BranchGuard.active!(@organizations, tx, input.fetch(:branch_id), field: "filial").id
           valid_until = Q::Rules.valid_until!(input[:valid_until], period: period, now: now)
           discount = discount_bps(input.fetch(:manual_discount_bps, 0))
           priced = @pricer.price(tx, products: active_products!(tx, lines), lines: lines, period: period, zone: org.time_zone,
@@ -63,7 +64,7 @@ module Locentra
           version = Q::Version.new(id: @ids.uuid, quote_id: quote_id, number: number, branch_id: branch_id, period: period, valid_until: valid_until,
                                    items: priced.items, pricing: summary, terms: Q::Rules.terms(input[:terms]), manual_discount_bps: discount,
                                    deposit: Domain::Money.new(summary.fetch("deposit_cents")), total: Domain::Money.new(summary.fetch("total_cents")),
-                                   created_at: now, sent_at: nil)
+                                   created_at: now, sent_at: nil, cancellation_policy: org.cancellation_policy)
           [version, priced.overrides]
         end
 
@@ -73,13 +74,6 @@ module Locentra
           Integer(value.to_s, 10)
         rescue ArgumentError
           raise Domain::ValidationError.field("desconto", "percentual inválido")
-        end
-
-        def active_branch!(tx, branch_id)
-          id = Domain::Identifier.parse(branch_id, "filial")
-          raise Domain::NotFound, "filial" unless @organizations.branch_active?(tx, id)
-
-          id
         end
 
         def active_products!(tx, lines)
@@ -238,12 +232,14 @@ module Locentra
       end
 
       # Envio da versão atual. Com `hold_on_send`, cria na mesma transação uma reserva em bloqueio
-      # temporário (até 1440 minutos) com o snapshot de preços da versão, vinculada ao orçamento.
-      # Com `none`, o envio não garante disponibilidade.
+      # temporário (até 1440 minutos) com o snapshot de preços e a política de cancelamento da versão,
+      # vinculada ao orçamento. Com `none`, o envio não garante disponibilidade. Em ambos os casos a filial
+      # da versão precisa estar ativa.
       class SendQuote
-        def initialize(uow:, quotes:, create_reservation:, audit:, events:, clock:)
+        def initialize(uow:, quotes:, organizations:, create_reservation:, audit:, events:, clock:)
           @uow = uow
           @quotes = quotes
+          @organizations = organizations
           @create_reservation = create_reservation
           @audit = audit
           @events = events
@@ -255,6 +251,7 @@ module Locentra
             now = @clock.now
             quote = Scope.lock!(@quotes, tx, current, quote_id)
             version = @quotes.find_version(tx, quote.id, quote.current_version)
+            Organizations::BranchGuard.active!(@organizations, tx, version.branch_id, field: "filial")
             sent = quote.send_version(version, now)
             hold = create_hold(tx, current, sent, version) if sent.hold_on_send?
             sent = sent.with_hold(hold.id) if hold
@@ -277,7 +274,8 @@ module Locentra
                                      customer_id: quote.customer_id, branch_id: version.branch_id, period: version.period, lines: version.lines,
                                      mode: "hold", hold_minutes: quote.hold_minutes, source: "quote",
                                      notes: "Bloqueio temporário do orçamento #{quote.code} (versão #{version.number})",
-                                     pricing_snapshot: { items: version.items, summary: version.pricing }
+                                     pricing_snapshot: { items: version.items, summary: version.pricing },
+                                     cancellation_policy: version.cancellation_policy
                                    }, tx: tx)
         rescue Domain::Unavailable => e
           raise Domain::Unavailable.new(e.shortages, "Sem disponibilidade para o bloqueio temporário do orçamento; ajuste a versão ou envie sem bloqueio")
@@ -488,7 +486,8 @@ module Locentra
                                        mode: "confirm", source: "quote", quote_id: quote.id,
                                        notes: "Convertida do orçamento #{quote.code} (versão #{version.number})",
                                        pricing_snapshot: { items: version.items,
-                                                           summary: version.pricing.merge("quote_code" => quote.code, "quote_version" => version.number) }
+                                                           summary: version.pricing.merge("quote_code" => quote.code, "quote_version" => version.number) },
+                                       cancellation_policy: version.cancellation_policy
                                      }, tx: tx)
           end
           [reservation, true]

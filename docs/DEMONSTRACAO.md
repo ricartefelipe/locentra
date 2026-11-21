@@ -2,9 +2,10 @@
 
 Roteiro para apresentar o Locentra manualmente com os dados do seed, do primeiro acesso ao isolamento
 entre organizações. O mesmo roteiro é executado automaticamente por
-`test/integration/demo_flow_test.rb` (passos 1 a 14) e por
-`test/integration/demo_commercial_terms_test.rb` (passo 15), com dados próprios dos testes, o que garante
-que os passos e os resultados descritos aqui continuam válidos.
+`test/integration/demo_flow_test.rb` (passos 1 a 14), por
+`test/integration/demo_commercial_terms_test.rb` (passo 15) e por
+`test/integration/demo_organization_settings_test.rb` (passo 16), com dados próprios dos testes, o que
+garante que os passos e os resultados descritos aqui continuam válidos.
 
 ## Preparação
 
@@ -271,6 +272,48 @@ Os mesmos cadastros estão na API (`/api/v1/coupons`, `/api/v1/fees`,
 `/api/v1/customers/<id>/price-agreements`) e na CLI (`bin/locentra coupons list`), com credenciais que
 tenham os escopos `coupons.read`, `fees.read` e `price_agreements.read`.
 
+### 16. Configurações da organização e filiais
+
+O seed tem somente a filial **Matriz** na Alfa; o plano profissional permite 3 filiais ativas, e a segunda é
+criada no próprio passo. Se as configurações da Alfa já foram alteradas, use **Restaurar valores padrão** e
+salve antes de começar.
+
+1. Entre com `ana@alfa.demo` e escolha **Alfa Audiovisual**. Em **Organização**, no formulário **Nova
+   filial**, informe nome **Unidade Norte**, código **NORTE** e um endereço → **Criar filial**.
+2. Clique em **Editar configurações**. Em **Política de cancelamento**, deixe as faixas **48 h / 0%**,
+   **24 h / 50%** e **0 h / 100%** (altere a primeira linha de 72 para 48 e a multa da segunda de 30 para 50;
+   use **Adicionar faixa** e **Remover** se precisar). Em **Validade padrão do bloqueio temporário**, informe
+   **45**. Clique em **Pré-visualizar** e, depois de conferir, em **Salvar configurações**.
+3. Abra o contrato **C-…** gerado no passo 7. Depois, em **Reservas → Nova reserva**, registre uma reserva
+   com **Confirmar agora** (qualquer cliente, período livre) e abra **Política de cancelamento desta reserva**.
+4. Volte a **Organização → Editar configurações** e veja **Histórico de alterações**. Abra **Auditoria**.
+5. Em **Organização**, clique em **Detalhes** da filial **NORTE** → **Desativar filial** e confirme o diálogo.
+   Depois abra os **Detalhes** da **MATRIZ** → **Desativar filial** e confirme.
+6. Volte à **NORTE** → **Reativar filial**.
+
+**Esperado:**
+
+- Item 1: aviso "Filial criada." e a tabela **Filiais** com **NORTE** "Ativa".
+- Item 2: a pré-visualização lista "de 24 h a menos de 48 h antes do início: multa de 50% do valor contratado",
+  a tabela "Exemplo sobre um contrato de R$ 1.000,00" (**R$ 500,00** nessa faixa) e "Bloqueios criados sem
+  validade informada vencem em 45 minutos."; nada é gravado até salvar. Ao salvar: "Configurações salvas.
+  Reservas, orçamentos e contratos já registrados mantêm a política e os valores do registro." Em
+  **Organização**, a validade aparece como "45 minutos" e a política, sem "(padrão)".
+- Item 3: o contrato do passo 7 continua com "de 24 h a menos de 72 h antes do início: multa de 30% do valor
+  contratado" (a política registrada na reserva). A reserva nova sugere **45** minutos na validade do
+  bloqueio e mostra a política nova (48 h / 24 h / 0 h).
+- Item 4: o histórico mostra "Configurações da organização alteradas (validade padrão do bloqueio, política de
+  cancelamento)" com o nome da proprietária; a auditoria lista `organization.settings_updated`.
+- Item 5: a NORTE é desativada ("Filial desativada. Reservas, orçamentos e contratos já registrados não mudam;
+  ativos e estoque continuam vinculados e podem ser transferidos.") e deixa de aparecer em **Nova reserva**.
+  A Matriz é recusada com "A organização precisa de ao menos uma filial ativa."; com a NORTE ativa, a recusa
+  citaria as reservas em aberto da Matriz ("Não é possível desativar a filial MATRIZ: … reservas em aberto
+  (R-…)").
+- Item 6: "Filial reativada."; as duas filiais aparecem como "Ativa".
+
+A mesma organização pode ser consultada pela API (`GET /api/v1/organization`) e pela CLI
+(`bin/locentra organization show`), com uma credencial que tenha o escopo `organization.read`.
+
 ## Observabilidade durante o roteiro
 
 - Toda resposta traz `x-request-id`; um cliente pode enviar o próprio identificador
@@ -287,5 +330,6 @@ tenham os escopos `coupons.read`, `fees.read` e `price_agreements.read`.
 ```bash
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/demo_flow_test.rb
 docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/demo_commercial_terms_test.rb
+docker compose run --rm dev bundle exec ruby -Ilib -Itest test/integration/demo_organization_settings_test.rb
 docker compose run --rm dev bundle exec rake test:browser   # fluxos da interface no Chromium
 ```

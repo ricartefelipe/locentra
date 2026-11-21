@@ -7,6 +7,7 @@ telas de navegação. A tabela abaixo foi gerada a partir do código e é confer
 
 | Permissão | Proprietário | Administrador | Gerente | Atendente | Operador de estoque | Financeiro | Auditor |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `organization.read` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `organization.manage` | ✓ | ✓ |  |  |  |  |  |
 | `members.read` | ✓ | ✓ | ✓ |  |  |  | ✓ |
 | `members.manage` | ✓ | ✓ |  |  |  |  |  |
@@ -74,6 +75,17 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
   - a exclusão de cupom (somente de cupom nunca usado) existe apenas na interface web, com `coupons.write`;
   - credenciais criadas antes destas permissões não ganham os escopos novos: é preciso criar outra
     credencial com os escopos desejados. Para os papéis, as permissões valem imediatamente.
+- **Organização e filiais** (ver [módulo](modulos/configuracoes-organizacao.md)):
+  - as configurações (nome, fuso horário, validade padrão do bloqueio temporário e política de
+    cancelamento) são alteradas somente por usuário com `organization.manage`, pela interface web; credenciais
+    de integração e da CLI não alteram, mesmo com o escopo `organization.manage`;
+  - criar, editar, desativar e reativar filiais exigem `organization.manage`;
+  - `organization.read` governa a página `/organizacao`, o detalhe de filial (`/organizacao/filiais/:id`),
+    `GET /api/v1/organization` e `organization show` na CLI;
+  - `whoami` e a resolução de `--filial` na CLI continuam sem permissão adicional;
+  - credenciais existentes não ganham `organization.read`: é preciso criar outra credencial com o escopo;
+  - o painel de assinatura (plano, preço e limites) aparece somente com `organization.manage`;
+  - o histórico da filial aparece com `organization.manage` ou `audit.read`.
 - **Cliente (portal):** ator `customer` com a permissão `portal.access`, sempre restrito ao próprio
   `customer_id`; recursos de outros clientes respondem como inexistentes.
 - **Worker (`system`):** executa somente tarefas enfileiradas pela própria aplicação, sempre no contexto de

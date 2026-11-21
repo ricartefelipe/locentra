@@ -49,8 +49,9 @@ module Locentra
           @ids = ids
         end
 
+        # Fuso do contrato (o da emissão, igual ao da precificação da reserva); o atual só em termos sem o campo.
         def generate(tx, actor, contract, version:, reason:, amendments:, period:, now:)
-          zone = @organizations.find(tx, tx.tenant_id!).time_zone
+          zone = Domain::TimeZone.snapshot_or(contract.time_zone_identifier, @organizations.find(tx, tx.tenant_id!).time_zone)
           snapshot = C::Terms.document_snapshot(contract: contract, version: version, reason: reason, amendments: amendments,
                                                 current_period: period, zone: zone, now: now)
           bytes = @renderer.render(snapshot)
@@ -109,19 +110,22 @@ module Locentra
           contract
         end
 
+        # A política vem da reserva (congelada na criação) e o fuso é o de referência da reserva (o da
+        # precificação): cada contrato tem um único fuso, igual ao do preço.
         def build_terms(tx, org, reservation, conditions, now)
           customer = @customers.find(tx, reservation.customer_id)
           pricing = @reservations.pricing(tx, reservation.id)
+          zone = Domain::TimeZone.snapshot_or(pricing[:summary]["timezone"], org.time_zone)
           quote = reservation.quote_id && @quotes.find(tx, reservation.quote_id)
           quote_version = quote && @quotes.find_version(tx, quote.id, quote.approved_version)
           C::Terms.build(
-            organization: { "name" => org.name, "legal_document" => @contracts.organization_document(tx), "timezone" => org.timezone },
+            organization: { "name" => org.name, "legal_document" => @contracts.organization_document(tx), "timezone" => zone.identifier },
             customer: customer, address: @customers.addresses(tx, customer.id).first,
             branch: @organizations.branches(tx).find { |b| b.id == reservation.branch_id }, reservation: reservation,
             items: @reservations.items(tx, reservation.id), pricing: pricing[:summary],
-            adjustments_cents: pricing[:adjustments].sum { |a| a["amount_cents"] }, policy: org.cancellation_policy,
+            adjustments_cents: pricing[:adjustments].sum { |a| a["amount_cents"] }, policy: @reservations.cancellation_policy(tx, reservation.id),
             conditions: Domain::Organizations::Text.optional(conditions, max: 5000) || quote_version&.terms,
-            quote: quote && { "id" => quote.id, "code" => quote.code, "version" => quote.approved_version }, zone: org.time_zone, now: now
+            quote: quote && { "id" => quote.id, "code" => quote.code, "version" => quote.approved_version }, zone: zone, now: now
           )
         end
       end
@@ -212,8 +216,9 @@ module Locentra
 
         private
 
+        # Descrição e horários do aditivo no fuso do contrato (o da emissão).
         def amend(tx, current, contract, before, result, description, now)
-          zone = @organizations.find(tx, tx.tenant_id!).time_zone
+          zone = Domain::TimeZone.snapshot_or(contract.time_zone_identifier, @organizations.find(tx, tx.tenant_id!).time_zone)
           previous = @contracts.amendments(tx, contract.id).map { |row| row.slice(*AMENDMENT_KEYS) }
           version = contract.current_document_version + 1
           amendment = C::Terms.extension_amendment(number: previous.size + 1, from: before.period, to: result[:reservation].period,

@@ -183,20 +183,6 @@ module Locentra
           end
         end
 
-        class OrganizationController < Controller
-          def show(ctx, errors: {}, status: 200)
-            data = uc(:get_organization).call(ctx.actor)
-            render(ctx, "organization/show", title: "Organização", status: status, data: data, errors: errors)
-          end
-
-          def create_branch(ctx)
-            uc(:create_branch).call(ctx.actor, name: ctx.form["nome"], code: ctx.form["codigo"], address: ctx.form["endereco"])
-            redirect(ctx, "/organizacao", notice: "Filial criada.")
-          rescue Domain::ValidationError, Domain::Conflict, Domain::PlanLimitExceeded => e
-            show(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
-          end
-        end
-
         class HealthController < Controller
           def live(_ctx) = json(200, { "status" => "ok" })
 

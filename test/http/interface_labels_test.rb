@@ -57,6 +57,22 @@ class InterfaceLabelsTest < HttpTest
     assert_equal "valor padrão", labels.label(:changed_field, "default_amount_cents")
   end
 
+  def test_organization_settings_and_branch_labels_are_in_portuguese
+    labels = Locentra::Interfaces::HTTP::Labels
+    actions = { "organization.created" => "Organização criada", "organization.settings_updated" => "Configurações da organização alteradas",
+                "branch.created" => "Filial criada", "branch.updated" => "Filial alterada", "branch.deactivated" => "Filial desativada",
+                "branch.reactivated" => "Filial reativada" }
+    changed = { "timezone" => "fuso horário", "hold_minutes" => "validade padrão do bloqueio", "cancellation_policy" => "política de cancelamento",
+                "address" => "endereço", "name" => "nome" }
+    fields = { "fuso_horario" => "Fuso horário", "confirmar_fuso" => "Confirmação da troca de fuso",
+               "faixas_cancelamento" => "Faixas da política de cancelamento", "fuso" => "Fuso horário do formulário", "destino" => "Destino",
+               "faixas" => "Faixas de desconto" }
+
+    actions.each { |action, text| assert_equal text, labels.label(:audit_action, action) }
+    changed.each { |field, text| assert_equal text, labels.label(:changed_field, field) }
+    fields.each { |field, text| assert_equal text, labels.label(:field, field) }
+  end
+
   def test_error_summary_shows_field_names_and_transition_errors_use_status_labels
     get "/produtos/novo"
     post_form "/produtos", { "sku" => "X-1", "nome" => "Produto", "rastreamento" => "bulk", "preco_diaria" => "10,00", "caucao" => "-5" }

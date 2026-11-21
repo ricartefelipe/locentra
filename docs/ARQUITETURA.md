@@ -51,7 +51,7 @@ flowchart TB
 | Aplicação | `lib/locentra/application` | Casos de uso: autorização, coordenação do domínio, transações, portas | Domínio |
 | Infraestrutura | `lib/locentra/infrastructure` | PostgreSQL, pool, repositórios SQL, fila, SMTP, PDF, armazenamento, provedores, HTTP seguro | Domínio, Aplicação |
 | Interfaces | `lib/locentra/interfaces/{http,cli,worker}` | Rack/Puma, interface web, portal, API, CLI, worker | Aplicação |
-| Composição | `lib/locentra/system.rb`, `lib/locentra/wiring/` | Composition root explícito (montagens por módulo em `wiring/`); nenhuma conexão aberta na montagem | Todas |
+| Composição | `lib/locentra/system.rb`, `lib/locentra/wiring/` | Composition root explícito (montagens por módulo em `wiring/`: `commercial_terms.rb` e `organizations.rb`); nenhuma conexão aberta na montagem | Todas |
 
 Carregar `locentra/domain` e `locentra/application` não abre conexões, não inicia threads, não lê variáveis
 de ambiente e não carrega infraestrutura. A aplicação declara as exceções das portas que os adaptadores
@@ -66,6 +66,7 @@ adaptadores de infraestrutura (cifragem, armazenamento, HTTP seguro, Asaas) no m
 | Contexto | Domínio | Casos de uso | Documentação |
 |---|---|---|---|
 | Organizações e identidade | `identity.rb`, `organizations.rb` | `identity.rb`, `organizations.rb`, `integrations.rb` | [Permissões](PERMISSOES.md), [Isolamento](ISOLAMENTO.md) |
+| Configurações da organização e filiais | `organizations.rb` (`Organization`, `Branch`), `organization_settings.rb` (`Settings`, `CancellationPolicy`) | `organization_settings.rb` (`BranchGuard`, configurações e filiais), montados por `wiring/organizations.rb` | [Módulo](modulos/configuracoes-organizacao.md) |
 | Clientes | `customers.rb` | `customers.rb` | — |
 | Catálogo e ativos | `catalog.rb` | `catalog.rb` | [Máquinas de estado](MAQUINAS-DE-ESTADO.md) |
 | Disponibilidade e reservas | `availability.rb`, `reservations.rb` | `availability.rb`, `reservations.rb` | [Motor de disponibilidade](DISPONIBILIDADE.md) |

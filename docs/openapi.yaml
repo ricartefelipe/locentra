@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Locentra API
-  version: "1.1"
+  version: "1.2"
   description: |
     API versionada do Locentra. Autenticação por credencial de integração (`Authorization: Bearer lcn_...`)
     com escopos por permissão. O tenant é determinado pela credencial, nunca por parâmetros.
@@ -19,11 +19,35 @@ info:
     de cupom e de tarifa aceitam também o código. Os erros de validação vêm em `error.details.fields`, com os
     nomes de campo das regras de negócio (por exemplo `codigo`, `valor`, `valido_ate`, `maximo_usos`,
     `subtotal_minimo`, `desconto`, `motivo`, `encerrar_em`, `valor_padrao`, `tarifas`).
+
+    A organização do token (configurações e filiais) é consultada em `GET /organization`, com o escopo
+    `organization.read`. Não há alteração das configurações nem das filiais pela API: a troca do fuso horário
+    exige leitura das consequências e confirmação por uma pessoa na interface web, e a auditoria liga cada
+    alteração a um usuário. Credenciais criadas antes desta versão não recebem `organization.read`: é preciso
+    criar outra credencial com o escopo.
 servers:
   - url: /api/v1
 security:
   - bearer: []
 paths:
+  /organization:
+    get:
+      summary: Organização do token com configurações e filiais
+      description: >-
+        Escopo `organization.read`. A organização é sempre a da credencial. `settings` traz a validade padrão do
+        bloqueio temporário (usada quando `hold_minutes` não é informado na criação de reserva), a política de
+        cancelamento vigente para reservas e versões de orçamento novas e o texto de cada faixa. Os indicadores
+        `*_default` comparam o valor com o padrão do sistema. As filiais incluem as inativas, com `active` e
+        `deactivated_at`. Somente leitura: as configurações são alteradas pela interface web.
+      operationId: getOrganization
+      responses:
+        "200":
+          description: Organização
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Organization" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /availability:
     get:
       summary: Disponibilidade por período
@@ -156,7 +180,10 @@ paths:
         liberado se ela for cancelada ou expirar). `fees` aplica tarifas adicionais: tarifa do catálogo pelo valor
         padrão não exige outro escopo; valor diferente do padrão e tarifa avulsa exigem `fees.override` (`403`).
         Credenciais não reduzem tarifas abaixo do valor padrão. As condições negociadas vigentes do cliente são
-        aplicadas automaticamente.
+        aplicadas automaticamente. Sem `hold_minutes`, o bloqueio usa a validade padrão da organização. A reserva
+        guarda a política de cancelamento vigente na criação. Filial inexistente responde `404` ("filial não
+        encontrada"); filial inativa responde `422` com `filial` em `error.details.fields` ("filial inativa:
+        escolha uma filial ativa").
       operationId: createReservation
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -685,6 +712,55 @@ components:
             message: { type: string }
             details: { type: object }
             request_id: { type: string }
+    Organization:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string, description: Identificador da organização (não muda) }
+        time_zone: { type: string, example: America/Sao_Paulo, description: Fuso horário IANA da organização }
+        time_zone_label: { type: string, example: "Brasília (SP, RJ, MG, ES, PR, SC, RS, GO, DF)" }
+        status: { type: string, enum: [active, suspended, closed] }
+        lock_version: { type: integer, description: Versão das configurações (controle otimista da interface web) }
+        settings: { $ref: "#/components/schemas/OrganizationSettings" }
+        branches: { type: array, items: { $ref: "#/components/schemas/Branch" } }
+    OrganizationSettings:
+      type: object
+      properties:
+        hold_minutes: { type: integer, minimum: 5, maximum: 1440, description: Validade padrão do bloqueio temporário em minutos }
+        hold_minutes_default: { type: boolean, description: Verdadeiro quando a validade é a padrão do sistema (30 minutos) }
+        hold_minutes_limits:
+          type: object
+          properties:
+            min: { type: integer, example: 5 }
+            max: { type: integer, example: 1440 }
+        cancellation_policy: { $ref: "#/components/schemas/CancellationPolicy" }
+        cancellation_policy_default: { type: boolean, description: Verdadeiro quando a política é a padrão do sistema }
+        cancellation_terms:
+          type: array
+          description: Texto de cada faixa, da maior para a menor antecedência
+          items: { type: string }
+    CancellationPolicy:
+      type: object
+      description: >-
+        Faixas ordenadas da maior para a menor antecedência (de 1 a 6, uma delas de 0 h). A multa da faixa vale da
+        antecedência informada até a faixa seguinte e não diminui à medida que o início se aproxima.
+      properties:
+        tiers: { type: array, minItems: 1, maxItems: 6, items: { $ref: "#/components/schemas/CancellationTier" } }
+    CancellationTier:
+      type: object
+      properties:
+        min_hours_before: { type: integer, minimum: 0, maximum: 8760, description: Antecedência mínima em horas inteiras }
+        fee_bps: { type: integer, minimum: 0, maximum: 10000, description: Multa em pontos-base sobre o valor contratado }
+    Branch:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, description: Código da filial (não muda) }
+        name: { type: string }
+        address: { type: [string, "null"] }
+        active: { type: boolean }
+        deactivated_at: { type: [string, "null"], format: date-time }
     Customer:
       type: object
       properties:
@@ -761,6 +837,9 @@ components:
           type: array
           description: Ajustes de valor registrados depois da criação, em ordem cronológica (presente no detalhe)
           items: { $ref: "#/components/schemas/ReservationAdjustment" }
+        cancellation_policy:
+          description: Política de cancelamento congelada na criação da reserva (presente no detalhe)
+          allOf: [{ $ref: "#/components/schemas/CancellationPolicy" }]
     ReservationAdjustment:
       type: object
       properties:

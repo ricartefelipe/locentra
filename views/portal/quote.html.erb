@@ -42,6 +42,7 @@
       <%= partial("shared/pricing_summary", pricing: v.pricing, items: v.items, audience: :customer, total: v.total) %>
       <dt>Caução prevista</dt><dd><%= money(v.deposit) %></dd>
     </dl>
+    <%= partial("shared/cancellation_policy", policy: v.cancellation_policy, title: "Política de cancelamento desta versão") %>
   </section>
   <section class="panel" aria-labelledby="decisao-titulo">
     <h2 id="decisao-titulo">Sua decisão</h2>

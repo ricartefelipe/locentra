@@ -4,7 +4,7 @@
 </header>
 <form method="get" action="/disponibilidade" class="filters">
   <label for="filial">Filial</label>
-  <select id="filial" name="filial"><% @branches.each do |b| %><option value="<%= b.id %>"<%= selected(@branch.id, b.id) %>><%= b.name %></option><% end %></select>
+  <select id="filial" name="filial"><%= branch_options(@branches, @branch&.id, active_only: false) %></select>
   <label for="inicio">A partir de</label><input id="inicio" name="inicio" type="date" value="<%= @start.iso8601 %>">
   <label for="dias">Dias</label>
   <select id="dias" name="dias"><% [7, 14, 31].each do |d| %><option value="<%= d %>"<%= selected(@days, d) %>><%= d %></option><% end %></select>

@@ -225,7 +225,8 @@ Os passos 1 a 4 foram exercitados na atualização da 1.0.0 para a 1.1.0 (regist
 construídas localmente; o download da imagem publicada no GHCR não foi exercitado, porque a publicação não
 está habilitada no repositório.
 
-Versões com verificação prévia ou restrição de retorno têm seção própria: migration 0015 na seção 13.
+Versões com verificação prévia ou restrição de retorno têm seção própria: migration 0015 na seção 13 e
+migration 0016 na seção 14.
 
 ## 13. Atualização para a migration 0015 (condições comerciais) — exercitado em 21/11/2026
 
@@ -369,3 +370,120 @@ worker da 1.0.0 ficaram em execução durante a migration.
 No exercício, o Compose da 1.1.0 foi executado a partir de outro diretório, o que recriou o contêiner do
 PostgreSQL (o caminho montado de `docker/postgres/init` mudou) sem perda de dados, porque o volume `pgdata`
 é o mesmo. Numa atualização feita a partir do mesmo checkout isso não ocorre.
+
+## 14. Atualização para a migration 0016 (configurações da organização) — exercitado em 21/11/2026
+
+A migration `0016_configuracoes_organizacao.sql` é aplicada numa única transação. A atualização a partir do
+esquema da 0015, com dados no formato da 1.1.0 (política personalizada em `settings`, `settings` vazio, valores
+JSON `null`, filial inativa, reservas com e sem contrato e versão de orçamento enviada), é coberta por
+`test/repository/migration_0016_test.rb`, inclusive o aborto com diagnóstico. O procedimento abaixo foi
+exercitado num ambiente Compose com dados da 1.1.0; o registro está na seção 14.5.
+
+### 14.1 Verificação prévia (antes do passo 2 da seção 12)
+
+A 0016 confere o formato de `organizations.settings` antes de alterar qualquer coisa. Se encontrar uma
+organização com `settings` que não seja objeto JSON, com `cancellation_policy` sem `tiers` (lista de 1 a 6
+faixas), com faixa sem `min_hours_before` ou `fee_bps` numéricos ou com `hold_minutes` fora de 5 a 1440,
+**aborta** com
+`migração 0016: configurações (settings) fora do formato esperado nas organizações …` e nada é alterado. A
+1.1.0 não grava `settings`, então isso só ocorre com alteração manual. Confira antes com `locentra_backup`
+(a consulta aplica as mesmas regras da migration e é conferida por
+`test/repository/organization_settings_repository_test.rb`):
+
+```sql
+-- psql "postgres://locentra_backup:<senha>@<host>:5432/locentra"
+SELECT id, settings
+  FROM organizations
+ WHERE jsonb_typeof(settings) <> 'object'
+    OR (NULLIF(settings -> 'cancellation_policy', 'null'::jsonb) IS NOT NULL
+        AND NOT CASE WHEN jsonb_typeof(settings -> 'cancellation_policy' -> 'tiers') = 'array'
+                     THEN jsonb_array_length(settings -> 'cancellation_policy' -> 'tiers') BETWEEN 1 AND 6
+                          AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(settings -> 'cancellation_policy' -> 'tiers') t
+                                           WHERE jsonb_typeof(t -> 'min_hours_before') IS DISTINCT FROM 'number'
+                                              OR jsonb_typeof(t -> 'fee_bps') IS DISTINCT FROM 'number')
+                     ELSE false END)
+    OR (NULLIF(settings -> 'hold_minutes', 'null'::jsonb) IS NOT NULL
+        AND NOT ((settings ->> 'hold_minutes') ~ '^\d{1,4}$' AND (settings ->> 'hold_minutes')::int BETWEEN 5 AND 1440));
+```
+
+Para cada linha, corrija `settings` com o proprietário (por exemplo, removendo a chave inválida com
+`settings - 'hold_minutes'`) ou restaure o valor anterior conhecido. Valores JSON `null` não impedem a
+migration: são tratados como ausentes e removidos.
+
+### 14.2 Aplicação
+
+- Faça o backup (seção 3) e aplique a migration no passo 2 da seção 12, **antes** de substituir web e worker.
+  A 1.1.0 continua funcionando sobre o esquema da 0016: os gatilhos de preenchimento gravam a política da
+  organização (ou a padrão) nas reservas e versões que ela inserir sem a coluna.
+- A migration mantém travas exclusivas em `organizations`, `branches`, `reservations`, `quote_versions` e
+  `contracts` até o commit. A duração é dominada pelas verificações das CHECKs novas (varredura de
+  `reservations` e `quote_versions`, sem reescrita das tabelas) e pelos preenchimentos direcionados
+  (normalmente nenhuma linha). **Toda requisição da 1.1.0 espera durante a migration**, porque o
+  autenticador lê `organizations`. Em bases grandes, use uma janela de manutenção; nas demais, um horário de
+  pouco movimento. Limite a espera pelas travas para não acumular requisições atrás de uma transação longa:
+
+  ```bash
+  docker run --rm -e APP_ENV=production -e MIGRATION_DATABASE_URL=... -e PGOPTIONS='-c lock_timeout=5s' \
+    ghcr.io/<repositório>:X.Y.Z ruby bin/locentra-admin db:migrate
+  ```
+
+  Se a migration falhar por `lock_timeout`, nada é aplicado; repita quando as transações longas terminarem.
+- **Não altere configurações nem filiais até todas as instâncias estarem na versão nova.** Durante a troca,
+  uma instância 1.1.0 não respeita filiais desativadas e emite contratos com a política atual de `settings`.
+- Credenciais existentes não recebem `organization.read`; crie credenciais novas para as integrações e rotinas
+  de CLI que vão consultar a organização.
+- Depois da troca, confira `/health/ready` e a métrica `domain_conflicts_total` (códigos `stale_organization`,
+  `stale_branch`, `last_active_branch` e `branch_in_use`).
+
+### 14.3 Retorno à versão 1.1.0
+
+O esquema da 0016 é tolerado pela 1.1.0 (colunas novas com default ou preenchidas pelos gatilhos; nenhuma
+coluna renomeada ou removida). O que muda é a regra:
+
+- a 1.1.0 ignora `reservations.cancellation_policy` e `quote_versions.cancellation_policy` e emite contratos
+  com a política atual de `settings`, não com a registrada na reserva;
+- a 1.1.0 não conhece a gestão de filiais: lista também as inativas nos formulários, recusa as criações nelas
+  com "filial não encontrado" (inclusive baixa e perda de estoque, que a versão nova aceita), não confere a
+  filial no envio de orçamento sem bloqueio e não oferece edição, desativação nem reativação;
+- reservas antigas voltam a usar o fuso atual em extensões, multas e cobranças.
+
+Antes de voltar, restaure as configurações anteriores (política e validade) na tela da versão nova, para que
+os contratos emitidos durante o retorno usem a mesma política das reservas, ou aceite que contratos emitidos
+durante o retorno não respeitem o snapshot. Confira com `locentra_backup` quantas reservas têm política
+diferente da atual da organização:
+
+```sql
+SELECT r.organization_id, count(*) AS reservas_com_politica_diferente
+  FROM reservations r JOIN organizations o ON o.id = r.organization_id
+ WHERE r.status IN ('requested', 'held', 'confirmed')
+   AND NOT EXISTS (SELECT 1 FROM contracts c WHERE c.organization_id = r.organization_id AND c.reservation_id = r.id)
+   AND r.cancellation_policy IS DISTINCT FROM COALESCE(o.settings -> 'cancellation_policy', app_default_cancellation_policy())
+ GROUP BY 1;
+```
+
+### 14.4 Remoção futura dos gatilhos de preenchimento
+
+Os gatilhos `reservations_cancellation_policy_fill` e `quote_versions_cancellation_policy_fill` existem para as
+inserções de instâncias 1.1.0 durante a implantação gradual e o retorno. A aplicação 1.2 sempre informa a
+coluna (keyword obrigatória no repositório, coberta por teste). Quando não houver mais retorno possível à
+1.1.0, uma migration futura remove os dois gatilhos e a função `app_cancellation_policy_fill()`; os gatilhos de
+imutabilidade e as CHECKs permanecem.
+
+### 14.5 Registro do exercício (21/11/2026, PostgreSQL 18.7, imagem construída a partir da branch da 1.2.0)
+
+Ambiente Compose da 1.1.0 (o mesmo do registro da seção 13.5, já na 0015, com seed, dados legados e um
+anexo), com web e worker da 1.1.0 em execução. Para exercitar o aborto, `settings` de uma organização foi
+alterado manualmente para `{"hold_minutes": 2}`.
+
+| Passo | Resultado |
+|---|---|
+| 14.1, verificação prévia (`locentra_backup`) | a organização alterada listada com o `settings` inválido |
+| `db:migrate` antes da correção | abortou com `migração 0016: configurações (settings) fora do formato esperado nas organizações …`; o esquema continuou na 0015 |
+| Correção com o proprietário (`settings - 'hold_minutes'`, com contexto da organização) | a verificação prévia voltou vazia |
+| Backup da seção 3 | gravado, com 1 arquivo de anexo |
+| `db:migrate` com `PGOPTIONS='-c lock_timeout=5s'` e a 1.1.0 em execução | 0016 aplicada em cerca de 7 s (incluindo a partida do contêiner); a 1.1.0 continuou com `/health/ready` e a tela de entrada em 200 |
+| Troca de web e worker para a versão nova | os dois `healthy`; `/health/ready` 200 |
+| **Organização → Editar configurações** | validade do bloqueio alterada de 30 para 45 minutos; `organization.settings_updated` na auditoria |
+| Reenvio do formulário com a versão anterior (outra aba) | 409 com "as configurações da organização foram alteradas por outra operação; revise os valores atuais" |
+| 14.3, consulta de retorno | nenhuma reserva com política diferente da atual |
+| Retorno à 1.1.0 e volta à versão nova | os dois sentidos `healthy` e `/health/ready` 200; parada final de web e worker com código 0 |

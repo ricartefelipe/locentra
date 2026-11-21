@@ -43,6 +43,8 @@ module Locentra
 
       COMMANDS = [
         Command.new(words: %w[whoami], handler: :whoami, argument: nil, options: [], summary: "Credencial, organização e escopos em uso"),
+        Command.new(words: %w[organization show], handler: :organization_show, argument: nil, options: [],
+                    summary: "Configurações da organização (fuso, bloqueio temporário, política de cancelamento) e filiais"),
         Command.new(words: %w[availability], handler: :availability, argument: nil, options: %i[branch starts ends products],
                     required: %i[starts ends], summary: "Disponibilidade por filial e período"),
         Command.new(words: %w[reservations list], handler: :reservations_list, argument: nil,

@@ -35,15 +35,19 @@ module Locentra
             "coupon.deactivated" => "Cupom desativado", "coupon.reactivated" => "Cupom reativado", "coupon.deleted" => "Cupom excluído",
             "fee.created" => "Tarifa cadastrada", "fee.updated" => "Tarifa alterada", "fee.deactivated" => "Tarifa desativada",
             "fee.reactivated" => "Tarifa reativada", "price_agreement.created" => "Condição negociada cadastrada",
-            "price_agreement.ended" => "Condição negociada encerrada"
+            "price_agreement.ended" => "Condição negociada encerrada", "organization.created" => "Organização criada",
+            "organization.settings_updated" => "Configurações da organização alteradas", "branch.created" => "Filial criada",
+            "branch.updated" => "Filial alterada", "branch.deactivated" => "Filial desativada", "branch.reactivated" => "Filial reativada"
           },
           coupon_kind: Domain::Pricing::COUPON_KINDS, coupon_status: Domain::Pricing::COUPON_STATUSES,
           agreement_status: Domain::Pricing::AGREEMENT_STATUSES, fee_status: Domain::Pricing::FEE_STATUSES,
           redemption_state: Domain::Pricing::REDEMPTION_STATES,
-          # Campos alterados registrados na auditoria de cupons e tarifas (`changes`).
+          # Campos alterados registrados na auditoria (`changes`) de cupons, tarifas, configurações e filiais.
           changed_field: { "description" => "descrição", "valid_from" => "início da vigência", "valid_until" => "fim da vigência",
                            "max_redemptions" => "máximo de usos", "min_subtotal_cents" => "subtotal mínimo", "active" => "situação",
-                           "name" => "nome", "default_amount_cents" => "valor padrão" },
+                           "name" => "nome", "default_amount_cents" => "valor padrão", "timezone" => "fuso horário",
+                           "hold_minutes" => "validade padrão do bloqueio", "cancellation_policy" => "política de cancelamento",
+                           "address" => "endereço" },
           actor_type: { "user" => "Usuário", "api" => "Integração (API)", "cli" => "CLI", "system" => "Sistema", "customer" => "Cliente (portal)" },
           field: {
             "nome" => "Nome", "email" => "E-mail", "senha" => "Senha", "organizacao" => "Nome da empresa", "plano" => "Plano",
@@ -62,7 +66,9 @@ module Locentra
             "severidade" => "Severidade", "patrimonio" => "Patrimônio", "codigo" => "Código", "endereco" => "Endereço",
             "telefone" => "Telefone", "periodo" => "Período", "tarifas" => "Tarifas adicionais", "maximo_usos" => "Máximo de usos",
             "subtotal_minimo" => "Subtotal mínimo", "valido_de" => "Início da vigência", "valido_ate" => "Fim da vigência",
-            "valor_padrao" => "Valor padrão", "encerrar_em" => "Encerrar em", "busca" => "Busca", "ordenacao" => "Ordenação"
+            "valor_padrao" => "Valor padrão", "encerrar_em" => "Encerrar em", "busca" => "Busca", "ordenacao" => "Ordenação",
+            "fuso_horario" => "Fuso horário", "confirmar_fuso" => "Confirmação da troca de fuso",
+            "faixas_cancelamento" => "Faixas da política de cancelamento", "fuso" => "Fuso horário do formulário", "destino" => "Destino"
           }
         }.freeze
 
