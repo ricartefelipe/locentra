@@ -35,11 +35,11 @@ module Locentra
           raise Domain::Conflict.new("inspeção já decidida por outra operação", code: "stale_inspection") unless count == 1
         end
 
-        def list(tx, status: "pending", limit: 100)
-          tx.query(<<~SQL, [tx.tenant_id!, limit])
+        def list(tx, status: "pending", limit: 100, offset: 0)
+          tx.query(<<~SQL, [tx.tenant_id!, limit, offset])
             SELECT i.id, i.status, i.reason, i.quantity, i.created_at, i.decided_at, i.decision_notes, i.asset_id, i.stock_pool_id,
-                   i.return_line_id, i.maintenance_order_id, i.reservation_id, p.name AS product_name, p.sku, a.tag, b.code AS branch_code,
-                   r.code AS reservation_code, m.code AS maintenance_code
+                   i.return_line_id, i.maintenance_order_id, i.reservation_id, i.product_id, i.branch_id, p.name AS product_name, p.sku, a.tag,
+                   b.code AS branch_code, r.code AS reservation_code, m.code AS maintenance_code
               FROM inspections i
               JOIN products p ON p.organization_id = i.organization_id AND p.id = i.product_id
               JOIN branches b ON b.organization_id = i.organization_id AND b.id = i.branch_id
@@ -47,8 +47,12 @@ module Locentra
               LEFT JOIN reservations r ON r.organization_id = i.organization_id AND r.id = i.reservation_id
               LEFT JOIN maintenance_orders m ON m.organization_id = i.organization_id AND m.id = i.maintenance_order_id
              WHERE i.organization_id = $1 AND #{STATUSES.fetch(status)}
-             ORDER BY COALESCE(i.decided_at, i.created_at) DESC, i.id LIMIT $2
+             ORDER BY COALESCE(i.decided_at, i.created_at) DESC, i.id LIMIT $2 OFFSET $3
           SQL
+        end
+
+        def count(tx, status:)
+          tx.query_value("SELECT count(*) FROM inspections i WHERE i.organization_id = $1 AND #{STATUSES.fetch(status)}", [tx.tenant_id!])
         end
 
         private

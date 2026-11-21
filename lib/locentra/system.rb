@@ -273,6 +273,7 @@ module Locentra
       uc[:reject_inspection] = inspections::RejectInspection.new(**common, inspections: r[:inspections], catalog: r[:catalog], desk: desk,
                                                                            ledger: ledger, relocation: relocation, alert_book: alert_book, audit: audit)
       uc[:list_inspections] = inspections::ListInspections.new(uow: uow, inspections: r[:inspections])
+      uc[:search_inspections] = inspections::SearchInspections.new(uow: uow, inspections: r[:inspections])
       uc[:create_damage_report] = inspections::CreateDamageReport.new(**common, fulfillment: r[:fulfillment], damage_reports: r[:damage_reports],
                                                                                 organizations: r[:organizations], audit: audit, ids: ids)
       uc[:revise_damage_report] = inspections::ReviseDamageReport.new(**common, damage_reports: r[:damage_reports], audit: audit)
@@ -310,6 +311,7 @@ module Locentra
                                                                  allocations: allocations, availability: r[:availability], coverage: coverage,
                                                                  queue: queue, audit: audit)
       uc[:resolve_alert] = overdue::ResolveAlert.new(**common, alerts: r[:alerts], audit: audit)
+      uc[:list_alerts] = overdue::ListAlerts.new(uow: uow, alerts: r[:alerts])
       uc[:operations_board] = overdue::OperationsBoard.new(**common, operations: r[:operations], alerts: r[:alerts], inspections: r[:inspections],
                                                                      damage_reports: r[:damage_reports], transfers: r[:transfers],
                                                                      organizations: r[:organizations])
@@ -364,6 +366,7 @@ module Locentra
       uc[:preview_contract_cancellation] = A::Contracts::PreviewCancellation.new(uow: uow, contracts: r[:contracts], clock: clock)
       uc[:list_contracts] = A::Contracts::ListContracts.new(uow: uow, contracts: r[:contracts])
       uc[:get_contract] = A::Contracts::GetContract.new(uow: uow, contracts: r[:contracts], reservations: r[:reservations], clock: clock)
+      uc[:document_file] = A::Contracts::DocumentFile.new(uow: uow, contracts: r[:contracts], download: uc[:download_attachment])
       uc[:reservation_links] = A::Contracts::ReservationLinks.new(uow: uow, contracts: r[:contracts], quotes: r[:quotes])
     end
 

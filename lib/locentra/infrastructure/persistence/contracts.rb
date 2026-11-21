@@ -88,6 +88,14 @@ module Locentra
           SQL
         end
 
+        # Versão do documento para download (sem os dados do aceite e sem o snapshot).
+        def find_document(tx, contract_id, version)
+          tx.query_one(<<~SQL, [tx.tenant_id!, contract_id, version])
+            SELECT d.id, d.version, d.reason, d.attachment_id, d.sha256, d.generated_at
+              FROM contract_documents d WHERE d.organization_id = $1 AND d.contract_id = $2 AND d.version = $3
+          SQL
+        end
+
         def lock_document(tx, contract_id, version)
           tx.query_one(<<~SQL, [tx.tenant_id!, contract_id, version])
             SELECT #{DOCUMENT_COLUMNS} FROM contract_documents d
