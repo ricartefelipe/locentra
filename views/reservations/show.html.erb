@@ -99,11 +99,7 @@
   <section class="panel">
     <h2>Valores</h2>
     <dl class="details">
-      <dt>Subtotal</dt><dd><%= money(pricing["subtotal_cents"].to_i) %></dd>
-      <% if pricing["coupon_code"] %><dt>Cupom <%= pricing["coupon_code"] %></dt><dd>−<%= money(pricing["coupon_discount_cents"]) %></dd><% end %>
-      <% if pricing["manual_discount_cents"].to_i.positive? %><dt>Desconto manual</dt><dd>−<%= money(pricing["manual_discount_cents"]) %></dd><% end %>
-      <% Array(pricing["fees"]).each do |fee| %><dt><%= fee["description"] %></dt><dd><%= money(fee["amount_cents"]) %></dd><% end %>
-      <dt>Total contratado</dt><dd><strong><%= money(r.total) %></strong></dd>
+      <%= partial("shared/pricing_summary", pricing: pricing, items: @data[:items], audience: :staff, total: r.total, total_label: "Total contratado") %>
       <dt>Caução prevista</dt><dd><%= money(r.deposit) %></dd>
       <% @data[:pricing][:adjustments].each do |adj| %>
         <dt>Ajuste (<%= label(:adjustment_kind, adj["kind"]) %>)</dt><dd><%= money(adj["amount_cents"]) %> em <%= datetime(adj["created_at"]) %></dd>
@@ -117,13 +113,14 @@
 <section class="panel">
   <h2>Itens e alocações</h2>
   <table class="table">
-    <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col" class="num">Total</th><th scope="col">Alocação</th></tr></thead>
+    <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th><th scope="col">Alocação</th></tr></thead>
     <tbody>
       <% @data[:items].each do |item| %>
         <tr>
           <td><%= item["name"] %> <span class="muted"><%= item["sku"] %></span></td>
           <td><%= item["quantity"] %></td>
           <td><%= item["pricing"]["description"] %></td>
+          <td><%= negotiated_discount(item) %></td>
           <td class="num"><%= money(item["total_cents"]) %></td>
           <td>
             <% assets = @data[:allocations][:assets].select { |a| a["reservation_item_id"] == item["id"] && a["active"] } %>

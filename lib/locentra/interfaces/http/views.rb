@@ -171,6 +171,14 @@ module Locentra
         # Desconto de um cupom (cadastro ou snapshot): percentual em pontos-base ou valor fixo em centavos.
         def coupon_discount(kind, value) = kind == "percent" ? percent(value) : money(value)
 
+        # Condição negociada aplicada a uma linha de reserva (snapshot em "pricing"), de orçamento ou de
+        # contrato: "−8% (−R$ 72,00)"; sem condição (inclusive em snapshots antigos), "—".
+        def negotiated_discount(item)
+          data = item["pricing"].is_a?(Hash) ? item["pricing"] : item
+          cents = data["negotiated_discount_cents"].to_i
+          cents.positive? ? "−#{percent(data["negotiated_discount_bps"].to_i)} (−#{money(cents)})" : "—"
+        end
+
         def asset_status(status) = Domain::Catalog::ASSET_STATUSES.fetch(status.to_s) { Labels.label(:field, status) }
 
         def status_badge(status, label)
@@ -218,6 +226,13 @@ module Locentra
         def keyed_value(values, group, key)
           bucket = values.is_a?(Hash) ? values[group] : nil
           bucket.is_a?(Hash) ? bucket[key] : nil
+        end
+
+        # Linhas de campos repetidos (nome[]) reenviados, alinhadas pela posição: uma lista de valores por
+        # linha, na ordem dos nomes informados.
+        def value_rows(values, *names)
+          columns = names.map { |name| Array(values[name]) }
+          Array.new(columns.map(&:size).max.to_i) { |index| columns.map { |column| column[index] } }
         end
 
         # Mantém aberto o bloco <details> cujo formulário tem erro em algum dos campos informados.

@@ -104,6 +104,35 @@ module Locentra
           end
         end
 
+        # Pedidos de tarifa dos formulários de reserva e orçamento. Linha do catálogo sem tarifa escolhida
+        # é ignorada e valor em branco vale o padrão da tarifa; linha avulsa exige descrição e valor. Os
+        # erros de formato vão para o campo "tarifas".
+        def fee_requests_from(form)
+          catalog = paired(form["tarifa_id"], form["tarifa_valor"]).filter_map do |fee_id, amount|
+            next if fee_id.to_s.strip.empty?
+
+            Domain::Pricing::FeeRequest.catalog(fee_id: fee_id, amount: amount.to_s.strip.empty? ? nil : money!(amount.to_s.strip, "tarifas"))
+          end
+          catalog + custom_fee_requests(form)
+        end
+
+        def custom_fee_requests(form)
+          paired(form["avulsa_descricao"], form["avulsa_valor"]).filter_map do |description, amount|
+            blank = [description, amount].map { |value| value.to_s.strip.empty? }
+            next if blank.all?
+            raise Domain::ValidationError.field("tarifas", "informe descrição e valor da tarifa avulsa") if blank.any?
+
+            Domain::Pricing::FeeRequest.custom(description: description, amount: money!(amount.to_s.strip, "tarifas"))
+          end
+        end
+
+        # Pares de campos repetidos (nome[]) alinhados pela posição, mesmo com listas de tamanhos diferentes.
+        def paired(first, second)
+          left = Array(first)
+          right = Array(second)
+          Array.new([left.size, right.size].max) { |index| [left[index], right[index]] }
+        end
+
         def session_cookie(response, token)
           response.set_cookie(Authenticator.cookie_name(@system.config),
                               value: token, path: "/", httponly: true, secure: secure_cookies?, same_site: :lax)

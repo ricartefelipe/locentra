@@ -189,18 +189,21 @@ module Locentra
             org = uc(:get_organization).call(ctx.actor)
             customers = uc(:list_customers).call(ctx.actor, status: "active", limit: 100).items
             products = uc(:list_products).call(ctx.actor, limit: 100).items.select(&:active)
+            fees = uc(:list_fees).call(ctx.actor, status: "active", limit: 100).items
             render(ctx, "reservations/new", title: "Nova reserva", status: status, branches: org[:branches], customers: customers, products: products,
-                                            values: ctx.get? ? ctx.rack.GET : ctx.form, errors: errors, shortages: shortages,
+                                            fees: fees, values: ctx.get? ? ctx.rack.GET : ctx.form, errors: errors, shortages: shortages,
                                             hold_minutes: org[:organization].hold_minutes)
           end
 
+          # Ajuste de tarifa sem permissão ou acima do limite (AccessDenied) volta ao formulário, como o
+          # desconto manual acima do limite do papel.
           def create(ctx)
             f = ctx.form
             reservation = uc(:create_reservation).call(ctx.actor, {
               customer_id: f["cliente_id"], branch_id: f["filial_id"], period: period_from(ctx, f["inicio"], f["fim"]),
               lines: lines_from(f["produto"], f["quantidade"]), mode: f["modo"].to_s,
               hold_minutes: f["validade_bloqueio"].to_s.empty? ? nil : f["validade_bloqueio"],
-              notes: f["observacoes"], coupon_code: f["cupom"],
+              notes: f["observacoes"], coupon_code: f["cupom"], fees: fee_requests_from(f),
               manual_discount_bps: discount_bps(f["desconto"])
             }.compact)
             redirect(ctx, "/reservas/#{reservation.id}", notice: "Reserva #{reservation.code} registrada (#{reservation.status_label}).")

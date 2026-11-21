@@ -29,8 +29,14 @@
     </dl>
     <h3>Itens</h3>
     <ul class="row-list">
-      <% terms["items"].each do |item| %><li><%= item["quantity"] %> × <%= item["name"] %> <span class="muted"><%= item["sku"] %> · <%= item["description"] %></span> — <%= money(item["total_cents"]) %></li><% end %>
+      <% terms["items"].each do |item| %>
+        <li><%= item["quantity"] %> × <%= item["name"] %> <span class="muted"><%= item["sku"] %> · <%= item["description"] %><% if item["negotiated_discount_cents"].to_i.positive? %> · condição negociada <%= negotiated_discount(item) %><% end %></span> — <%= money(item["total_cents"]) %></li>
+      <% end %>
     </ul>
+    <h3>Valores na emissão</h3>
+    <dl class="details">
+      <%= partial("shared/pricing_summary", pricing: terms["pricing"] || {}, items: terms["items"], audience: :staff, total: terms["total_cents"].to_i) %>
+    </dl>
     <h3>Política de cancelamento</h3>
     <ul>
       <% terms["cancellation_terms"].each do |text| %><li><%= text %></li><% end %>

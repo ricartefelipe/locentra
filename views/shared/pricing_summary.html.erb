@@ -1,0 +1,22 @@
+<%# Detalhamento de valores de um snapshot de preços (reserva, versão de orçamento ou termos de contrato), em pares
+    dt/dd para um <dl class="details">. Locais: pricing (resumo), items (linhas, para a condição negociada), audience
+    (:staff ou :customer), total (Money ou centavos) e total_label (padrão "Total"). A audiência :customer não recebe
+    origem da tarifa, valor padrão nem ligações internas. Chaves ausentes em snapshots antigos são toleradas. %>
+<% staff = @audience == :staff %>
+<% negotiated = Array(@items).sum { |item| (item["pricing"].is_a?(Hash) ? item["pricing"] : item)["negotiated_discount_cents"].to_i } %>
+<% coupon = @pricing["coupon"].is_a?(Hash) ? @pricing["coupon"] : {} %>
+<% coupon_code = coupon["code"] || @pricing["coupon_code"] %>
+<dt>Subtotal</dt>
+<dd><%= money(@pricing["subtotal_cents"].to_i) %><% if negotiated.positive? %><br><span class="muted">o subtotal já considera a condição negociada (−<%= money(negotiated) %>)</span><% end %></dd>
+<% if coupon_code %>
+  <dt>Cupom <% if staff && coupon["id"] && can?("coupons.read") %><a href="/cupons/<%= coupon["id"] %>"><%= coupon_code %></a><% else %><%= coupon_code %><% end %><% if coupon["kind"] == "percent" %> (<%= percent(coupon["value"].to_i) %>)<% end %></dt>
+  <dd>−<%= money(@pricing["coupon_discount_cents"].to_i) %></dd>
+<% end %>
+<% if @pricing["manual_discount_cents"].to_i.positive? %>
+  <dt><%= staff ? "Desconto manual" : "Desconto" %></dt><dd>−<%= money(@pricing["manual_discount_cents"]) %></dd>
+<% end %>
+<% Array(@pricing["fees"]).each do |fee| %>
+  <dt><%= fee["description"] %><% if staff && fee["source"] == "custom" %> <span class="muted">(avulsa)</span><% elsif staff && fee["default_amount_cents"] && fee["default_amount_cents"] != fee["amount_cents"] %> <span class="muted">(valor ajustado; padrão <%= money(fee["default_amount_cents"]) %>)</span><% end %></dt>
+  <dd><%= money(fee["amount_cents"].to_i) %></dd>
+<% end %>
+<dt><%= @total_label || "Total" %></dt><dd><strong><%= money(@total) %></strong></dd>

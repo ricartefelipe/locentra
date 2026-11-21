@@ -1,0 +1,83 @@
+<%# Tarifas adicionais dos formulários de reserva e orçamento. Variáveis: @fees (tarifas ativas e, na nova versão de
+    orçamento, também as da versão anterior), @values e @errors. Cada linha envia tarifa_id[] e tarifa_valor[] (em
+    branco vale o padrão). Sem a permissão de ajuste, valores ajustados e tarifas avulsas da versão anterior aparecem
+    como texto, com campos ocultos, e podem ser mantidos ou removidos. %>
+<% override = can?("fees.override") %>
+<% by_id = @fees.to_h { |fee| [fee.id, fee] } %>
+<% rows = value_rows(@values, "tarifa_id", "tarifa_valor") %>
+<% customs = value_rows(@values, "avulsa_descricao", "avulsa_valor") %>
+<% kept, choices = override ? [[], rows] : rows.partition { |_, amount| !amount.to_s.strip.empty? } %>
+<% choices = [[nil, nil]] if choices.empty? %>
+<fieldset class="full" data-line-group="tarifas">
+  <legend>Tarifas adicionais</legend>
+  <%= field_errors(@errors, "tarifas") %>
+  <% unless override || (kept.empty? && customs.empty?) %>
+    <ul class="row-list">
+      <% kept.each do |fee_id, amount| %>
+        <li data-kept-line>
+          <input type="hidden" name="tarifa_id[]" value="<%= fee_id %>"><input type="hidden" name="tarifa_valor[]" value="<%= amount %>">
+          <%= by_id[fee_id] ? by_id[fee_id].name : "Tarifa" %> · R$ <%= amount %>
+          <% if by_id[fee_id] %><span class="muted">(valor ajustado; padrão <%= money(by_id[fee_id].default_amount) %>)</span><% end %>
+          <button type="button" class="link-button" data-remove-kept>Remover</button>
+        </li>
+      <% end %>
+      <% customs.each do |description, amount| %>
+        <li data-kept-line>
+          <input type="hidden" name="avulsa_descricao[]" value="<%= description %>"><input type="hidden" name="avulsa_valor[]" value="<%= amount %>">
+          <%= description %> · R$ <%= amount %> <span class="muted">(avulsa)</span>
+          <button type="button" class="link-button" data-remove-kept>Remover</button>
+        </li>
+      <% end %>
+    </ul>
+    <p class="muted">Tarifas mantidas da versão anterior: continuam valendo como foram autorizadas, sem alteração de valor.</p>
+  <% end %>
+  <% if @fees.empty? %>
+    <p class="empty">Nenhuma tarifa ativa.<% if can?("fees.write") %> <a href="/tarifas/nova">Cadastrar tarifa</a><% end %></p>
+  <% else %>
+    <div data-lines>
+      <% choices.each_with_index do |(fee_id, amount), i| %>
+        <div class="line" data-line>
+          <label for="tarifa-<%= i %>">Tarifa</label>
+          <select id="tarifa-<%= i %>" name="tarifa_id[]">
+            <option value="">Nenhuma</option>
+            <% @fees.each do |fee| %>
+              <option value="<%= fee.id %>"<%= selected(fee_id, fee.id) %>><%= fee.active ? "#{fee.name} · #{money(fee.default_amount)}" : "#{fee.name} (inativa)" %></option>
+            <% end %>
+          </select>
+          <% if override %>
+            <label for="tarifa-valor-<%= i %>">Valor (R$)</label>
+            <input id="tarifa-valor-<%= i %>" name="tarifa_valor[]" inputmode="decimal" placeholder="padrão" value="<%= amount %>" aria-describedby="ajuda-tarifas">
+          <% else %>
+            <input type="hidden" name="tarifa_valor[]" value="">
+          <% end %>
+          <button type="button" class="link-button" data-remove-line>Remover</button>
+        </div>
+      <% end %>
+    </div>
+    <button type="button" data-add-line>Adicionar tarifa</button>
+  <% end %>
+  <% if override %>
+    <p class="muted" id="ajuda-tarifas">Valor em branco: vale o padrão da tarifa. Valor diferente do padrão fica registrado na auditoria; a redução é limitada a <%= percent(Locentra::Domain::Identity.discount_limit_bps(request.actor.role)) %> do padrão (limite de desconto do seu papel).</p>
+  <% else %>
+    <p class="muted">Tarifas são aplicadas pelo valor padrão. Valor diferente e tarifa avulsa exigem a permissão de ajustar tarifas (gerente, administrador ou proprietário).</p>
+  <% end %>
+</fieldset>
+<% if override %>
+  <% customs = [[nil, nil]] if customs.empty? %>
+  <fieldset class="full" data-line-group="avulsas">
+    <legend>Tarifas avulsas</legend>
+    <div data-lines>
+      <% customs.each_with_index do |(description, amount), i| %>
+        <div class="line" data-line>
+          <label for="avulsa-descricao-<%= i %>">Descrição</label>
+          <input id="avulsa-descricao-<%= i %>" class="wide" name="avulsa_descricao[]" maxlength="120" value="<%= description %>">
+          <label for="avulsa-valor-<%= i %>">Valor (R$)</label>
+          <input id="avulsa-valor-<%= i %>" name="avulsa_valor[]" inputmode="decimal" value="<%= amount %>">
+          <button type="button" class="link-button" data-remove-line>Remover</button>
+        </div>
+      <% end %>
+    </div>
+    <button type="button" data-add-line>Adicionar tarifa avulsa</button>
+    <p class="muted">Cobrança fora do catálogo, com descrição e valor próprios; a descrição aparece para o cliente. Linhas em branco são ignoradas.</p>
+  </fieldset>
+<% end %>
