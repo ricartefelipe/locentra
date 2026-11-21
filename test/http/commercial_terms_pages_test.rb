@@ -301,7 +301,7 @@ class CommercialTermsPagesTest < CommercialTermsHttpTest
     follow_redirect!
 
     assert_includes last_response.body, "Cupom atualizado."
-    assert_equal [{ "max_redemptions" => [10, 20] }], audit_events("coupon.updated").map { |event| event["details"]["changes"] }
+    assert_equal([{ "max_redemptions" => [10, 20] }], audit_events("coupon.updated").map { |event| event["details"]["changes"] })
     assert_equal "Linha 1\nLinha 2", coupon_data(coupon.id)[:coupon].description
   end
 
