@@ -338,19 +338,24 @@ class OperationsApiTest < ApiV1TestCase
       assert_equal "permissão necessária: reservations.read", error_message, path
     end
     stock = { "items" => [{ "line_id" => picking["lines"].first["id"], "quantity" => 2 }] }
-    [["/pickups/#{picking["id"]}/check", stock, "fulfillment.write"], ["/pickups/#{picking["id"]}/deliver", { "picker" => { "kind" => "customer" } }, "fulfillment.write"],
+    every = %w[reservations.read fulfillment.write inspections.write customers.read]
+    [["/pickups/#{picking["id"]}/check", stock, "fulfillment.write"],
+     ["/pickups/#{picking["id"]}/deliver", { "picker" => { "kind" => "customer" } }, "fulfillment.write"],
      ["/pickups/#{picking["id"]}/cancel", { "reason" => "Sem escopo" }, "fulfillment.write"],
      ["/reservations/#{reservation.id}/returns", { "entries" => [{ "pickup_line_id" => returned["lines"].first["pickup_line_id"], "outcome" => "ok" }] },
       "fulfillment.write"],
      ["/inspections/#{inspection}/approve", {}, "inspections.write"], ["/inspections/#{inspection}/reject", { "notes" => "Sem escopo" }, "inspections.write"]]
       .each do |path, body, permission|
-        post!(403, path, body, token: token(%w[reservations.read fulfillment.write inspections.write customers.read] - [permission]))
+        post!(403, path, body, token: token(every - [permission]))
 
         assert_error "forbidden"
         assert_equal "permissão necessária: #{permission}", error_message, path
       end
-    assert_equal ["picking", [0]], [get!(200, "/pickups/#{picking["id"]}")["status"], get!(200, "/pickups/#{picking["id"]}")["lines"].map { |row| row["checked_quantity"] }]
-    assert_equal [1, 2, 0], [count("SELECT count(*) FROM returns"), get!(200, "/inspections")["pagination"]["total"], count("SELECT count(*) FROM maintenance_orders")]
+    unchanged = get!(200, "/pickups/#{picking["id"]}")
+
+    assert_equal ["picking", [0]], [unchanged["status"], unchanged["lines"].map { |row| row["checked_quantity"] }]
+    assert_equal [1, 2, 0], [count("SELECT count(*) FROM returns"), get!(200, "/inspections")["pagination"]["total"],
+                             count("SELECT count(*) FROM maintenance_orders")]
   end
 
   # Isolamento -------------------------------------------------------------------------------------

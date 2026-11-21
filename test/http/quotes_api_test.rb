@@ -89,7 +89,7 @@ class QuotesApiTest < ApiV1TestCase
     assert_equal "approved", post!(200, "/quotes/#{id}/approve", { "version" => 2, "approver_name" => "Maria Compradora" }, token: write)["status"]
     converted = post!(201, "/quotes/#{id}/convert", {}, token: token(%w[quotes.write reservations.write]))
 
-    assert_equal ["converted", "confirmed"], [converted["quote"]["status"], converted["reservation"]["status"]]
+    assert_equal %w[converted confirmed], [converted["quote"]["status"], converted["reservation"]["status"]]
     assert_equal "rejected", post!(200, "/quotes/#{sent.id}/reject", { "reason" => "Preço acima do orçamento" }, token: write)["status"]
   end
 
