@@ -2,7 +2,7 @@
 
 module Locentra
   module Application
-    # Orçamentos: versões imutáveis precificadas com o Pricer (sem consumir cupons), envio com
+    # Orçamentos: versões imutáveis precificadas com o Pricer (sem cupons), envio com
     # política de bloqueio explícita, aprovação da versão atual, rejeição, expiração e conversão
     # idempotente em reserva usando o snapshot de preços da versão aprovada.
     module Quotes
@@ -35,7 +35,10 @@ module Locentra
       end
 
       # Monta e precifica o conteúdo de uma versão, sem gravar. Os preços vêm do catálogo vigente e
-      # do Pricer com `redeem: false`: o orçamento não consome cupons nem altera disponibilidade.
+      # do Pricer sem cupom (orçamentos não aplicam cupons) e sem alterar disponibilidade. Devolve a
+      # versão e as tarifas ajustadas (para a auditoria; não entram no snapshot gravado). Na revisão,
+      # `previous_fees` são as tarifas da versão anterior: as entradas mantidas iguais já foram
+      # autorizadas e não exigem nova autorização.
       class VersionBuilder
         def initialize(organizations:, allocator:, pricer:, ids:)
           @organizations = organizations
@@ -44,21 +47,24 @@ module Locentra
           @ids = ids
         end
 
-        def build(tx, actor, quote_id:, number:, customer_id:, input:, org:, now:)
+        def build(tx, actor, quote_id:, number:, customer_id:, input:, org:, now:, previous_fees: [])
           period = input.fetch(:period)
           Domain::Reservations::Rules.validate_start!(period, now)
           lines = Domain::Reservations::Rules.normalize_lines(input.fetch(:lines))
           branch_id = active_branch!(tx, input.fetch(:branch_id))
           valid_until = Q::Rules.valid_until!(input[:valid_until], period: period, now: now)
           discount = discount_bps(input.fetch(:manual_discount_bps, 0))
-          priced, summary = @pricer.price(tx, products: active_products!(tx, lines), lines: lines, period: period, zone: org.time_zone,
-                                              customer_id: customer_id, now: now, manual_discount_bps: discount,
-                                              discount_limit_bps: actor.user? ? Domain::Identity.discount_limit_bps(actor.role) : 0,
-                                              redeem: false)
-          Q::Version.new(id: @ids.uuid, quote_id: quote_id, number: number, branch_id: branch_id, period: period, valid_until: valid_until,
-                         items: priced, pricing: summary, terms: Q::Rules.terms(input[:terms]), manual_discount_bps: discount,
-                         deposit: Domain::Money.new(summary.fetch("deposit_cents")), total: Domain::Money.new(summary.fetch("total_cents")),
-                         created_at: now, sent_at: nil)
+          priced = @pricer.price(tx, products: active_products!(tx, lines), lines: lines, period: period, zone: org.time_zone,
+                                     customer_id: customer_id, now: now, manual_discount_bps: discount, fees: input.fetch(:fees, []),
+                                     previous_fees: previous_fees, fee_override: Authorizer.allowed?(actor, "fees.override"),
+                                     discount_limit_bps: actor.user? ? Domain::Identity.discount_limit_bps(actor.role) : 0,
+                                     lock_coupon: false)
+          summary = priced.summary
+          version = Q::Version.new(id: @ids.uuid, quote_id: quote_id, number: number, branch_id: branch_id, period: period, valid_until: valid_until,
+                                   items: priced.items, pricing: summary, terms: Q::Rules.terms(input[:terms]), manual_discount_bps: discount,
+                                   deposit: Domain::Money.new(summary.fetch("deposit_cents")), total: Domain::Money.new(summary.fetch("total_cents")),
+                                   created_at: now, sent_at: nil)
+          [version, priced.overrides]
         end
 
         private
@@ -80,6 +86,18 @@ module Locentra
           products = @allocator.products_for(tx, lines.map(&:product_id))
           lines.each { |l| raise Domain::NotFound, "produto" unless products[l.product_id]&.fetch(:product)&.active }
           products
+        end
+      end
+
+      # Detalhes de tarifas na auditoria de criação e revisão: total das tarifas e, quando houver, as
+      # entradas ajustadas (valor diferente do padrão ou avulsas).
+      module FeeAudit
+        module_function
+
+        def details(version, overrides, base)
+          details = base.merge("fees_cents" => version.pricing.fetch("fees_cents", 0))
+          details["fee_overrides"] = overrides unless overrides.empty?
+          details
         end
       end
 
@@ -145,15 +163,16 @@ module Locentra
             policy = Q::Rules.hold_policy!(input[:hold_policy])
             hold_minutes = Q::Rules.hold_minutes!(policy, input[:hold_minutes] || org.hold_minutes)
             id = @ids.uuid
-            version = @builder.build(tx, current, quote_id: id, number: 1, customer_id: customer.id, input: input, org: org, now: now)
+            version, overrides = @builder.build(tx, current, quote_id: id, number: 1, customer_id: customer.id, input: input, org: org, now: now)
             quote = Q::Quote.draft(id: id, organization_id: tx.tenant_id!, customer_id: customer.id, branch_id: version.branch_id,
                                    hold_policy: policy, hold_minutes: hold_minutes)
             @quotes.insert(tx, quote, current.audit_actor_id, now)
             @quotes.insert_version(tx, version, current.audit_actor_id)
             quote = quote.with(code: @organizations.next_code(tx, "quote", "Q"))
             @quotes.assign_code(tx, quote.id, quote.code)
-            @audit.record(tx, current, "quote.created", "quote", quote.id, "code" => quote.code, "version" => 1,
-                                                                           "total_cents" => version.total.cents, "hold_policy" => policy)
+            @audit.record(tx, current, "quote.created", "quote", quote.id,
+                          FeeAudit.details(version, overrides, "code" => quote.code, "version" => 1, "total_cents" => version.total.cents,
+                                                               "hold_policy" => policy))
             quote
           end
         end
@@ -195,16 +214,17 @@ module Locentra
             policy = Q::Rules.hold_policy!(input[:hold_policy] || quote.hold_policy)
             hold_minutes = Q::Rules.hold_minutes!(policy, input[:hold_minutes] || quote.hold_minutes || org.hold_minutes)
             previous = @quotes.find_version(tx, quote.id, quote.current_version)
-            version = @builder.build(tx, current, quote_id: quote.id, number: quote.current_version + 1, customer_id: quote.customer_id,
-                                                  input: input, org: org, now: now)
+            version, overrides = @builder.build(tx, current, quote_id: quote.id, number: quote.current_version + 1, customer_id: quote.customer_id,
+                                                             input: input, org: org, now: now, previous_fees: previous.pricing.fetch("fees", []))
             ensure_changed!(quote, previous, version, policy, hold_minutes)
             revised = quote.revise(branch_id: version.branch_id, hold_policy: policy, hold_minutes: hold_minutes)
             @hold_release.call(tx, current, quote, "Nova versão do orçamento")
             @quotes.insert_version(tx, version, current.audit_actor_id)
             @quotes.update(tx, revised, now)
             @audit.record(tx, current, "quote.revised", "quote", quote.id,
-                          "code" => quote.code, "from_version" => previous.number, "to_version" => version.number,
-                          "previous_status" => quote.status, "total_cents" => version.total.cents)
+                          FeeAudit.details(version, overrides, "code" => quote.code, "from_version" => previous.number,
+                                                               "to_version" => version.number, "previous_status" => quote.status,
+                                                               "total_cents" => version.total.cents))
             revised
           end
         end

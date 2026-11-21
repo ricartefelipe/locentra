@@ -78,7 +78,7 @@ module Locentra
         tokens: A::Identity::OneTimeTokens.new(repository: repos[:user_tokens], clock: clock, ids: ids),
         sessions: A::Identity::Sessions.new(uow: uow, repository: repos[:sessions], clock: clock, ids: ids),
         limits: A::Organizations::PlanLimits.new(subscriptions: repos[:subscriptions]),
-        pricer: A::Reservations::Pricer.new(pricing: repos[:pricing]),
+        pricer: A::Reservations::Pricer.new(pricing: repos[:pricing], ids: ids),
         pricing_rules: Domain::Pricing::Rules.new,
         mailer: @mailer, http: @http,
         box: I::SecretBox.new(config.encryption_key, previous: config.previous_encryption_keys),

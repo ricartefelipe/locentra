@@ -5,45 +5,84 @@ module Locentra
     module Reservations
       R = Domain::Reservations
 
-      # Precificação de itens com snapshot completo (tabela, unidades, descontos e totais).
+      # Precificação de itens com snapshot completo (tabela, unidades, descontos, condição negociada
+      # aplicada, cupom e tarifas) e registro do uso do cupom pela reserva.
+      #
+      # Ordem de travas na criação de reserva: cupom (FOR UPDATE, com a contagem de usos ativos em
+      # instrução separada, depois da trava) → inserção da reserva e do uso → estoques. Cancelamento,
+      # expiração e alocador não tocam em cupons: o uso deixa de ser ativo pela situação da reserva.
       class Pricer
-        def initialize(pricing:)
+        P = Domain::Pricing
+
+        # `overrides`: tarifas com valor diferente do padrão ou avulsas, para a auditoria; nunca entram
+        # no resumo gravado.
+        Priced = Data.define(:items, :summary, :coupon, :overrides)
+
+        def initialize(pricing:, ids:)
           @pricing = pricing
+          @ids = ids
         end
 
         def price(tx, products:, lines:, period:, zone:, customer_id:, now:, coupon_code: nil, manual_discount_bps: 0, fees: [],
-                  discount_limit_bps: 0, redeem: false)
-          priced = lines.map do |line|
+                  previous_fees: [], fee_override: false, discount_limit_bps: 0, lock_coupon: false)
+          agreements = []
+          items = lines.map do |line|
             product = products.fetch(line.product_id)[:product]
-            table = Domain::Pricing::PriceTable.from_h(product.pricing)
-            negotiated = @pricing.negotiated_discount_bps(tx, customer_id, product.id, now)
-            snapshot = if table.priced?
-                         Domain::Pricing::Line.price(table: table, period: period, zone: zone, quantity: line.quantity,
-                                                     negotiated_bps: negotiated)
-                       else
-                         { "table" => {}, "description" => "sem tabela de preços", "quantity" => line.quantity, "unit_amount_cents" => 0,
-                           "gross_cents" => 0, "total_cents" => 0 }
-                       end
+            snapshot = line_snapshot(tx, product, line, period, zone, customer_id, now, agreements)
             snapshot.merge("product_id" => product.id, "sku" => product.sku, "name" => product.name, "tracking" => product.tracking,
                            "deposit_unit_cents" => product.deposit.cents)
           end
-          coupon = load_coupon(tx, coupon_code, redeem)
+          coupon = load_coupon(tx, coupon_code, lock_coupon, now)
+          resolution = resolve_fees(tx, fees, previous_fees, fee_override, discount_limit_bps)
+          deposit = Domain::Money.new(items.sum { |l| l["deposit_unit_cents"] * l["quantity"] })
+          totals = P::Totals.compose(lines: items, fees: resolution.entries, coupon: coupon, manual_discount_bps: manual_discount_bps,
+                                     discount_limit_bps: discount_limit_bps, now: now, deposit: deposit)
+          summary = totals.merge("coupon" => coupon&.to_snapshot, "agreements" => agreements.uniq(&:id).map(&:to_snapshot),
+                                 "period" => period.to_h, "timezone" => zone.identifier, "priced_at" => now.iso8601)
+          Priced.new(items: items, summary: summary, coupon: coupon, overrides: resolution.overrides)
+        end
 
-          deposit = Domain::Money.new(priced.sum { |l| l["deposit_unit_cents"] * l["quantity"] })
-          totals = Domain::Pricing::Totals.compose(lines: priced, fees: fees, coupon: coupon, manual_discount_bps: manual_discount_bps,
-                                                   discount_limit_bps: discount_limit_bps, now: now, deposit: deposit)
-          @pricing.redeem_coupon(tx, coupon.code) if coupon && redeem
-          [priced, totals.merge("period" => period.to_h, "timezone" => zone.identifier, "priced_at" => now.iso8601)]
+        # Grava o uso do cupom de uma reserva recém-inserida (sem cupom, nada a fazer). O gatilho do banco
+        # repete a verificação do limite sob a mesma trava do cupom.
+        def record_redemption(tx, priced, reservation:, actor_id:, now:)
+          return nil unless priced.coupon
+
+          row = { "id" => @ids.uuid, "coupon_id" => priced.coupon.id, "reservation_id" => reservation.id,
+                  "subtotal_cents" => priced.summary.fetch("subtotal_cents"), "discount_cents" => priced.summary.fetch("coupon_discount_cents"),
+                  "redeemed_by" => actor_id, "redeemed_at" => now }
+          tx.savepoint { @pricing.insert_redemption(tx, row) }
+          row
+        rescue Domain::ValidationError
+          raise Domain::ValidationError.field("cupom", "cupom esgotado")
         end
 
         private
 
-        # Com `redeem`, o cupom é lido com lock para que o limite de utilizações valha sob concorrência.
-        def load_coupon(tx, code, redeem)
-          text = code.to_s.strip.upcase
+        def line_snapshot(tx, product, line, period, zone, customer_id, now, agreements)
+          table = P::PriceTable.from_h(product.pricing)
+          unless table.priced?
+            return { "table" => {}, "description" => "sem tabela de preços", "quantity" => line.quantity, "unit_amount_cents" => 0,
+                     "gross_cents" => 0, "total_cents" => 0, "negotiated_agreement_id" => nil }
+          end
+
+          agreement = @pricing.applicable_agreement(tx, customer_id, product.id, now)
+          agreements << agreement if agreement
+          P::Line.price(table: table, period: period, zone: zone, quantity: line.quantity, negotiated_bps: agreement ? agreement.discount_bps : 0)
+                 .merge("negotiated_agreement_id" => agreement&.id)
+        end
+
+        # Com `lock`, o cupom é lido com FOR UPDATE para que o limite de usos valha sob concorrência.
+        def load_coupon(tx, code, lock, now)
+          text = P::Codes.normalize(code)
           return nil if text.empty?
 
-          @pricing.find_coupon(tx, text, lock: redeem) || raise(Domain::ValidationError.field("cupom", "cupom inexistente"))
+          @pricing.find_coupon(tx, text, lock: lock, now: now) || raise(Domain::ValidationError.field("cupom", "cupom inexistente"))
+        end
+
+        def resolve_fees(tx, requests, previous, may_override, limit)
+          ids = requests.filter_map(&:fee_id) + previous.filter_map { |entry| entry["fee_id"] }
+          catalog = ids.empty? ? {} : @pricing.fees_by_ids(tx, ids)
+          P::Fees.resolve(requests, catalog: catalog, previous: previous, may_override: may_override, reduction_limit_bps: limit)
         end
       end
 
@@ -150,19 +189,21 @@ module Locentra
           branch_id = active_branch!(tx, input.fetch(:branch_id))
           org = @organizations.find(tx, tx.tenant_id!)
           products = active_products!(tx, lines)
-          priced, summary = if input[:pricing_snapshot]
-                              snapshot_pricing!(input[:pricing_snapshot], lines, period)
-                            else
-                              price(tx, current, input, products: products, lines: lines, period: period, org: org, customer: customer, now: now)
-                            end
-          reservation = build(tx, input, mode, org: org, customer: customer, branch_id: branch_id, period: period, summary: summary, now: now)
-          @reservations.insert(tx, reservation, summary, current.audit_actor_id, now)
-          items = insert_items(tx, reservation, priced, now)
+          priced = if input[:pricing_snapshot]
+                     snapshot_pricing!(input[:pricing_snapshot], lines, period)
+                   else
+                     price(tx, current, input, products: products, lines: lines, period: period, org: org, customer: customer, now: now)
+                   end
+          reservation = build(tx, input, mode, org: org, customer: customer, branch_id: branch_id, period: period, summary: priced.summary,
+                                               now: now)
+          @reservations.insert(tx, reservation, priced.summary, current.audit_actor_id, now)
+          @pricer.record_redemption(tx, priced, reservation: reservation, actor_id: current.audit_actor_id, now: now)
+          items = insert_items(tx, reservation, priced.items, now)
           if reservation.occupying?
             @allocator.allocate(tx, reservation_id: reservation.id, branch_id: branch_id, period: period, items: items, now: now,
                                     actor_id: current.audit_actor_id)
           end
-          finalize(tx, current, reservation, mode)
+          finalize(tx, current, reservation, mode, priced)
         end
 
         def active_customer!(tx, customer_id)
@@ -185,14 +226,18 @@ module Locentra
           products
         end
 
+        # Cupom travado (o uso é gravado na mesma transação); ajuste de tarifa exige `fees.override` e
+        # a redução respeita o mesmo limite do desconto manual do papel (0 para credenciais).
         def price(tx, current, input, products:, lines:, period:, org:, customer:, now:)
           limit = current.user? ? Domain::Identity.discount_limit_bps(current.role) : 0
           @pricer.price(tx, products: products, lines: lines, period: period, zone: org.time_zone, customer_id: customer.id,
                             coupon_code: input[:coupon_code], manual_discount_bps: input.fetch(:manual_discount_bps, 0).to_i,
-                            fees: input.fetch(:fees, []), now: now, discount_limit_bps: limit, redeem: true)
+                            fees: input.fetch(:fees, []), fee_override: Authorizer.allowed?(current, "fees.override"), now: now,
+                            discount_limit_bps: limit, lock_coupon: true)
         end
 
-        # O snapshot é usado como está: itens e período precisam coincidir com a reserva solicitada.
+        # O snapshot é usado como está: itens e período precisam coincidir com a reserva solicitada. Um
+        # snapshot pré-calculado nunca traz cupom (orçamentos não aplicam cupons e o uso não seria gravado).
         def snapshot_pricing!(snapshot, lines, period)
           items = snapshot.fetch(:items)
           summary = snapshot.fetch(:summary)
@@ -200,8 +245,9 @@ module Locentra
           given = items.map { |i| [i.fetch("product_id"), i.fetch("quantity")] }.sort
           raise Domain::ValidationError.field("precos", "o snapshot de preços não corresponde aos itens") unless expected == given
           raise Domain::ValidationError.field("precos", "o snapshot de preços não corresponde ao período") unless summary["period"] == period.to_h
+          raise Domain::ValidationError.field("precos", "o snapshot de preços não pode conter cupom") if summary["coupon_code"] || summary["coupon"]
 
-          [items, summary]
+          Pricer::Priced.new(items: items, summary: summary, coupon: nil, overrides: [])
         end
 
         # O código sequencial definitivo é atribuído em `finalize`: o lock da linha do contador fica
@@ -229,11 +275,15 @@ module Locentra
           end
         end
 
-        def finalize(tx, current, reservation, mode)
+        # O uso do cupom é auditado aqui (o histórico do cupom fica só com as alterações de cadastro).
+        def finalize(tx, current, reservation, mode, priced)
           reservation = reservation.with(code: @organizations.next_code(tx, "reservation", "R"))
           @reservations.assign_code(tx, reservation.id, reservation.code)
-          @audit.record(tx, current, "reservation.created", "reservation", reservation.id,
-                        "code" => reservation.code, "status" => reservation.status, "mode" => mode)
+          details = { "code" => reservation.code, "status" => reservation.status, "mode" => mode,
+                      "fees_cents" => priced.summary.fetch("fees_cents", 0) }
+          details = details.merge("coupon_id" => priced.coupon.id, "coupon_code" => priced.coupon.code) if priced.coupon
+          details["fee_overrides"] = priced.overrides unless priced.overrides.empty?
+          @audit.record(tx, current, "reservation.created", "reservation", reservation.id, details)
           @events.publish(tx, "reservation.#{reservation.status}", "reservation", reservation.id, "code" => reservation.code)
           reservation
         end
