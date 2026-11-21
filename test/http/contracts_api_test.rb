@@ -137,6 +137,23 @@ class ContractsApiTest < ApiV1TestCase
     assert_equal sha, Digest::SHA256.hexdigest(body)
   end
 
+  # Cada contrato serve o próprio PDF: a mesma versão de outro contrato da organização não é devolvida.
+  def test_pdf_belongs_to_the_requested_contract
+    contracts = [issued, issued(reservation(after_rental))]
+    digests = contracts.map do |contract|
+      get "/api/v1/contracts/#{contract.id}/documents/1", {}, headers(@token)
+
+      assert_equal 200, last_response.status, last_response.body[0, 300]
+      assert_includes last_response.headers["content-disposition"], "contrato-#{contract.code}-v1.pdf"
+      sha = owner_query("SELECT sha256 FROM contract_documents WHERE contract_id = $1", [contract.id]).first["sha256"]
+
+      assert_equal sha, Digest::SHA256.hexdigest(last_response.body)
+      sha
+    end
+
+    assert_equal 2, digests.uniq.size
+  end
+
   def test_pdf_errors
     contract = issued
     get!(404, "/contracts/#{contract.id}/documents/2")

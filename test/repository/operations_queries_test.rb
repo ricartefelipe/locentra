@@ -114,6 +114,20 @@ class OperationsQueriesTest < DatabaseTest
     assert_nil(tenant_tx(@beta) { |tx| @system.repos[:contracts].find_document(tx, contract.id, 1) })
   end
 
+  # A versão 1 de cada contrato é a do próprio contrato, nunca a de outro contrato da mesma organização.
+  def test_find_document_filters_by_contract
+    first = uc(:issue_contract).call(@actor, confirmed([line(@camera, 1)]).id)
+    second = uc(:issue_contract).call(@actor, confirmed([line(@camera, 1)], after_rental).id)
+    stored = owner_query("SELECT contract_id, attachment_id, sha256 FROM contract_documents", [], tenant: @org[:organization_id])
+             .to_h { |row| [row["contract_id"], row.values_at("attachment_id", "sha256")] }
+    found = [first, second].to_h do |contract|
+      [contract.id, tenant_tx { |tx| @system.repos[:contracts].find_document(tx, contract.id, 1) }.values_at("attachment_id", "sha256")]
+    end
+
+    assert_equal 2, stored.values.uniq.size
+    assert_equal stored, found
+  end
+
   def test_pickup_line_details_include_the_product
     reservation = confirmed([line(@camera, 1), line(@chairs, 2)])
     pickup = uc(:start_pickup).call(@actor, reservation.id)
