@@ -382,10 +382,13 @@ foi exercitado num ambiente Compose.
 ### 14.1 Verificação prévia (antes do passo 2 da seção 12)
 
 A 0016 confere o formato de `organizations.settings` antes de alterar qualquer coisa. Se encontrar uma
-organização com `settings` que não seja objeto JSON, com `cancellation_policy` sem `tiers` (ou com campos não
-numéricos) ou com `hold_minutes` fora de 5 a 1440, **aborta** com
+organização com `settings` que não seja objeto JSON, com `cancellation_policy` sem `tiers` (lista de 1 a 6
+faixas), com faixa sem `min_hours_before` ou `fee_bps` numéricos ou com `hold_minutes` fora de 5 a 1440,
+**aborta** com
 `migração 0016: configurações (settings) fora do formato esperado nas organizações …` e nada é alterado. A
-1.1.0 não grava `settings`, então isso só ocorre com alteração manual. Confira antes com `locentra_backup`:
+1.1.0 não grava `settings`, então isso só ocorre com alteração manual. Confira antes com `locentra_backup`
+(a consulta aplica as mesmas regras da migration e é conferida por
+`test/repository/organization_settings_repository_test.rb`):
 
 ```sql
 -- psql "postgres://locentra_backup:<senha>@<host>:5432/locentra"
@@ -393,8 +396,12 @@ SELECT id, settings
   FROM organizations
  WHERE jsonb_typeof(settings) <> 'object'
     OR (NULLIF(settings -> 'cancellation_policy', 'null'::jsonb) IS NOT NULL
-        AND (jsonb_typeof(settings -> 'cancellation_policy' -> 'tiers') IS DISTINCT FROM 'array'
-             OR jsonb_array_length(settings -> 'cancellation_policy' -> 'tiers') NOT BETWEEN 1 AND 6))
+        AND NOT CASE WHEN jsonb_typeof(settings -> 'cancellation_policy' -> 'tiers') = 'array'
+                     THEN jsonb_array_length(settings -> 'cancellation_policy' -> 'tiers') BETWEEN 1 AND 6
+                          AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(settings -> 'cancellation_policy' -> 'tiers') t
+                                           WHERE jsonb_typeof(t -> 'min_hours_before') IS DISTINCT FROM 'number'
+                                              OR jsonb_typeof(t -> 'fee_bps') IS DISTINCT FROM 'number')
+                     ELSE false END)
     OR (NULLIF(settings -> 'hold_minutes', 'null'::jsonb) IS NOT NULL
         AND NOT ((settings ->> 'hold_minutes') ~ '^\d{1,4}$' AND (settings ->> 'hold_minutes')::int BETWEEN 5 AND 1440));
 ```

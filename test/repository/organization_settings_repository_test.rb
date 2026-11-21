@@ -141,6 +141,34 @@ class OrganizationSettingsRepositoryTest < DatabaseTest
     assert_equal 1, owner_query("UPDATE branches SET active = false, deactivated_at = now() WHERE id = $1 RETURNING id", [@branch.id]).size
   end
 
+  # Consulta de verificação prévia da seção 14.1 de docs/RUNBOOKS.md: precisa apontar exatamente as
+  # organizações que fariam a 0016 abortar (mesmas regras de app_cancellation_policy_shape_ok e de hold_minutes).
+  def runbook_precheck_sql
+    section = File.read(File.expand_path("../../docs/RUNBOOKS.md", __dir__))[/^### 14\.1 .*?(?=^### )/m]
+    section[/```sql\n(.*?)```/m, 1] || flunk("consulta da seção 14.1 não encontrada")
+  end
+
+  def test_runbook_precheck_points_out_exactly_the_settings_that_abort_the_migration
+    sql = runbook_precheck_sql
+    cases = {
+      '{"cancellation_policy": {"tiers": [{"min_hours_before": 48, "fee_bps": 1000}, {"min_hours_before": 0, "fee_bps": 5000}]}}' => false,
+      '{"hold_minutes": 45, "outra": 1}' => false,
+      '{"cancellation_policy": {"tiers": [{"min_hours_before": "72", "fee_bps": 0}, {"min_hours_before": 0, "fee_bps": 10000}]}}' => true,
+      '{"cancellation_policy": {"tiers": [{"fee_bps": 100}]}}' => true,
+      '{"cancellation_policy": {"tiers": [1]}}' => true,
+      '{"cancellation_policy": {"tiers": {}}}' => true,
+      '{"cancellation_policy": {"tiers": []}}' => true,
+      '{"cancellation_policy": "padrão"}' => true,
+      '{"hold_minutes": 1441}' => true
+    }
+    flagged = cases.keys.to_h do |settings|
+      owner_query("UPDATE organizations SET settings = $1::jsonb WHERE id = $2", [settings, @org[:organization_id]])
+      [settings, owner_query(sql).any? { |row| row["id"] == @org[:organization_id] }]
+    end
+
+    assert_equal cases, flagged
+  end
+
   def repo = @system.repos[:organizations]
   def reservations = @system.repos[:reservations]
 
