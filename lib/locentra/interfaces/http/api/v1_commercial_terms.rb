@@ -26,7 +26,7 @@ module Locentra
           def coupons(ctx)
             page = uc(:list_coupons).call(ctx.actor, status: ctx.query("status"), search: ctx.query("q"), sort: ctx.query("sort") || "code",
                                                      limit: ctx.query("limit"), offset: ctx.query("offset"))
-            json(200, CS.page(page) { |row| CS.coupon(row[:coupon], row[:status]) })
+            json(200, S.page(page) { |row| CS.coupon(row[:coupon], row[:status]) })
           end
 
           def coupon(ctx)
@@ -60,7 +60,7 @@ module Locentra
             page = uc(:list_coupon_redemptions).call(ctx.actor, ctx.param(:id), limit: ctx.query("limit"), offset: ctx.query("offset"))
             reservations = ctx.can?("reservations.read")
             customers = Application::Reservations::ListReservations.customer_names?(ctx.actor)
-            json(200, CS.page(page) { |item| CS.coupon_redemption(item, reservations: reservations, customers: customers) })
+            json(200, S.page(page) { |item| CS.coupon_redemption(item, reservations: reservations, customers: customers) })
           end
 
           # Tarifas adicionais ----------------------------------------------------------------------
@@ -68,7 +68,7 @@ module Locentra
           def fees(ctx)
             page = uc(:list_fees).call(ctx.actor, status: ctx.query("status"), search: ctx.query("q"), sort: ctx.query("sort") || "name",
                                                   limit: ctx.query("limit"), offset: ctx.query("offset"))
-            json(200, CS.page(page) { |fee| CS.fee(fee) })
+            json(200, S.page(page) { |fee| CS.fee(fee) })
           end
 
           def fee(ctx)
@@ -99,7 +99,7 @@ module Locentra
 
           def price_agreements(ctx)
             page = uc(:list_price_agreements).call(ctx.actor, ctx.param(:id), limit: ctx.query("limit"), offset: ctx.query("offset"))
-            json(200, CS.page(page) { |row| CS.price_agreement(row[:agreement], row[:status], product: row[:product]) })
+            json(200, S.page(page) { |row| CS.price_agreement(row[:agreement], row[:status], product: row[:product]) })
           end
 
           def create_price_agreement(ctx)
@@ -232,7 +232,7 @@ module Locentra
           # `product_id` nulo ou ausente cadastra a condição geral; pela API o produto é sempre o identificador.
           def agreement_input(data)
             collect do |check|
-              { product: check.call("produto") { data["product_id"] && Domain::Identifier.parse(data["product_id"], "produto") },
+              { product: check.call("produto") { data["product_id"].nil? ? nil : Domain::Identifier.parse(data["product_id"], "produto") },
                 discount_bps: check.call("desconto") { strict_integer(data, "discount_bps", "desconto") },
                 valid_from: check.call("valido_de") { api_instant(data, "valid_from", "valido_de") },
                 valid_until: check.call("valido_ate") { api_instant(data, "valid_until", "valido_ate") },

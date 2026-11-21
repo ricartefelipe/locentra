@@ -51,11 +51,6 @@ module Locentra
                    "valid_until" => time(agreement.valid_until), "notes" => agreement.notes, "ended_at" => time(agreement.ended_at),
                    "end_reason" => agreement.end_reason, "status" => status, "created_at" => time(agreement.created_at))
       end
-
-      def page(page, &)
-        { "data" => page.items.map(&), "pagination" => { "limit" => page.limit, "offset" => page.offset, "total" => page.total,
-                                                         "next_offset" => page.next_offset } }
-      end
     end
   end
 end

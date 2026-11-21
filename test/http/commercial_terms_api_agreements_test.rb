@@ -57,6 +57,9 @@ class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
 
       assert_equal [field], fields.keys, key
     end
+    post!(422, agreements_path, { "discount_bps" => 500, "product_id" => false })
+
+    assert_equal %w[produto], fields.keys
     post!(422, agreements_path, { "discount_bps" => 9500, "product_id" => @camera.id, "valid_until" => "2026-03-01T00:00:00Z" })
 
     assert_equal %w[desconto valido_ate], fields.keys.sort
