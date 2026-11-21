@@ -128,7 +128,7 @@ module Locentra
                    "Vigência: #{validity(coupon.valid_from, coupon.valid_until)} (#{zone.identifier})",
                    "Usos ativos: #{coupon.usage_text}#{"; restantes: #{P.count_label(coupon.remaining)}" if coupon.remaining}" \
                    "#{" · total de usos: #{P.count_label(coupon.total_redemptions)}" if coupon.total_redemptions}",
-                   "Subtotal mínimo: #{minimum(coupon)}"]
+                   "Subtotal mínimo: #{F.clean(minimum(coupon))}"]
           lines << "Descrição: #{F.clean(coupon.description)}" if coupon.description
           lines
         end

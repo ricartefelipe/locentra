@@ -65,6 +65,7 @@ class CliCommercialTermsTest < CliTest
     assert_equal "Exibindo 1–2 de 2 (horários em America/Sao_Paulo).", lines.last
     assert_includes ok("coupons", "list", "--limite", "1").out, "Exibindo 1–1 de 2 (horários em America/Sao_Paulo). Próxima página: --deslocamento 1."
     assert_includes ok("coupons", "list", "--situacao", "inactive").out, "Nenhum cupom encontrado."
+    assert_includes ok("coupons", "show", "FIXO50").out.lines.map(&:rstrip), "Subtotal mínimo: —", "sem mínimo, como na listagem"
   end
 
   def test_coupons_json_has_the_api_fields_and_filters
