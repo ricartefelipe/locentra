@@ -73,7 +73,7 @@ module Locentra
         # Linhas com dados de exibição: produto, patrimônio da linha e patrimônio atualmente alocado.
         def line_details(tx, pickup_id)
           tx.query(<<~SQL, [tx.tenant_id!, pickup_id])
-            SELECT l.id, l.status, l.asset_id, l.stock_pool_id, l.expected_quantity, l.checked_quantity, l.delivered_quantity,
+            SELECT l.id, l.status, l.product_id, l.asset_id, l.stock_pool_id, l.expected_quantity, l.checked_quantity, l.delivered_quantity,
                    l.returned_quantity, l.missing_quantity, l.release_reason, l.reservation_item_id, p.name AS product_name, p.sku,
                    a.tag, a.status AS asset_status, aa.asset_id AS allocated_asset_id, aa.active AS allocation_active, x.tag AS allocated_tag
               FROM pickup_lines l

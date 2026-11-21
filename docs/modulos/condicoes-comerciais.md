@@ -140,7 +140,9 @@ detalhamento antes de aprovar o orçamento.
 Rotas em `docs/openapi.yaml`: `/coupons`, `/coupons/{id}` (consulta por identificador ou código; `PATCH`),
 `/coupons/{id}/deactivate`, `/coupons/{id}/reactivate`, `/coupons/{id}/redemptions`, `/fees` e
 equivalentes, `/customers/{id}/price-agreements`, `/price-agreements/{id}/end` e `fees` em
-`POST /reservations`.
+`POST /reservations`, `POST /quotes` e `POST /quotes/{id}/versions` (as mesmas regras de autorização; a nova
+versão mantém sem nova autorização a tarifa idêntica à da versão anterior). Credenciais não aplicam desconto
+manual em reservas nem em orçamentos.
 
 - Toda mutação exige `Idempotency-Key` e roda na transação da chave. As mutações usam somente o identificador.
 - `PATCH` altera as chaves enviadas; `null` limpa (em `min_subtotal_cents`, vale 0). Sem mudança, responde 200
@@ -200,7 +202,8 @@ gestão de tarifas ficam na web e na API.
 ## Limitações
 
 - Cupons não se aplicam a orçamentos nem a solicitações do portal.
-- Tarifas pela API somente na criação de reserva (não há API de orçamentos).
+- Tarifas pela API na criação de reserva e nas versões de orçamento; a reserva convertida copia as tarifas da
+  versão aprovada.
 - O livro de usos não é reconstruído para reservas anteriores à migration 0015: os usos da 1.0.0 aparecem
   somente no contador legado do cupom.
 - Não há evento de webhook para alterações de cadastro.

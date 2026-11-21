@@ -241,6 +241,31 @@ em aberto, reagendamento, extensão e cancelamento diretos ficam ocultos e um av
 A tela do cliente tem o atalho "Novo orçamento". Os formulários têm labels, mensagens por campo
 (`aria-invalid`), estados vazios e nenhum script inline.
 
+## API v1
+
+Rotas em `docs/openapi.yaml` (detalhes em [`api-v1.md`](api-v1.md)); toda mutação exige `Idempotency-Key`, roda
+na transação da chave e devolve o detalhe atualizado, lido nessa transação.
+
+| Rota | Escopo | Função |
+|---|---|---|
+| `GET /quotes`, `GET /quotes/{id}` | `quotes.read` | Lista (situação, cliente, busca, ordenação, paginação) e detalhe com todas as versões |
+| `POST /quotes`, `POST /quotes/{id}/versions` | `quotes.write` | Criação e nova versão (conteúdo completo; o cliente não muda) |
+| `POST /quotes/{id}/send`, `/approve`, `/reject` | `quotes.write` | Envio (com bloqueio: `reservations.write`), aprovação em nome do cliente e rejeição |
+| `POST /quotes/{id}/convert` | `quotes.write` e `reservations.write` | Conversão: 201 quando cria a reserva, 200 quando já convertido, `Location` da reserva |
+| `GET /contracts`, `GET /contracts/{id}` | `contracts.read` | Lista (situação, cliente, busca) e detalhe com documentos, aditivos e prévia de cancelamento |
+| `GET /contracts/{id}/documents/{version}` | `contracts.read` | PDF da versão como anexo, sem cache, com `Repr-Digest` (SHA-256 gravado) |
+| `POST /contracts` | `contracts.write` | Emissão pela reserva: 201 quando emite, 200 quando já havia contrato |
+| `POST /contracts/{id}/amendments` | `contracts.write` e `reservations.write` | Aditivo de extensão (409 `unavailable` com `shortages` quando invade outra reserva) |
+| `POST /contracts/{id}/cancel` | `contracts.write` e `reservations.cancel` | Cancelamento com a multa da política (409 `contract_not_cancellable` depois da retirada) |
+
+- A versão do orçamento aceita tarifas (`fees`, com as regras da reserva: valor ajustado e tarifa avulsa exigem
+  `fees.override`); credenciais não aplicam desconto manual (403).
+- Aprovação de orçamento vencido responde 409 `quote_expired`, e o orçamento passa a expirado sem aprovar
+  (`ApproveQuote#record_expiration`, em transação própria); a mesma chave repetida não aprova.
+- O detalhe traz o cliente pelo identificador. Documento, IP e navegador do aceite e o snapshot dos dados do
+  documento não são expostos.
+- Aceite eletrônico e encerramento do contrato continuam somente na interface web e no portal.
+
 ## Decisões
 
 - **Bloqueio vinculado por `hold_reservation_id`.** A reserva de bloqueio não recebe `quote_id`; só a
@@ -270,8 +295,7 @@ A tela do cliente tem o atalho "Novo orçamento". Os formulários têm labels, m
 
 ## Limitações
 
-- Não há endpoints de API v1 para orçamentos e contratos; as operações estão disponíveis na interface
-  web e nos casos de uso.
+- Aceite eletrônico e encerramento de contrato não estão na API v1 (interface web e portal).
 - As telas do cliente (aprovação, rejeição, leitura, aceite e download dos PDFs) estão no módulo do
   portal do cliente (`docs/modulos/portal-cliente.md`).
 - O único tipo de aditivo é a extensão de prazo. Antecipação, troca de itens ou de condições exigem

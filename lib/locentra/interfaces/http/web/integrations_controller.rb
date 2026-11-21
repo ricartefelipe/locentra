@@ -84,9 +84,7 @@ module Locentra
           private
 
           def disposition(filename, content_type)
-            ascii = filename.encode("ASCII", invalid: :replace, undef: :replace, replace: "_").gsub(/[^A-Za-z0-9._ -]/, "_")
-            kind = content_type == "application/pdf" || content_type.start_with?("image/") ? "inline" : "attachment"
-            %(#{kind}; filename="#{ascii}"; filename*=UTF-8''#{ERB::Util.url_encode(filename)})
+            content_disposition(filename, content_type == "application/pdf" || content_type.start_with?("image/") ? "inline" : "attachment")
           end
         end
       end

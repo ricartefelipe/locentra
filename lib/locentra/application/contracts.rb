@@ -65,8 +65,11 @@ module Locentra
         end
       end
 
-      # Emissão idempotente: a reserva é bloqueada e, se já houver contrato, ele é devolvido.
+      # Emissão idempotente: a reserva é bloqueada e, se já houver contrato, ele é devolvido. `issue` informa
+      # se o contrato foi criado agora (`created`) ou já existia; `call` devolve só o contrato.
       class IssueContract
+        Result = Data.define(:contract, :created)
+
         def initialize(uow:, contracts:, reservations:, customers:, organizations:, quotes:, documents:, audit:, events:, clock:, ids:)
           @uow = uow
           @contracts = contracts
@@ -81,20 +84,22 @@ module Locentra
           @ids = ids
         end
 
-        def call(actor, reservation_id, conditions: nil)
-          @uow.run(actor, "contracts.write") do |tx, current|
-            now = @clock.now
-            reservation = @reservations.lock(tx, Domain::Identifier.parse(reservation_id, "reserva")) || raise(Domain::NotFound, "reserva")
-            existing = @contracts.find_by_reservation(tx, reservation.id)
-            next existing if existing
+        def call(actor, reservation_id, conditions: nil) = issue(actor, reservation_id, conditions: conditions).contract
 
-            issue(tx, current, reservation, conditions, now)
+        def issue(actor, reservation_id, conditions: nil, tx: nil)
+          Composition.run(@uow, actor, "contracts.write", tx) do |t, current|
+            now = @clock.now
+            reservation = @reservations.lock(t, Domain::Identifier.parse(reservation_id, "reserva")) || raise(Domain::NotFound, "reserva")
+            existing = @contracts.find_by_reservation(t, reservation.id)
+            next Result.new(contract: existing, created: false) if existing
+
+            Result.new(contract: issue_new(t, current, reservation, conditions, now), created: true)
           end
         end
 
         private
 
-        def issue(tx, current, reservation, conditions, now)
+        def issue_new(tx, current, reservation, conditions, now)
           org = @organizations.find(tx, tx.tenant_id!)
           terms = build_terms(tx, org, reservation, conditions, now)
           contract = C::Contract.issue(id: @ids.uuid, organization_id: tx.tenant_id!, reservation: reservation, terms: terms, now: now)
@@ -201,16 +206,16 @@ module Locentra
           @ids = ids
         end
 
-        def call(actor, contract_id, ends_at:, description: nil)
-          @uow.run(actor, "contracts.write") do |tx, current|
+        def call(actor, contract_id, ends_at:, description: nil, tx: nil)
+          Composition.run(@uow, actor, "contracts.write", tx) do |t, current|
             Authorizer.authorize!(current, "reservations.write")
             now = @clock.now
-            contract = Scope.lock!(@contracts, tx, current, contract_id)
+            contract = Scope.lock!(@contracts, t, current, contract_id)
             raise Domain::InvalidTransition.new("contrato", contract.status, "aditivo") unless contract.amendable?
 
-            before = @reservations.find(tx, contract.reservation_id)
-            result = @extend_reservation.call(current, contract.reservation_id, ends_at: ends_at, tx: tx, via: :contract)
-            amend(tx, current, contract, before, result, description, now)
+            before = @reservations.find(t, contract.reservation_id)
+            result = @extend_reservation.call(current, contract.reservation_id, ends_at: ends_at, tx: t, via: :contract)
+            amend(t, current, contract, before, result, description, now)
           end
         end
 
@@ -270,22 +275,22 @@ module Locentra
           @ids = ids
         end
 
-        def call(actor, contract_id, reason:)
-          @uow.run(actor, "contracts.write") do |tx, current|
+        def call(actor, contract_id, reason:, tx: nil)
+          Composition.run(@uow, actor, "contracts.write", tx) do |t, current|
             Authorizer.authorize!(current, "reservations.cancel")
             now = @clock.now
-            contract = Scope.lock!(@contracts, tx, current, contract_id)
-            reservation = @reservations.lock(tx, contract.reservation_id)
-            preview = Scope.cancellation_preview(contract, @contracts.amendments(tx, contract.id), now)
+            contract = Scope.lock!(@contracts, t, current, contract_id)
+            reservation = @reservations.lock(t, contract.reservation_id)
+            preview = Scope.cancellation_preview(contract, @contracts.amendments(t, contract.id), now)
             cancelled = contract.cancel(now: now, reason: reason, fee: preview.fee, reservation: reservation)
-            record_fee(tx, current, contract, preview, now) if preview.fee.positive?
+            record_fee(t, current, contract, preview, now) if preview.fee.positive?
             @cancel_reservation.call(current, contract.reservation_id,
-                                     reason: "Contrato #{contract.code} cancelado: #{cancelled.cancellation_reason}"[0, 500], tx: tx,
+                                     reason: "Contrato #{contract.code} cancelado: #{cancelled.cancellation_reason}"[0, 500], tx: t,
                                      via: :contract)
-            @contracts.update(tx, cancelled, now)
-            @audit.record(tx, current, "contract.cancelled", "contract", contract.id,
+            @contracts.update(t, cancelled, now)
+            @audit.record(t, current, "contract.cancelled", "contract", contract.id,
                           preview.to_h.merge("code" => contract.code, "reason" => cancelled.cancellation_reason))
-            @events.publish(tx, "contract.cancelled", "contract", contract.id, "code" => contract.code, "fee_cents" => preview.fee.cents)
+            @events.publish(t, "contract.cancelled", "contract", contract.id, "code" => contract.code, "fee_cents" => preview.fee.cents)
             { contract: cancelled, preview: preview }
           end
         end
@@ -336,13 +341,14 @@ module Locentra
           @contracts = contracts
         end
 
-        def call(actor, status: nil, search: nil, limit: nil, offset: nil)
+        # O cliente do portal vê somente os próprios contratos; a equipe pode filtrar por cliente.
+        def call(actor, status: nil, customer_id: nil, search: nil, limit: nil, offset: nil)
           lim, off = Page.params(limit: limit, offset: offset)
           raise Domain::ValidationError.field("situacao", "inválida") if status && !C::STATUSES.key?(status)
 
           @uow.run(actor, Scope.read_permission(actor)) do |tx, current|
-            items, total = @contracts.search(tx, status: status, customer_id: current.customer? ? current.customer_id : nil,
-                                                 search: search.to_s.strip[0, 40], limit: lim, offset: off)
+            customer = current.customer? ? current.customer_id : (customer_id && Domain::Identifier.parse(customer_id, "cliente"))
+            items, total = @contracts.search(tx, status: status, customer_id: customer, search: search.to_s.strip[0, 40], limit: lim, offset: off)
             Page.new(items: items, limit: lim, offset: off, total: total)
           end
         end
@@ -356,15 +362,43 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, contract_id)
-          @uow.run(actor, Scope.read_permission(actor)) do |tx, current|
-            contract = Scope.find!(@contracts, tx, current, contract_id)
-            amendments = @contracts.amendments(tx, contract.id)
-            reservation = @reservations.find(tx, contract.reservation_id)
-            { contract: contract, documents: @contracts.documents(tx, contract.id), amendments: amendments,
+        # Com `tx`, lê na transação do chamador (detalhe devolvido por uma mutação ainda não confirmada);
+        # `permission` é então a permissão da mutação, conferida no lugar da de leitura.
+        def call(actor, contract_id, tx: nil, permission: nil)
+          Composition.run(@uow, actor, Composition.detail_permission(tx, Scope.read_permission(actor), permission), tx) do |t, current|
+            contract = Scope.find!(@contracts, t, current, contract_id)
+            amendments = @contracts.amendments(t, contract.id)
+            reservation = @reservations.find(t, contract.reservation_id)
+            { contract: contract, documents: @contracts.documents(t, contract.id), amendments: amendments,
               reservation: reservation, current_total: Scope.total_with_amendments(contract, amendments),
               preview: contract.cancellable_with?(reservation) ? Scope.cancellation_preview(contract, amendments, @clock.now) : nil }
           end
+        end
+      end
+
+      # Arquivo de uma versão do documento do contrato (PDF). O contrato e a versão são conferidos no
+      # escopo do ator; o conteúdo é lido pelo download de anexos, que aplica a permissão do dono
+      # (`contracts.read`) e trata o conteúdo ausente como "não encontrado".
+      class DocumentFile
+        VERSION = /\A[1-9]\d{0,5}\z/
+
+        def initialize(uow:, contracts:, download:)
+          @uow = uow
+          @contracts = contracts
+          @download = download
+        end
+
+        def call(actor, contract_id, version)
+          text = version.to_s
+          raise Domain::ValidationError.field("versao", "informe a versão do documento (número inteiro positivo)") unless text.match?(VERSION)
+
+          number = Integer(text, 10)
+          doc = @uow.run(actor, Scope.read_permission(actor)) do |tx, current|
+            contract = Scope.find!(@contracts, tx, current, contract_id)
+            @contracts.find_document(tx, contract.id, number) || raise(Domain::NotFound, "documento")
+          end
+          row, bytes = @download.call(actor, doc["attachment_id"])
+          { document: doc, filename: row["filename"], content_type: row["content_type"], bytes: bytes }
         end
       end
 
