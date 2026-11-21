@@ -164,6 +164,7 @@ R$ 895,20.
   orçamento e na reserva (`cancellation_policy`) no momento da criação; a reserva criada a partir de orçamento
   recebe a da versão, e o contrato copia a da reserva. Uma alteração da política da organização vale somente
   para reservas e versões registradas depois dela.
+- Ajustes viram cobranças pela sincronização idempotente do módulo financeiro.
 
 ## Fuso de referência
 
@@ -178,4 +179,3 @@ organização:
   termos do contrato, de modo que cada contrato tem um único fuso, igual ao do preço;
 - reservas e versões de orçamento novas são precificadas no fuso novo; um período que cruza a meia-noite em
   só um dos fusos pode ter número de dias de calendário diferente.
-- Ajustes viram cobranças pela sincronização idempotente do módulo financeiro.
