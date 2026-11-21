@@ -77,8 +77,9 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
     credencial com os escopos desejados. Para os papéis, as permissões valem imediatamente.
 - **Organização e filiais** (ver [módulo](modulos/configuracoes-organizacao.md)):
   - as configurações (nome, fuso horário, validade padrão do bloqueio temporário e política de
-    cancelamento) são alteradas somente por usuário com `organization.manage`, pela interface web; credenciais
-    de integração e da CLI não alteram, mesmo com o escopo `organization.manage`;
+    cancelamento) são alteradas somente por usuário com `organization.manage`, pela interface web ou pela API
+    com sessão (`PATCH /api/v1/organization/settings`, cookie de sessão e `X-CSRF-Token`); credenciais de
+    integração e da CLI não alteram, mesmo com o escopo `organization.manage` (ADR-029);
   - criar, editar, desativar e reativar filiais exigem `organization.manage`;
   - `organization.read` governa a página `/organizacao`, o detalhe de filial (`/organizacao/filiais/:id`),
     `GET /api/v1/organization` e `organization show` na CLI;
@@ -86,6 +87,10 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
   - credenciais existentes não ganham `organization.read`: é preciso criar outra credencial com o escopo;
   - o painel de assinatura (plano, preço e limites) aparece somente com `organization.manage`;
   - o histórico da filial aparece com `organization.manage` ou `audit.read`.
+- **API v1** (ver [módulo](modulos/api-v1.md)): cada endpoint exige a permissão do caso de uso, como escopo da
+  credencial; não há escopo próprio da API. A conversão de orçamento e o aditivo de contrato exigem também
+  `reservations.write`, e o cancelamento de contrato, `reservations.cancel`. Credenciais não aplicam desconto
+  manual (limite 0). Os retirantes autorizados aparecem no detalhe da retirada somente com `customers.read`.
 - **Cliente (portal):** ator `customer` com a permissão `portal.access`, sempre restrito ao próprio
   `customer_id`; recursos de outros clientes respondem como inexistentes.
 - **Worker (`system`):** executa somente tarefas enfileiradas pela própria aplicação, sempre no contexto de

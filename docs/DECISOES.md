@@ -332,8 +332,9 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
 - **Leitura e alteração (D10, D11):** `organization.read` (todos os papéis) governa a página, o detalhe de
   filial, a API e a CLI; quem só lê não vê formulários nem o painel de assinatura. As configurações são
   alteradas somente por usuário: a troca de fuso exige leitura e confirmação humanas e a auditoria liga a
-  alteração a uma pessoa. Por isso não há alteração pela API nem pela CLI nesta versão. As mutações de filial
-  exigem apenas a permissão, como a criação.
+  alteração a uma pessoa. Por isso não há alteração pela API nem pela CLI nesta versão (atualizado pelo ADR-029:
+  a API v1 passou a alterar as configurações por sessão de usuário; credenciais e CLI continuam sem alterar). As
+  mutações de filial exigem apenas a permissão, como a criação.
 - **Auditoria e métricas (D12):** valores anterior e novo, sem webhook novo; os conflitos novos entram em
   `domain_conflicts_total`.
 - **Plano (D13):** só a reativação de filial conta em `max_branches`.
@@ -373,3 +374,71 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   orçamento e o portal mostram a política registrada. Uma troca de fuso preserva o cálculo de tudo o que já foi
   precificado. A organização ganhou uma tela própria de configurações e as filiais, um ciclo ativa ⇄ inativa
   documentado em `MAQUINAS-DE-ESTADO.md`.
+
+## ADR-029 — API v1 ampliada: orçamentos, contratos, operação e alteração das configurações por sessão
+
+- **Contexto:** a API v1 cobria reservas, clientes, catálogo, disponibilidade, financeiro, condições
+  comerciais e a leitura da organização. Orçamentos, contratos, retirada, devolução, inspeções e alertas só
+  existiam na interface web, e as configurações não tinham alteração pela API (ADR-028). Toda mutação da API
+  roda na transação da chave de idempotência (ADR-017), e os casos de uso desses módulos só sabiam abrir a
+  própria transação: o coordenador recusa transação aninhada.
+- **Composição transacional genérica (D1):** `Application::Composition.run(uow, actor, permission, tx)` delega
+  a `uow.run` sem `tx` e, com `tx`, confere a permissão sobre o ator recebido e executa na transação do
+  chamador. Generaliza `CommercialTerms::Support.run` (mantido) e funciona com as unidades de trabalho falsas
+  dos testes unitários, que só implementam `run`. Os casos de uso usados por mutações da API ganharam `tx: nil`;
+  sem `tx`, o caminho da web e da CLI é o de antes.
+- **Detalhe lido na mesma transação (D2):** a mutação responde com o detalhe atualizado, lido pelo caso de uso
+  de leitura com `tx:` (a gravação ainda não foi confirmada). Esse corpo fica gravado na chave e o replay
+  devolve exatamente a mesma resposta.
+- **Configurações somente por sessão de usuário (D3):** `PATCH /organization/settings` vale só para sessão de
+  usuário com `organization.manage` (cookie de sessão e `X-CSRF-Token`). Credenciais recebem 403 `forbidden`,
+  mesmo com o escopo: a tela de credenciais oferece todos os escopos e as credenciais com `organization.manage`
+  foram emitidas sob a regra documentada de que não alteram configurações; liberar agora ampliaria em silêncio
+  o poder de tokens existentes, contra o precedente de que credenciais antigas não ganham capacidade nova. A
+  troca de fuso exige leitura humana das consequências, e a auditoria liga a alteração a uma pessoa. A
+  liberação para integrações fica como evolução futura, com permissão nova e dedicada e credenciais novas.
+- **PATCH parcial com versão obrigatória (D4):** chave presente altera o campo e chave ausente mantém o valor
+  (`Organization#revision_attrs` é a base da revisão). `lock_version` é obrigatório, ao contrário do "opcional
+  na API" das condições comerciais (ADR-027): a escrita parcial de configurações que afetam todo o tenant não
+  pode sobrescrever às cegas uma alteração concorrente. A troca de fuso exige `confirm_time_zone_change: true`.
+  Chaves desconhecidas ou não editáveis respondem 422 no nome da chave, em vez de serem ignoradas. Sem mudança
+  efetiva, 200 com `changed: false` e sem auditoria; a auditoria registra o canal (`via: api`).
+- **Política em pontos-base (D5):** o mesmo formato de `GET /organization`, validado por
+  `CancellationPolicy.build` (`from_tiers`), com as regras do ADR-028 e as mensagens agrupadas em
+  `faixas_cancelamento`. Só inteiros do JSON são aceitos.
+- **Criação que pode encontrar o existente (D6):** emissão de contrato, separação e conversão respondem 201
+  quando criam e 200 quando devolvem o existente, com `Location` nos dois casos. `IssueContract#issue` e
+  `StartPickup#open` devolvem o registro com `created`; `call` continua devolvendo o registro.
+- **Aprovação de orçamento vencido (D7):** na composição, a expiração gravada pela tentativa seria desfeita com
+  a transação da chave. O controlador trata o `quote_expired` chamando `ApproveQuote#record_expiration`, que só
+  expira e nunca aprova, e propaga o 409.
+- **Dados pessoais (D8):** os detalhes trazem `customer_id`, sem nome nem documento; os retirantes autorizados
+  aparecem somente com `customers.read`; documento, IP e navegador do aceite e o snapshot do documento não são
+  expostos.
+- **Escopos (D9):** a mesma matriz de permissões, sem permissão nova; as permissões adicionais continuam
+  conferidas dentro dos casos de uso (conversão e aditivo com `reservations.write`, cancelamento de contrato com
+  `reservations.cancel`, desconto manual recusado para credenciais pelo limite 0 do `VersionBuilder`).
+- **Fora do escopo (D10):** portal do cliente, aceite e encerramento de contrato, avarias, manutenção,
+  transferências, prévia e restauração de configurações, gestão de filiais e alteração das configurações por
+  credencial e pela CLI.
+- **PDF (D11):** `GET /contracts/{id}/documents/{version}` reutiliza `Attachments::Download` (permissão do dono,
+  404 entre organizações e para conteúdo ausente) e responde como anexo, sem cache, com `Repr-Digest`
+  (RFC 9530) a partir do SHA-256 gravado.
+- **Contrato OpenAPI exato (D12):** os schemas de resposta novos declaram `additionalProperties: false` e
+  `required` com todas as propriedades; um validador mínimo nos testes confere tipo, enum, formato,
+  obrigatórias e chaves extras contra respostas reais, inclusive de erro.
+- **Alternativas rejeitadas:**
+  - liberar `organization.manage` para credenciais: ampliaria o poder de credenciais já emitidas e tiraria da
+    troca de fuso a confirmação humana;
+  - permissão nova exclusiva para alterar configurações por integração: muda a matriz e exige decisão de
+    produto e credenciais novas; fica como evolução;
+  - não oferecer o PATCH: deixaria a API sem a alteração que a interface já faz com as mesmas regras, e o
+    caminho por sessão mantém a pessoa responsável na auditoria;
+  - repetir a aprovação no tratamento do `quote_expired`, como a confirmação de reserva com bloqueio vencido: a
+    repetição poderia aprovar fora da chave de idempotência;
+  - `lock_version` opcional no PATCH: uma escrita parcial sem versão sobrescreveria alterações concorrentes de
+    outra pessoa sem aviso.
+- **Consequências:** os casos de uso de orçamentos, contratos, operação e configurações aceitam a transação do
+  chamador, sem mudar a web nem a CLI. A API ganhou orçamentos, contratos, operação e a alteração das
+  configurações por sessão, com testes de conformidade das respostas com o OpenAPI. Integrações continuam sem
+  alterar configurações.

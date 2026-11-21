@@ -171,7 +171,27 @@ conflitos `stale_organization`, `stale_branch`, `last_active_branch` e `branch_i
 `GET /api/v1/organization` (escopo `organization.read`; tenant do token) devolve nome, identificador, fuso e
 rótulo, situação, versão, `settings` (validade e limites, política canônica, textos das faixas e os
 indicadores `*_default` por valor) e as filiais com `active` e `deactivated_at`. O detalhe da reserva inclui
-`cancellation_policy`. Não há alteração pela API nesta versão (ADR-028).
+`cancellation_policy`.
+
+`PATCH /api/v1/organization/settings` altera as configurações somente por sessão de usuário com
+`organization.manage` (cookie de sessão e `X-CSRF-Token`, o campo `_csrf` das páginas); credenciais recebem 403,
+mesmo com o escopo `organization.manage` (ADR-029). Regras:
+
+- PATCH parcial: chave presente altera o campo (`name`, `time_zone`, `hold_minutes`, `cancellation_policy`) e
+  chave ausente mantém o valor atual; `lock_version` é obrigatório e divergente responde 409
+  `stale_organization`;
+- a troca de fuso exige `confirm_time_zone_change: true` (422 em `confirmar_fuso`, a mensagem da tela);
+- a política usa o formato de `GET /organization` (`{"tiers": [{"min_hours_before": 48, "fee_bps": 1000}]}`),
+  com as regras e as mensagens da tela em `faixas_cancelamento`; textos e números com casas decimais são
+  recusados;
+- chaves desconhecidas ou não editáveis (`slug`, `status`, `settings`, `branches`...) respondem 422 no próprio
+  nome;
+- sem mudança efetiva, 200 com `changed: false` e sem auditoria; com mudança, a auditoria
+  `organization.settings_updated` traz `via: api`;
+- exige `Idempotency-Key`; a resposta é `{"organization": <objeto de GET /organization>, "changed": bool}`.
+
+Prévia, restauração dos valores padrão e gestão de filiais continuam somente na interface web. Detalhes em
+[`api-v1.md`](api-v1.md).
 
 ## CLI
 
@@ -212,12 +232,16 @@ API (`OrganizationSerializers.organization`). `whoami` e a resolução de `--fil
 | `test/concurrency/organization_settings_race_test.rb` | Edições simultâneas, desativação contra reserva e transferência nas duas ordens, últimas duas filiais sem assinatura, reativações no limite e reserva durante a troca de política |
 | `test/http/organization_settings_pages_test.rb`, `organization_branches_pages_test.rb` | Telas com `Rack::Lint`: acessibilidade, salvamento, 422 com a linha marcada, prévia, restauração, 409 entre abas, confirmação do fuso, CSRF, histórico, formulários abertos durante a troca, filiais, permissões e isolamento |
 | `test/http/organization_api_test.rb` | Formato completo, escopo, tenant do token e política no detalhe da reserva |
+| `test/http/organization_settings_api_test.rb` | PATCH por sessão: alteração parcial com auditoria `via: api`, operação nula, política em pontos-base com as mensagens da tela, confirmação do fuso, versão obrigatória e desatualizada, chaves desconhecidas, CSRF, idempotência, gerente e credenciais recusados e isolamento |
+| `test/unit/domain/organization_settings_test.rb` (faixas em pontos-base) | `from_tiers` (formato, regras e equivalência com o formulário), `revise` com `cancellation_tiers`, precedência das linhas do formulário e `revision_attrs` |
 | `test/cli/organization_test.rb` | Saída humana e JSON igual ao serializador, escopo e ajuda |
 | `test/browser/organization_settings_test.rb` | Nova faixa pelo módulo de linhas, prévia, salvamento, troca de fuso com foco no resumo de erros, edição e desativação de filial com o diálogo de confirmação |
 
 ## Limitações
 
-- As configurações são alteradas somente pela interface web, por usuário; a API v1 e a CLI apenas consultam.
+- As configurações são alteradas somente por usuário, pela interface web ou pela API v1 com sessão
+  (`PATCH /api/v1/organization/settings`); credenciais e CLI apenas consultam (ADR-029).
+- Prévia, restauração dos valores padrão e gestão de filiais não estão na API.
 - A lista de fusos oferece somente os fusos do Brasil (o atual é sempre aceito).
 - O CNPJ da organização (`legal_document`), impresso nos contratos, ainda não é editável; a coluna não recebe
   `UPDATE` da aplicação.

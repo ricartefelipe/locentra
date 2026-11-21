@@ -3,6 +3,35 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versões seguem
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Adicionado
+
+- **API v1 — orçamentos:** lista paginada com filtros, detalhe com versões, criação, nova versão, envio (com ou
+  sem bloqueio temporário), aprovação em nome do cliente, rejeição e conversão em reserva (`201` quando cria,
+  `200` quando já convertido, com `Location` da reserva). Tarifas nas versões com as regras da reserva.
+- **API v1 — contratos:** lista paginada, detalhe com documentos, aditivos e prévia de cancelamento, emissão a
+  partir da reserva (`201`/`200`), aditivo de extensão e cancelamento com a política do contrato.
+- **API v1 — PDF do contrato:** `GET /contracts/{id}/documents/{version}` como anexo, sem cache, com
+  `Repr-Digest` (SHA-256 gravado na geração).
+- **API v1 — operação:** separação (`201`/`200`), conferência, entrega e cancelamento da retirada; itens a
+  devolver, registro e detalhe da devolução; listas paginadas de inspeções (com aprovação e reprovação) e de
+  alertas (com resolução).
+- **API v1 — configurações da organização:** `PATCH /organization/settings` somente por sessão de usuário com
+  `organization.manage` (cookie de sessão e `X-CSRF-Token`), parcial, com `lock_version` obrigatório,
+  confirmação da troca de fuso e política em pontos-base; credenciais recebem 403 (ADR-029).
+- OpenAPI com schemas de resposta fechados, esquema de segurança de sessão e o parâmetro `X-CSRF-Token`; testes
+  que conferem as respostas reais contra o contrato.
+
+### Alterado
+
+- `GET /contracts` e o caso de uso de lista de contratos aceitam o filtro `customer_id` para a equipe.
+- `Organization#revise` aceita a política em faixas com pontos-base (`cancellation_tiers`), além das linhas do
+  formulário, e a alteração das configurações aplica somente os campos informados.
+- A auditoria `organization.settings_updated` registra o canal (`via: api`) quando a alteração vem da API.
+- Os casos de uso de orçamentos, contratos, retirada, devolução, inspeções, alertas e configurações aceitam a
+  transação do chamador (`tx:`), sem mudança na interface web e na CLI.
+
 ## [1.2.0] — 2026-11-21
 
 ### Adicionado
