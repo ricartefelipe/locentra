@@ -38,7 +38,7 @@ docker compose --profile ops run --rm migrate ruby bin/locentra-admin db:status
   conteúdo original e crie uma migration nova.
 - A aplicação e o worker nunca usam a credencial de migration.
 
-## 3. Backup do banco e dos anexos — exercitado em 20/11/2026 (esquema da 1.0.0)
+## 3. Backup do banco e dos anexos — exercitado em 21/11/2026 (esquema da 1.1.0)
 
 Papel dedicado `locentra_backup` (somente leitura, `BYPASSRLS`, membro de `pg_read_all_data`). Como a RLS é
 forçada inclusive para o proprietário, um backup feito com o proprietário ou com o papel da aplicação sairia
@@ -63,7 +63,7 @@ caminho inexistente) o script termina com erro antes do dump; omitir os anexos e
 `STORAGE_ROOT` para o diretório real dos anexos. Guarde o diretório do backup fora do servidor, cifrado,
 com retenção definida pela política da operação.
 
-## 4. Restauração — exercitada em 20/11/2026 (esquema da 1.0.0)
+## 4. Restauração — exercitada em 21/11/2026 (esquema da 1.1.0)
 
 Executada por administrador do PostgreSQL (superusuário), sempre em **banco novo**; os proprietários
 originais (`locentra_owner`) e as políticas de RLS são preservados.
@@ -91,22 +91,25 @@ docker run --rm -v "$PWD/tmp/anexos-restaurados":/origem:ro -v locentra_storage:
 docker compose up -d --wait web worker
 ```
 
-### Registro do exercício (20/11/2026, PostgreSQL 18.7, branch release/1.0.0, banco semeado com um anexo)
+### Registro do exercício (21/11/2026, PostgreSQL 18.7, branch release/1.1.0, banco da 1.0.0 atualizado)
 
-Backup com `bin/backup` (imagem `postgres:18.7-trixie`, papel `locentra_backup`, `STORAGE_ROOT` apontando para
-o diretório dos anexos) e restauração com `bin/restore` em banco novo, que foi removido depois da validação.
+Banco criado pela 1.0.0 (seed e dados legados), atualizado para a 0015 pelo procedimento da seção 13 e com
+um anexo PDF enviado pela tela do cliente. Backup com `bin/backup` (imagem `postgres:18.7-trixie`, papel
+`locentra_backup`, volume `locentra_storage` montado somente para leitura) e restauração com `bin/restore` em
+banco novo, removido depois da validação.
 
 | Verificação | Resultado |
 |---|---|
 | Manifesto SHA-256 do backup | conferido antes da restauração; backup informou 1 arquivo de anexo |
-| `db:status` no banco restaurado | 14 migrations aplicadas, sem checksum divergente |
-| Contagem de linhas por tabela (origem × restaurado, via `locentra_backup`) | 69 tabelas, 224 linhas, idênticas tabela a tabela |
-| RLS no banco restaurado com `locentra_app` | sem contexto: 0 clientes; com contexto da organização: 2 clientes, nenhum de outra (4 clientes em 3 organizações no total) |
-| Permissões do banco restaurado | `PUBLIC` sem `CONNECT` nem `TEMPORARY`; `locentra_app` com `CONNECT` |
-| Anexo restaurado | SHA-256 do arquivo igual ao registrado em `attachments.sha256` |
+| `db:status` no banco restaurado (serviço `migrate`) | 15 migrations aplicadas, sem checksum divergente |
+| Contagem de linhas por tabela (origem × restaurado, via `locentra_backup`) | 71 tabelas, 318 linhas, idênticas tabela a tabela (inclui `coupons`, `customer_price_agreements` e `additional_fees`) |
+| RLS no banco restaurado com `locentra_app` | sem contexto: 0 cupons; com contexto da organização: 4 cupons, nenhum de outra (5 no total) |
+| Permissões do banco restaurado | `PUBLIC` sem acesso; `CONNECT`/`TEMPORARY` para `locentra_app` e `locentra_worker`; `CONNECT` para `locentra_backup` |
+| Anexo restaurado | SHA-256 do arquivo igual ao do arquivo enviado e ao registrado em `attachments.sha256` |
 
-Exercício anterior (18/11/2026, 10 migrations e 67 tabelas): encontrou e corrigiu a remoção do schema
-`public` pelo script, que o dump não recria.
+Exercícios anteriores: 20/11/2026 (14 migrations, 69 tabelas, 224 linhas, mesmas verificações, todas
+conferidas) e 18/11/2026 (10 migrations e 67 tabelas), que encontrou e corrigiu a remoção do schema `public`
+pelo script, que o dump não recria.
 
 **Não exercitado:** recuperação em ponto no tempo (arquivamento contínuo de WAL) e restauração a partir de
 object storage — dependem da infraestrutura de produção escolhida.
@@ -205,7 +208,7 @@ proxy reverso (nginx, balanceador):
 Limites por IP e por credencial (ADR-026) respondem `429` com `Retry-After`; `API_RATE_LIMIT` ajusta o
 limite da API por credencial por minuto.
 
-## 12. Implantação de uma versão publicada — procedimento escrito
+## 12. Implantação de uma versão publicada — exercitado com imagem local em 21/11/2026 (sem o GHCR)
 
 A publicação está descrita em `CONTRIBUTING.md` (tag anotada `vX.Y.Z`, CI completa e `PUBLISH_IMAGE=true`).
 A imagem publicada é `ghcr.io/<repositório>:X.Y.Z`; não existe tag `latest`, então a versão é sempre
@@ -218,15 +221,19 @@ explícita.
 4. Para voltar à versão anterior, use a imagem anterior; migrations são aditivas, mas confirme no
    `CHANGELOG.md` se a versão nova tem migration que a anterior não tolera antes de reverter.
 
+Os passos 1 a 4 foram exercitados na atualização da 1.0.0 para a 1.1.0 (registro na seção 13.5) com imagens
+construídas localmente; o download da imagem publicada no GHCR não foi exercitado, porque a publicação não
+está habilitada no repositório.
+
 Versões com verificação prévia ou restrição de retorno têm seção própria: migration 0015 na seção 13.
 
-## 13. Atualização para a migration 0015 (condições comerciais) — procedimento escrito
+## 13. Atualização para a migration 0015 (condições comerciais) — exercitado em 21/11/2026
 
 A migration `0015_condicoes_comerciais.sql` é aplicada numa única transação. A atualização a partir do
 esquema da 0014 é coberta por `test/repository/migration_0015_test.rb` (colunas preenchidas, RLS forçada
 restaurada, contador de usos preservado, cupons legados fora dos limites novos ainda desativáveis e recusa
-de condições sobrepostas); o procedimento abaixo ainda não
-foi executado num ambiente com dados reais e será exercitado na release 1.1.0.
+de condições sobrepostas). O procedimento abaixo foi exercitado de ponta a ponta sobre um banco criado pela
+1.0.0; o registro está na seção 13.5.
 
 ### 13.1 Verificação prévia (antes do passo 2 da seção 12)
 
@@ -335,3 +342,30 @@ Com `cupons_com_limite_usados` maior que zero, desative esses cupons (tela **Cup
 maior que zero, não volte: as condições não podem mais ser ajustadas para a regra antiga. Nesses casos,
 corrija o problema na versão nova. A restauração do backup anterior à migration (seção 4) descarta tudo o que
 foi registrado depois dele.
+
+### 13.5 Registro do exercício (21/11/2026, PostgreSQL 18.7, branch release/1.1.0)
+
+Ambiente Compose da 1.0.0 com seed e dados legados criados pelo papel da aplicação: duas condições
+negociadas sobrepostas para o mesmo cliente (5% com fim em 60 dias e 8% sem prazo), um cupom com limite já
+usado duas vezes (`LEGADO10`, 2 de 5) e um cupom com fim de vigência anterior ao início (`INVERTIDO`). Web e
+worker da 1.0.0 ficaram em execução durante a migration.
+
+| Passo | Resultado |
+|---|---|
+| 13.1, consulta 1 (`locentra_backup`) | 1 par sobreposto listado, com organização, cliente, ids e descontos |
+| 13.1, consulta 2 | o cupom `INVERTIDO` listado |
+| `db:migrate` com a imagem 1.1.0 antes do ajuste | abortou com `migração 0015: 1 par(es) de condições negociadas com vigências sobrepostas (organização …, cliente …)`; o esquema continuou na 0014 |
+| 13.2, ajuste com `locentra_app` e contexto da organização | a condição mais antiga passou a terminar no início da mais nova; a consulta 1 voltou vazia |
+| Backup da seção 3 antes da migration | gravado |
+| `db:migrate` (seção 12, passo 2) | 0015 aplicada em cerca de 3 s, com a 1.0.0 em execução |
+| 1.0.0 sobre o esquema da 0015 | `/health/ready` 200 (`database` e `migrations` ok) e tela de entrada 200 |
+| Troca de web e worker para a 1.1.0 (seção 12, passo 3) | os dois `healthy` em 16 s; `/health/ready` 200 |
+| Dados legados depois da migration | `LEGADO10` exibido com "2 de 5" usos (contador antigo preservado); as duas condições com início preenchido e sem sobreposição |
+| `db:seed` da 1.1.0 | tarifas, cupons e condições de demonstração acrescentados sem alterar os dados existentes |
+| Cupom legado com vigência inválida | exibido como "Expirado" e desativado pela tela **Cupons**, com `coupon.deactivated` na auditoria |
+| 13.4, consulta de retorno | `usos_no_livro` 0, `cupons_com_limite_usados` 0, `condicoes_encerradas_ou_agendadas` 0 |
+| Retorno à imagem 1.0.0 e volta à 1.1.0 | os dois sentidos `healthy`, `/health/ready` 200; parada final de web e worker com código 0 |
+
+No exercício, o Compose da 1.1.0 foi executado a partir de outro diretório, o que recriou o contêiner do
+PostgreSQL (o caminho montado de `docker/postgres/init` mudou) sem perda de dados, porque o volume `pgdata`
+é o mesmo. Numa atualização feita a partir do mesmo checkout isso não ocorre.
