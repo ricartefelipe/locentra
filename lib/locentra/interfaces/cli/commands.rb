@@ -1,24 +1,20 @@
 # frozen_string_literal: true
 
-require "date"
 require_relative "output"
+require_relative "command_support"
+require_relative "commercial_terms_commands"
 
 module Locentra
   module Interfaces
     module CLI
-      # Resultado de um comando: dados para `--json`, linhas para a saída humana e código de saída.
-      Result = Data.define(:data, :lines, :exit_code) do
-        def self.ok(data, lines) = new(data: data, lines: lines, exit_code: ExitCodes::OK)
-      end
-
       # Comandos da CLI operacional. Cada comando chama somente casos de uso da aplicação, com o ator
       # autenticado pela credencial: autorização, revalidação da credencial, isolamento por
       # organização e auditoria são os mesmos da interface web e da API.
       class Commands
+        include CommandSupport
+
         F = Formatting
         S = Serializers
-        OFFSET = /(Z|[+-]\d{2}:\d{2})\z/
-        DATE_ONLY = /\A\d{4}-\d{2}-\d{2}\z/
         HOLDS = { "inspection" => "inspeção pendente", "maintenance" => "ordem de manutenção ativa" }.freeze
         REPORT_STATUSES = { "running" => "Em execução", "completed" => "Concluída", "failed" => "Falhou" }.freeze
         ERROR_WIDTH = 100
@@ -30,7 +26,10 @@ module Locentra
           @actor = actor
         end
 
+        # Os comandos de condições comerciais (cupons, tarifas e condições negociadas) ficam em classe própria.
         def run(invocation)
+          return CommercialTermsCommands.new(system: @system, actor: @actor).run(invocation) if CommercialTermsCommands.handles?(invocation.command.handler)
+
           options = invocation.options
           argument = invocation.argument
           case invocation.command.handler
@@ -46,12 +45,6 @@ module Locentra
         end
 
         private
-
-        def uc(name) = @system.use_cases[name]
-
-        # Organização e filiais do ator (não exige permissão além da credencial válida).
-        def organization = @organization ||= uc(:get_organization).call(@actor)
-        def zone = organization[:organization].time_zone
 
         def whoami
           info = uc(:whoami).call(@actor)
@@ -101,8 +94,7 @@ module Locentra
                                                      from: from, to: to, sort: options[:sort] || "-starts_at", limit: options[:limit],
                                                      offset: options[:offset])
           names = Application::Reservations::ListReservations.customer_names?(@actor)
-          data = { "data" => page.items.map { |row| reservation_row(row, names) },
-                   "pagination" => { "limit" => page.limit, "offset" => page.offset, "total" => page.total, "next_offset" => page.next_offset } }
+          data = { "data" => page.items.map { |row| reservation_row(row, names) }, "pagination" => pagination(page) }
           Result.ok(data, reservation_lines(page, names))
         end
 
@@ -120,9 +112,7 @@ module Locentra
             [r.code, r.status_label, names ? row[:customer_name] : r.customer_id, F.time(r.period.starts_at, zone), F.time(r.period.ends_at, zone),
              r.total.format_brl]
           end
-          shown = "Exibindo #{page.offset + 1}–#{page.offset + page.items.size} de #{page.total} (horários em #{zone.identifier})."
-          shown += " Próxima página: --deslocamento #{page.next_offset}." if page.next_offset
-          lines = [*F.table(["Código", "Situação", names ? "Cliente" : "Cliente (id)", "Retirada", "Devolução", "Total"], rows), "", shown]
+          lines = [*F.table(["Código", "Situação", names ? "Cliente" : "Cliente (id)", "Retirada", "Devolução", "Total"], rows), "", shown_line(page)]
           names ? lines : lines + ["Nomes de clientes omitidos: a credencial não tem customers.read."]
         end
 
@@ -326,21 +316,6 @@ module Locentra
           job = uc(:retry_job).call(@actor, job_id)
           Result.ok({ "job" => job }, ["Tarefa #{job["id"]} (#{job["kind"]}) reenfileirada para reprocessamento.",
                                        "Tentativas anteriores: #{job["previous_attempts"]}. A operação foi registrada na auditoria."])
-        end
-
-        # Instante em ISO 8601 com fuso, data local (início do dia) ou data e hora locais da organização.
-        def instant(text, field)
-          value = text.to_s.strip
-          return Domain::Period.parse_instant(value, field) if value.match?(OFFSET)
-          return zone.start_of_day(Date.iso8601(value)) if value.match?(DATE_ONLY)
-
-          zone.parse_local(value)
-        rescue Date::Error
-          raise Domain::ValidationError.field(field, "data inexistente")
-        rescue Domain::ValidationError => e
-          raise e if e.errors.key?(field)
-
-          raise Domain::ValidationError.field(field, "#{e.errors.values.flatten.join("; ")} (fuso #{zone.identifier})")
         end
 
         def pick_branch(reference)

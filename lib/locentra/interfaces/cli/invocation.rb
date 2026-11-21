@@ -56,7 +56,28 @@ module Locentra
         Command.new(words: %w[jobs failures], handler: :jobs_failures, argument: nil, options: %i[limit],
                     summary: "Tarefas mortas (tentativas esgotadas) da organização"),
         Command.new(words: %w[jobs retry], handler: :jobs_retry, argument: "ID", options: [],
-                    summary: "Reprocessa uma tarefa morta (exige jobs.manage; auditado)")
+                    summary: "Reprocessa uma tarefa morta (exige jobs.manage; auditado)"),
+        Command.new(words: %w[coupons list], handler: :coupons_list, argument: nil,
+                    options: %i[coupon_status term_search coupon_sort limit offset], summary: "Cupons com situação, vigência e usos"),
+        Command.new(words: %w[coupons show], handler: :coupons_show, argument: "CÓDIGO|ID", options: %i[limit offset],
+                    summary: "Detalhes de um cupom e seus usos (as opções paginam os usos)"),
+        Command.new(words: %w[coupons create], handler: :coupons_create, argument: nil,
+                    options: %i[code kind value description valid_from valid_until max_uses min_subtotal], required: %i[code kind value],
+                    summary: "Cadastra um cupom (exige coupons.write; auditado)"),
+        Command.new(words: %w[coupons deactivate], handler: :coupons_deactivate, argument: "CÓDIGO|ID", options: [],
+                    summary: "Desativa um cupom; reservas já registradas não mudam"),
+        Command.new(words: %w[coupons reactivate], handler: :coupons_reactivate, argument: "CÓDIGO|ID", options: [],
+                    summary: "Reativa um cupom desativado"),
+        Command.new(words: %w[fees list], handler: :fees_list, argument: nil, options: %i[fee_status term_search limit offset],
+                    summary: "Tarifas adicionais do catálogo"),
+        Command.new(words: %w[fees show], handler: :fees_show, argument: "CÓDIGO|ID", options: [], summary: "Detalhes de uma tarifa adicional"),
+        Command.new(words: %w[agreements list], handler: :agreements_list, argument: nil, options: %i[customer limit offset],
+                    required: %i[customer], summary: "Condições negociadas de um cliente"),
+        Command.new(words: %w[agreements create], handler: :agreements_create, argument: nil,
+                    options: %i[customer discount agreement_product valid_from valid_until notes], required: %i[customer discount],
+                    summary: "Cadastra condição negociada (exige price_agreements.write; auditado)"),
+        Command.new(words: %w[agreements end], handler: :agreements_end, argument: "ID", options: %i[reason end_at], required: %i[reason],
+                    summary: "Encerra uma condição negociada, agora ou em instante agendado")
       ].freeze
 
       GROUPS = COMMANDS.select { |c| c.words.size == 2 }.map { |c| c.words.first }.uniq.freeze
@@ -73,7 +94,24 @@ module Locentra
         to: ["--ate INSTANTE", "Reservas que começam antes do instante (aceita data AAAA-MM-DD, início do dia local)"],
         sort: ["--ordem=ORDEM", "Ordenação: #{Application::Reservations::ListReservations::SORTS.join(", ")} (padrão -starts_at)"],
         limit: ["--limite N", "Quantidade máxima de itens (1 a #{Application::MAX_PAGE_LIMIT})"],
-        offset: ["--deslocamento N", "Quantidade de itens a pular (paginação)"]
+        offset: ["--deslocamento N", "Quantidade de itens a pular (paginação)"],
+        coupon_status: ["--situacao SITUAÇÃO", "Situação do cupom: #{Domain::Pricing::COUPON_STATUSES.keys.join(", ")}"],
+        fee_status: ["--situacao SITUAÇÃO", "Situação da tarifa: active ou inactive"],
+        term_search: ["--busca TEXTO", "Trecho do código, da descrição (cupons) ou do nome (tarifas)"],
+        coupon_sort: ["--ordem=ORDEM", "Ordenação: code (padrão), -created_at, valid_until"],
+        code: ["--codigo CÓDIGO", "Código do cupom (convertido para maiúsculas)"],
+        kind: ["--tipo TIPO", "percent (percentual) ou fixed (valor fixo)"],
+        value: ["--valor VALOR", "Desconto: percentual (10 ou 12,5) para percent; reais (50,00) para fixed"],
+        description: ["--descricao TEXTO", "Descrição"],
+        valid_from: ["--inicio-vigencia INSTANTE", "Início da vigência (formatos de --inicio)"],
+        valid_until: ["--fim-vigencia INSTANTE", "Fim exclusivo da vigência (formatos de --inicio)"],
+        max_uses: ["--maximo-usos N", "Máximo de usos (1 a 1.000.000)"],
+        min_subtotal: ["--subtotal-minimo VALOR", "Subtotal mínimo em reais"],
+        agreement_product: ["--produto SKU|ID", "Produto da condição (padrão: todos os produtos)"],
+        discount: ["--desconto PERCENTUAL", "Desconto negociado (até 90%, duas casas)"],
+        notes: ["--observacoes TEXTO", "Observações"],
+        reason: ["--motivo TEXTO", "Motivo do encerramento"],
+        end_at: ["--encerrar-em INSTANTE", "Instante do encerramento (padrão: agora)"]
       }.freeze
 
       Invocation = Data.define(:command, :options, :argument, :help, :json, :token_file)
