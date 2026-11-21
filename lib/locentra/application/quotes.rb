@@ -35,7 +35,8 @@ module Locentra
       end
 
       # Monta e precifica o conteúdo de uma versão, sem gravar. Os preços vêm do catálogo vigente e
-      # do Pricer sem cupom (orçamentos não aplicam cupons) e sem alterar disponibilidade. Devolve a
+      # do Pricer sem cupom (orçamentos não aplicam cupons) e sem alterar disponibilidade; a política de
+      # cancelamento vigente da organização é congelada na versão, com os preços. Devolve a
       # versão e as tarifas ajustadas (para a auditoria; não entram no snapshot gravado). Na revisão,
       # `previous_fees` são as tarifas da versão anterior: as entradas mantidas iguais já foram
       # autorizadas e não exigem nova autorização.
@@ -63,7 +64,7 @@ module Locentra
           version = Q::Version.new(id: @ids.uuid, quote_id: quote_id, number: number, branch_id: branch_id, period: period, valid_until: valid_until,
                                    items: priced.items, pricing: summary, terms: Q::Rules.terms(input[:terms]), manual_discount_bps: discount,
                                    deposit: Domain::Money.new(summary.fetch("deposit_cents")), total: Domain::Money.new(summary.fetch("total_cents")),
-                                   created_at: now, sent_at: nil)
+                                   created_at: now, sent_at: nil, cancellation_policy: org.cancellation_policy)
           [version, priced.overrides]
         end
 
@@ -277,7 +278,8 @@ module Locentra
                                      customer_id: quote.customer_id, branch_id: version.branch_id, period: version.period, lines: version.lines,
                                      mode: "hold", hold_minutes: quote.hold_minutes, source: "quote",
                                      notes: "Bloqueio temporário do orçamento #{quote.code} (versão #{version.number})",
-                                     pricing_snapshot: { items: version.items, summary: version.pricing }
+                                     pricing_snapshot: { items: version.items, summary: version.pricing },
+                                     cancellation_policy: version.cancellation_policy
                                    }, tx: tx)
         rescue Domain::Unavailable => e
           raise Domain::Unavailable.new(e.shortages, "Sem disponibilidade para o bloqueio temporário do orçamento; ajuste a versão ou envie sem bloqueio")
@@ -488,7 +490,8 @@ module Locentra
                                        mode: "confirm", source: "quote", quote_id: quote.id,
                                        notes: "Convertida do orçamento #{quote.code} (versão #{version.number})",
                                        pricing_snapshot: { items: version.items,
-                                                           summary: version.pricing.merge("quote_code" => quote.code, "quote_version" => version.number) }
+                                                           summary: version.pricing.merge("quote_code" => quote.code, "quote_version" => version.number) },
+                                       cancellation_policy: version.cancellation_policy
                                      }, tx: tx)
           end
           [reservation, true]
