@@ -77,8 +77,10 @@ de orçamento com a da organização, desligando `quote_versions_protect` soment
     e-mails informam o fuso ("Horários no fuso horário America/Manaus.");
   - datas de vencimento já gravadas não mudam;
   - formulários abertos antes da troca: todo formulário POST com data e hora local leva o campo oculto `fuso`;
-    se ele diferir do fuso atual, o envio é recusado com 422 no campo `fuso` e nada é gravado. A API não é
-    afetada (ISO 8601 com deslocamento).
+    se ele diferir do fuso atual, o envio é recusado com 422 no campo `fuso` e nada é gravado; os valores
+    enviados voltam ao formulário, que passa a levar o fuso atual. No portal, a consulta de disponibilidade é
+    refeita no fuso atual para reexibir a tabela com as quantidades e as observações. A API não é afetada
+    (ISO 8601 com deslocamento).
 - A tela mostra, antes da confirmação, quantas reservas e quantos contratos estão em aberto e quantos cupons e
   condições negociadas têm instante de vigência futuro.
 

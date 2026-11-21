@@ -2,11 +2,13 @@
 
 require_relative "portal_http_helper"
 require_relative "../support/commercial_terms_support"
+require_relative "../support/organization_settings_support"
 
 # Funcionalidades do portal pela interface (Rack::Lint): disponibilidade e solicitação de reserva,
 # reservas, orçamentos, contratos com aceite e PDF, cobranças e isolamento entre clientes e organizações.
 class PortalPagesTest < PortalHttpTest
   include CommercialTermsSupport
+  include OrganizationSettingsSupport
 
   def test_availability_check_and_reservation_request_through_the_screens
     portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
@@ -35,6 +37,31 @@ class PortalPagesTest < PortalHttpTest
     assert_includes page, "Entrega &lt;script&gt;x&lt;/script&gt;"
     assert_includes get_ok("/portal/reservas"), "Solicitada"
     assert_equal %w[requested portal], owner_query("SELECT status, source FROM reservations").first.values_at("status", "source")
+  end
+
+  # Solicitação enviada de uma tela aberta antes da troca de fuso: recusada sem gravar, com a tabela, as
+  # quantidades e as observações reexibidas e o fuso atual no formulário, para conferir e enviar de novo.
+  def test_reservation_request_from_a_page_opened_before_the_time_zone_change_keeps_the_form
+    portal_customer(@actor, @customer, email: "paula@cliente.test", name: "Paula Compras")
+    portal_login
+
+    assert_includes get_ok("/portal/disponibilidade?filial=#{@branch.id}&inicio=2026-03-10T05:00&fim=2026-03-11T05:00"),
+                    'name="fuso" value="America/Sao_Paulo"'
+    change_settings(timezone: "America/Manaus", confirm_timezone_change: true)
+    portal_post "/portal/reservas", request_form("2", "observacoes" => "Entregar na portaria B", "fuso" => "America/Sao_Paulo")
+    body = last_response.body
+
+    assert_equal 422, last_response.status
+    assert_includes body, "o fuso horário da organização mudou de America/Sao_Paulo para America/Manaus enquanto o formulário estava aberto"
+    assert_includes body, %(action="/portal/reservas")
+    assert_includes body, 'name="fuso" value="America/Manaus"'
+    assert_includes body, "Entregar na portaria B"
+    assert_match(/name="quantidade\[\]"[^>]*value="2"/, body)
+    assert_equal 0, owner_query("SELECT count(*) AS n FROM reservations").first["n"].to_i
+    portal_post "/portal/reservas", request_form("2", "observacoes" => "Entregar na portaria B", "fuso" => "America/Manaus")
+
+    assert_equal 303, last_response.status
+    assert_equal "2026-03-10 09:00:00+00", owner_query("SELECT starts_at FROM reservations").first["starts_at"]
   end
 
   def test_reservation_requests_are_limited_per_portal_user

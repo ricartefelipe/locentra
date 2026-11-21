@@ -323,7 +323,9 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   painel, financeiro, atrasos, calendário, telas, CLI e e-mails) usa o fuso novo, e os e-mails informam o fuso.
   Formulários abertos antes da troca levam o campo oculto `fuso` e são recusados com 422: interpretar os
   horários digitados no fuso novo mudaria o instante sem aviso. Foi escolhido 422 com `ValidationError` (e não
-  409) porque todos os controladores já reexibem os valores enviados nesse caso.
+  409) porque todos os controladores já reexibem os valores enviados nesse caso. No portal, a solicitação
+  recusada volta à consulta de disponibilidade refeita no fuso atual (a consulta não grava nada), com as
+  quantidades e as observações enviadas.
 - **Nome e filiais (D8, D9):** o nome é editável e o `slug` não muda; contratos emitidos mantêm o nome dos
   termos. Filiais têm nome e endereço editáveis com `lock_version`; o código não muda, porque é usado em
   `--filial` e nos snapshots.

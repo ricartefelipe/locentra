@@ -78,8 +78,9 @@ module Locentra
 
         # Data e hora local (datetime-local) no fuso da organização. Formulário exibido antes de uma troca de
         # fuso (campo oculto `fuso` diferente do atual) é recusado: os horários seriam lidos no fuso novo.
-        def local_time(ctx, value, field)
-          form_zone!(ctx)
+        # `check_zone: false` só serve para reexibir uma consulta (nada é gravado), no fuso atual.
+        def local_time(ctx, value, field, check_zone: true)
+          form_zone!(ctx) if check_zone
           begin
             ctx.time_zone.parse_local(value)
           rescue Domain::ValidationError
@@ -101,8 +102,8 @@ module Locentra
           value.to_s.strip.empty? ? nil : local_time(ctx, value, field)
         end
 
-        def period_from(ctx, starts, ends)
-          Domain::Period.new(local_time(ctx, starts, "inicio"), local_time(ctx, ends, "fim"))
+        def period_from(ctx, starts, ends, check_zone: true)
+          Domain::Period.new(local_time(ctx, starts, "inicio", check_zone: check_zone), local_time(ctx, ends, "fim", check_zone: check_zone))
         end
 
         # Período via API: ISO 8601 com offset.

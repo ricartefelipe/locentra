@@ -14,14 +14,17 @@ module Locentra
             render(ctx, "portal/home", title: "Início", data: uc(:portal_home).call(ctx.actor))
           end
 
-          # Consulta por filial e período; o resultado traz o formulário de solicitação de reserva.
+          # Consulta por filial e período; o resultado traz o formulário de solicitação de reserva. A consulta
+          # não grava nada e é sempre lida no fuso atual, inclusive ao reexibir uma solicitação recusada por
+          # fuso divergente: a tabela, as quantidades e as observações voltam com o fuso atual no formulário.
           def availability(ctx, errors: {}, status: 200, values: nil)
             values ||= ctx.rack.GET
             branches = uc(:portal_availability).branches(ctx.actor)
             result = nil
             unless values["inicio"].to_s.empty?
               begin
-                result = uc(:portal_availability).call(ctx.actor, branch_id: values["filial"], period: period_from(ctx, values["inicio"], values["fim"]),
+                period = period_from(ctx, values["inicio"], values["fim"], check_zone: false)
+                result = uc(:portal_availability).call(ctx.actor, branch_id: values["filial"], period: period,
                                                                   lines: lines_from(values["produto"], values["quantidade"]))
               rescue Domain::ValidationError, Domain::NotFound => e
                 errors = errors.merge(errors_of(e))
