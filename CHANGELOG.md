@@ -31,7 +31,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 ### Alterado
 
 - O uso de cupom passa a ser registrado por reserva (livro de usos) e é liberado quando a reserva é
-  cancelada ou o bloqueio temporário expira. Na 1.0.0 o contador só aumentava.
+  cancelada ou o bloqueio temporário expira. Na 1.0.0 o contador só aumentava. Para o limite de usos, o
+  bloqueio vencido continua contando por 5 minutos, porque uma confirmação iniciada antes do vencimento
+  pode estar em andamento.
 - O snapshot de preços de reservas, orçamentos e contratos identifica o cupom (`coupon`), as condições
   negociadas aplicadas (`agreements` e `negotiated_agreement_id` em cada item) e, em cada tarifa, a origem e o
   valor padrão. O contrato em PDF descreve cupom, condições e tarifas.
@@ -49,7 +51,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
   `docs/RUNBOOKS.md`, seção 13: condições negociadas sobrepostas herdadas da 1.0.0 abortam a migration, com
   mensagem que identifica a organização e o cliente, e precisam ser ajustadas antes. A migration altera
   `coupons`, `customer_price_agreements`, `reservations` e `reservation_items` com travas exclusivas de curta
-  duração; aplique-a antes de substituir web e worker.
+  duração; aplique-a antes de substituir web e worker. Cupons da 1.0.0 com fim de vigência anterior ao início
+  ou máximo acima de 1.000.000 continuam aceitos e podem ser desativados; a edição exige corrigir o campo.
 - Credenciais de integração existentes não recebem os escopos novos; crie credenciais novas para usá-los.
 - **Retorno à versão 1.0.0:** o esquema continua compatível, mas a 1.0.0 conta somente o contador antigo de
   usos (ignora os usos registrados depois da migration) e ignora o início e o encerramento das condições
