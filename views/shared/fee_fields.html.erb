@@ -16,7 +16,7 @@
       <% kept.each do |fee_id, amount| %>
         <li data-kept-line>
           <input type="hidden" name="tarifa_id[]" value="<%= fee_id %>"><input type="hidden" name="tarifa_valor[]" value="<%= amount %>">
-          <%= by_id[fee_id] ? by_id[fee_id].name : "Tarifa" %> · R$ <%= amount %>
+          <%= by_id[fee_id] ? by_id[fee_id].name : "Tarifa" %> · <%= money_text(amount) %>
           <% if by_id[fee_id] %><span class="muted">(valor ajustado; padrão <%= money(by_id[fee_id].default_amount) %>)</span><% end %>
           <button type="button" class="link-button" data-remove-kept>Remover</button>
         </li>
@@ -24,7 +24,7 @@
       <% customs.each do |description, amount| %>
         <li data-kept-line>
           <input type="hidden" name="avulsa_descricao[]" value="<%= description %>"><input type="hidden" name="avulsa_valor[]" value="<%= amount %>">
-          <%= description %> · R$ <%= amount %> <span class="muted">(avulsa)</span>
+          <%= description %> · <%= money_text(amount) %> <span class="muted">(avulsa)</span>
           <button type="button" class="link-button" data-remove-kept>Remover</button>
         </li>
       <% end %>

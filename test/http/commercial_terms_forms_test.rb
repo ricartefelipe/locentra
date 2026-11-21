@@ -183,4 +183,23 @@ class CommercialTermsFormsTest < CommercialTermsHttpTest
     refute audit_events("quote.revised").first["details"].key?("fee_overrides")
     assert_equal 2, uc(:get_quote).call(@actor, quote.id)[:quote].current_version
   end
+
+  # As tarifas mantidas aparecem como valor (com separador de milhar); o campo oculto guarda o texto do
+  # formulário.
+  def test_kept_fees_are_displayed_as_money_values
+    quote = uc(:create_quote).call(@actor, { customer_id: @customer.id, branch_id: @branch.id, lines: [line(@camera, 1)], period: rental,
+                                             valid_until: t("2026-03-06T21:00:00Z"),
+                                             fees: [catalog_fee(@fee, 160_000), custom_fee("Taxa de palco <i>", 123_456)] })
+    sign_in_as("attendant")
+    form = get_ok("/orcamentos/#{quote.id}/nova-versao")
+
+    assert_includes form, %(<input type="hidden" name="tarifa_valor[]" value="1600,00">)
+    assert_match(%r{Entrega e retirada no local · R\$ 1\.600,00\s*<span class="muted">\(valor ajustado; padrão R\$ 150,00\)</span>}, form)
+    assert_includes form, "Taxa de palco &lt;i&gt; · R$ 1.234,56 <span class=\"muted\">(avulsa)</span>"
+    refute_includes form, "R$ 1600,00"
+    post_form "/orcamentos/#{quote.id}/versoes", quote_form(tarifa_id: [@fee.id], tarifa_valor: ["1.600,0x"])
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "Entrega e retirada no local · R$ 1.600,0x", "texto inválido reexibido como veio"
+  end
 end

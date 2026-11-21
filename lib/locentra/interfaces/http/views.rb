@@ -111,6 +111,14 @@ module Locentra
           Domain::Money.new(cents).format_brl
         end
 
+        # Texto de campo monetário exibido como valor ("1600,00" → "R$ 1.600,00"); texto que não é valor
+        # válido (reenvio de formulário com erro) aparece como veio.
+        def money_text(text)
+          Domain::Money.parse(text).format_brl
+        rescue Domain::ValidationError
+          "R$ #{text}"
+        end
+
         # Valor de campo monetário: decimal com vírgula, sem símbolo nem separador de milhar ("1234,50").
         def money_input(value)
           cents = value.is_a?(Domain::Money) ? value.cents : value.to_i
