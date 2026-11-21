@@ -3,7 +3,7 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versões seguem
 [SemVer](https://semver.org/lang/pt-BR/).
 
-## [Não publicado]
+## [1.3.0] — 2026-11-21
 
 ### Adicionado
 
@@ -53,7 +53,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 - A auditoria `organization.settings_updated` registra o canal (`via: api`) quando a alteração vem da API.
 - Os casos de uso de orçamentos, contratos, retirada, devolução, inspeções, alertas e configurações aceitam a
   transação do chamador (`tx:`), sem mudança na interface web e na CLI.
-- O padrão de `WEBHOOK_CONCURRENCY` passou de 1 para 4 (o worker usa 10 conexões com os padrões).
+- O padrão de `WEBHOOK_CONCURRENCY` passou de 1 para 4 (o worker usa 10 conexões com os padrões). Instalações
+  com `.env` criado a partir do `.env.example` anterior mantêm `WEBHOOK_CONCURRENCY=1` até o ajuste manual
+  (`docs/RUNBOOKS.md`, seção 16.1).
 - O `platform.housekeeping` soma as tarefas removidas em `locentra_retention_purged_total{kind="jobs"}`; eventos
   da outbox, entregas de webhook e webhooks recebidos deixaram de ser mantidos indefinidamente e passam pela
   retenção por organização.
@@ -68,6 +70,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
   concorrente.
 - `PATCH /organization/settings` sem `cancellation_policy` mantém a política gravada como está: uma política
   anterior às regras atuais deixa de impedir a alteração de outro campo (422 em `faixas_cancelamento`).
+- O log estruturado é descarregado a cada linha. Fora de um terminal, o log do worker só aparecia quando o
+  buffer da saída padrão enchia ou o processo terminava.
 
 ## [1.2.0] — 2026-11-21
 
