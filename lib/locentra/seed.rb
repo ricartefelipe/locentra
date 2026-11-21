@@ -34,6 +34,26 @@ module Locentra
       }
     ].freeze
 
+    # Condições comerciais da demonstração (docs/DEMONSTRACAO.md, passo 15): tarifas [código, nome,
+    # valor padrão em centavos], cupons e condições negociadas [documento do cliente, SKU (nil = geral),
+    # desconto em pontos-base, observações].
+    COMMERCIAL_TERMS = {
+      "Alfa Audiovisual" => {
+        fees: [["ENTREGA", "Entrega e retirada no local", 15_000], ["MONTAGEM", "Montagem e desmontagem", 25_000],
+               ["LIMPEZA", "Higienização dos equipamentos", 8_000]],
+        coupons: [{ code: "BEMVINDO10", kind: "percent", value: 1_000, description: "Boas-vindas: 10% de desconto",
+                    max_redemptions: 100, valid_days: 365 },
+                  { code: "PRIMEIRALOCACAO", kind: "fixed", value: 5_000, description: "R$ 50,00 em locações acima de R$ 300,00 (uso único)",
+                    max_redemptions: 1, min_subtotal_cents: 30_000, valid_days: 365 }],
+        agreements: [["11222333000181", nil, 800, "Contrato anual de produção"], ["52998224725", "LEN-2470", 1_000, "Cliente recorrente de lentes"]]
+      },
+      "Beta Eventos" => {
+        fees: [["ENTREGA", "Entrega no local do evento", 20_000], ["MONTAGEM", "Montagem do salão", 35_000]],
+        coupons: [{ code: "PRIMAVERA15", kind: "percent", value: 1_500, description: "Temporada de casamentos", max_redemptions: 50, valid_days: 180 }],
+        agreements: [["45723174000110", nil, 500, "Parceria de eventos"]]
+      }
+    }.freeze
+
     def initialize(system)
       @system = system
     end
@@ -62,6 +82,41 @@ module Locentra
 
       ensure_membership(owners.fetch(DEMO_MEMBERSHIP[:organization]), DEMO_MEMBERSHIP[:owner], DEMO_MEMBERSHIP[:role])
       ensure_simulator(owners.fetch(DEMO_SIMULATOR[:organization]))
+      ensure_commercial_terms(owners)
+    end
+
+    # Tarifas e cupons são criados somente se o código nunca existiu (ativo ou desativado); condições,
+    # somente para clientes que nunca tiveram nenhuma (vigente ou encerrada). Nada é reativado ou alterado.
+    def ensure_commercial_terms(owners)
+      now = @system.clock.now
+      COMMERCIAL_TERMS.each do |organization, terms|
+        actor = owners.fetch(organization)
+        terms[:fees].each do |code, name, cents|
+          next if exists? { uc(:get_fee).call(actor, code) }
+
+          uc(:create_fee).call(actor, { code: code, name: name, default_amount: D::Money.new(cents) })
+        end
+        terms[:coupons].each do |spec|
+          next if exists? { uc(:get_coupon).call(actor, spec[:code]) }
+
+          uc(:create_coupon).call(actor, spec.except(:valid_days).merge(valid_until: now + (spec[:valid_days] * 86_400)))
+        end
+        terms[:agreements].each { |document, sku, bps, notes| ensure_agreement(actor, document, sku, bps, notes) }
+      end
+    end
+
+    def exists?
+      yield
+      true
+    rescue D::NotFound
+      false
+    end
+
+    def ensure_agreement(actor, document, sku, bps, notes)
+      customer = uc(:list_customers).call(actor, search: document, limit: 100).items.find { |c| c.document == document }
+      return unless customer && uc(:list_price_agreements).call(actor, customer.id).total.zero?
+
+      uc(:create_price_agreement).call(actor, customer.id, { product: sku, discount_bps: bps, notes: notes })
     end
 
     def owner_actor(spec)
