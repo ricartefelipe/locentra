@@ -726,7 +726,41 @@ components:
         total: { $ref: "#/components/schemas/Money" }
         deposit: { $ref: "#/components/schemas/Money" }
         version: { type: integer }
+        items:
+          type: array
+          description: Itens com o snapshot de preço da linha (presente no detalhe)
+          items:
+            type: object
+            properties:
+              product_id: { type: string, format: uuid }
+              sku: { type: string }
+              quantity: { type: integer }
+              pricing: { $ref: "#/components/schemas/ReservationItemPricing" }
         pricing: { $ref: "#/components/schemas/ReservationPricing" }
+    ReservationItemPricing:
+      type: object
+      description: >-
+        Snapshot de preço da linha, congelado na criação. `total_cents` já descontou as faixas de quantidade e a
+        condição negociada. Linhas anteriores ao cadastro de condições comerciais podem não ter
+        `negotiated_agreement_id`.
+      properties:
+        product_id: { type: string, format: uuid }
+        sku: { type: string }
+        name: { type: string }
+        tracking: { type: string, enum: [serialized, bulk, kit] }
+        description: { type: string, description: "Unidades cobradas, por exemplo \"2 diárias (24 h)\"" }
+        table: { type: object, description: Tabela de preços do produto no instante da precificação }
+        units: { type: object, description: "Unidades cobradas por tipo (horas, diárias, semanas)" }
+        quantity: { type: integer }
+        unit_amount_cents: { type: integer }
+        gross_cents: { type: integer }
+        tier_discount_bps: { type: integer }
+        tier_discount_cents: { type: integer }
+        negotiated_agreement_id: { type: [string, "null"], format: uuid, description: Condição negociada aplicada à linha }
+        negotiated_discount_bps: { type: integer }
+        negotiated_discount_cents: { type: integer }
+        total_cents: { type: integer }
+        deposit_unit_cents: { type: integer }
     ReservationPricing:
       type: object
       description: >-
@@ -743,6 +777,9 @@ components:
         fees_cents: { type: integer }
         total_cents: { type: integer }
         deposit_cents: { type: integer }
+        period: { $ref: "#/components/schemas/Period" }
+        timezone: { type: string, example: America/Sao_Paulo, description: Fuso da organização usado no cálculo das unidades }
+        priced_at: { type: string, format: date-time, description: Instante da precificação (vigência de cupons e condições) }
         coupon:
           type: [object, "null"]
           description: Cupom aplicado, como estava no instante da precificação

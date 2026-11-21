@@ -191,6 +191,16 @@ class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
     assert_empty owner_query("SELECT id FROM reservations")
   end
 
+  # As chaves de preço do detalhe da reserva estão no OpenAPI.
+  def assert_documented_keys(detail)
+    schemas = YAML.safe_load_file(File.expand_path("../../docs/openapi.yaml", __dir__)).dig("components", "schemas")
+    item = schemas.dig("Reservation", "properties", "items", "items", "properties")
+
+    assert_empty detail["pricing"].keys - schemas.dig("ReservationPricing", "properties").keys
+    assert_empty detail["items"].first.keys - item.keys
+    assert_empty detail["items"].first["pricing"].keys - schemas.dig("ReservationItemPricing", "properties").keys
+  end
+
   def test_reservation_detail_brings_coupon_agreements_and_fees
     fee = create_fee("ENTREGA", "Entrega e retirada no local", 15_000)
     coupon = create_coupon("BEMVINDO10", description: "Boas-vindas")
@@ -209,6 +219,7 @@ class CommercialTermsApiAgreementsTest < CommercialTermsApiTestCase
     assert_equal([[fee.id, "ENTREGA", 15_000, "catalog"]], pricing["fees"].map { |row| row.values_at("fee_id", "code", "amount_cents", "source") })
     assert_equal [agreement.id, 800, 7200], json_body["items"].first["pricing"].values_at("negotiated_agreement_id", "negotiated_discount_bps",
                                                                                           "negotiated_discount_cents")
+    assert_documented_keys(json_body)
     get!(200, "/coupons/BEMVINDO10")
 
     assert_equal [1, 1], json_body.values_at("redemptions", "total_redemptions")
