@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "http_helper"
+require_relative "../support/openapi_contract"
 
 class ApiTest < HttpTest
+  include OpenApiContract
+
   def setup
     super
     @org = create_organization
@@ -242,6 +245,40 @@ class ApiTest < HttpTest
     schema.fetch("properties", {}).each { |name, property| check_schema(property, "#{path}/#{name}", unknown) }
     %w[items not additionalProperties].each { |key| check_schema(schema[key], "#{path}/#{key}", unknown) }
     %w[oneOf anyOf allOf].each { |key| Array(schema[key]).each_with_index { |item, i| check_schema(item, "#{path}/#{key}[#{i}]", unknown) } }
+  end
+
+  # O validador do contrato acusa chave não documentada, tipo errado, obrigatória ausente, formato, enum,
+  # limites e oneOf ambíguo, e aceita a resposta conforme.
+  def test_openapi_contract_validator_detects_divergences
+    schema = { "type" => "object", "additionalProperties" => false, "required" => %w[id status total],
+               "properties" => { "id" => { "type" => "string", "format" => "uuid" }, "status" => { "type" => "string", "enum" => %w[open resolved] },
+                                 "total" => { "$ref" => "#/components/schemas/Money" }, "note" => { "type" => %w[string null] },
+                                 "count" => { "type" => "integer", "minimum" => 1, "maximum" => 3 },
+                                 "at" => { "type" => "string", "format" => "date-time" },
+                                 "items" => { "type" => "array", "items" => { "oneOf" => [{ "type" => "integer" }, { "type" => "number" }] } } } }
+    valid = { "id" => "0192f7a0-0000-7000-8000-000000000001", "status" => "open", "note" => nil, "count" => 2, "at" => "2026-03-02T12:00:00Z",
+              "total" => { "amount_cents" => 100, "currency" => "BRL", "formatted" => "R$ 1,00" }, "items" => [1.5] }
+
+    assert_empty contract_errors(valid, schema)
+    errors = contract_errors(valid.except("total").merge("id" => "abc", "status" => "closed", "note" => 3, "count" => 4, "at" => "ontem",
+                                                         "extra" => true, "items" => [1]), schema)
+
+    assert_equal ["$: propriedade obrigatória ausente: total", "$.id: \"abc\" não é uuid", "$.status: valor \"closed\" fora de [\"open\", \"resolved\"]",
+                  "$.note: tipo Integer (3) diferente de string | null", "$.count: 4 acima do máximo 3", "$.at: \"ontem\" não é date-time ISO 8601",
+                  "$.items[0]: corresponde a 2 opções de oneOf (esperada exatamente uma)", "$: propriedade não documentada: extra"], errors
+    assert_equal ["$.total.amount_cents: tipo String (\"100\") diferente de integer"],
+                 contract_errors(valid.merge("total" => { "amount_cents" => "100" }), schema)
+  end
+
+  def test_error_responses_conform_to_the_error_schema
+    get "/api/v1/customers", {}, { "HTTP_AUTHORIZATION" => "Bearer lcn_invalido" }
+
+    assert_conforms json_body, "Error"
+    get "/api/v1/customers", { "limit" => "0" }, auth
+
+    assert_equal 422, last_response.status
+    assert_conforms json_body, "Error"
+    assert_equal({ "limite" => ["entre 1 e 100"] }, json_body.dig("error", "details", "fields"))
   end
 
   def test_confirming_an_expired_hold_records_the_expiration

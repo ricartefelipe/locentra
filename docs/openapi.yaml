@@ -704,13 +704,21 @@ components:
         next_offset: { type: [integer, "null"] }
     Error:
       type: object
+      additionalProperties: false
+      required: [error]
       properties:
         error:
           type: object
+          additionalProperties: false
+          required: [code, message, details, request_id]
           properties:
             code: { type: string, example: unavailable }
             message: { type: string }
-            details: { type: object }
+            details:
+              type: object
+              description: >-
+                `fields` nos erros de validação (campo → lista de mensagens) e `shortages` na indisponibilidade
+                (`unavailable`); vazio nos demais erros.
             request_id: { type: string }
     Organization:
       type: object
