@@ -30,9 +30,11 @@ Souza. Na Beta: tarifas ENTREGA e MONTAGEM, cupom **PRIMAVERA15** e condição d
 Primavera ME. Se algum desses itens mudou depois do seed, ajuste-o antes do passo 15: o código de cupom e
 o de tarifa são únicos na organização, inclusive entre os desativados, então um item desativado é
 **reativado** ("Reativar cupom" em **Cupons** ou "Reativar tarifa" em **Tarifas adicionais**), e um item
-alterado volta aos valores do roteiro pela edição na própria página. Somente a condição negociada encerrada
-exige novo cadastro, em **Clientes → Produtora Horizonte Ltda. → Nova condição negociada** (8%, todos os
-produtos).
+alterado volta aos valores do roteiro pela edição na própria página. Exigem novo cadastro somente a condição
+negociada encerrada, em **Clientes → Produtora Horizonte Ltda. → Nova condição negociada** (8%, todos os
+produtos), e o cupom excluído (a exclusão vale para cupom nunca usado e não deixa nada a reativar). O cupom
+excluído é recriado ao repetir o seed (`ruby bin/locentra-admin db:seed`), porque o código deixou de existir,
+ou pode ser cadastrado de novo em **Cupons → Novo cupom** com os valores acima.
 
 | Endereço | Uso |
 |---|---|
