@@ -94,6 +94,27 @@ class PaymentResilienceTest < DatabaseTest
     assert_equal 1, count("audit_events", "action = 'payment.resubmission_scheduled'")
   end
 
+  # A consulta ao provedor e o reenvio da cobrança são ações para fora (ADR-031): o usuário sem e-mail
+  # confirmado não consulta nem reenvia, nem pela resolução direta nem pela conciliação; confirmado, reenvia.
+  def test_resolution_and_resubmission_require_a_confirmed_email
+    requested = request_online(@rental, 10_000)
+    submit = submit_with(Failing.new(simulator, create_first: false, error: IOError.new("processo interrompido")))
+    assert_raises(IOError) { submit.call(system_actor, requested.id) }
+
+    @clock.advance(FN::SubmitPayment::RECHECK_DELAY)
+    owner_query("UPDATE users SET email_confirmed_at = NULL WHERE id = $1", [@org[:user_id]], tenant: "")
+    listing = TruncatedListing.new(simulator)
+    jobs_before = count_jobs("kind = 'payments.submit'")
+
+    error = assert_raises(D::EmailUnconfirmed) { uc(:resolve_submission).call(@actor, requested.id) }
+    assert_includes error.message, "solicitar cobranças pelo provedor de pagamentos"
+    assert_raises(D::EmailUnconfirmed) { reconcile_with(listing).call(@actor) }
+    assert_equal ["submission_unknown", jobs_before], [payment(requested.id).status, count_jobs("kind = 'payments.submit'")], "nada reenfileirado"
+    confirm_email(@org[:user_id])
+
+    assert_equal :resubmission_scheduled, uc(:resolve_submission).call(@actor, requested.id)
+  end
+
   def test_duplicate_lookup_prefers_the_charge_that_can_still_be_paid
     requested = request_online(@rental, 3_000, scenario: "timeout_after_success")
     drain
