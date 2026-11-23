@@ -3,6 +3,19 @@
 "Testado" indica testes automatizados executados com sucesso. Comandos de verificação em
 `CONTRIBUTING.md`; documentação de cada módulo em `docs/modulos/`.
 
+## Verificação da branch (não publicado)
+
+Branch `feature/bloqueio-email-nao-confirmado` (confirmação de e-mail obrigatória, ADR-031, migration 0018), em
+22/11/2026:
+
+| Verificação | Resultado |
+|---|---|
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 1115 testes, 30.576 asserções, 0 falhas |
+| Cobertura de domínio + aplicação | 99,50% de linhas, 94,01% de branches (metas 90% / 80%) |
+| `rake test:browser` (Ferrum, Chrome headless) | 16 testes, 0 falhas |
+| `rubocop` | 340 arquivos, sem ofensas |
+| Atualização de um banco da 1.3.0 para a 0018 | coberta por `test/repository/migration_0018_test.rb`; procedimento em `RUNBOOKS.md` §17, não exercitado em ambiente Compose |
+
 ## Última verificação completa
 
 Executada para a versão 1.3.0 (API v1 ampliada, limite por organização na fila de webhooks, pausa automática de
@@ -63,6 +76,7 @@ restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprova
 | #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 |
 | #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 |
 | #19 | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (ADR-029) | Integrado e testado; versão 1.3.0 (ver acima) |
+| — (`feature/bloqueio-email-nao-confirmado`, não publicado) | Confirmação de e-mail obrigatória: ações para fora em nome da organização bloqueadas até a confirmação, conta somente leitura depois de 7 dias, aviso com reenvio, `403` `email_unconfirmed` na API por sessão, confirmação no aceite de convites e migration 0018 (ADR-031) | Implementado e testado na branch (ver "Verificação da branch") |
 | #20 | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (ADR-030) | Integrado e testado; versão 1.3.0 (ver acima) |
 
 ## Casos obrigatórios cobertos por testes
@@ -73,7 +87,9 @@ invade outra reserva; retirada e devolução duplicadas (sequencial e concorrent
 indisponibilidade; isolamento entre organizações e entre clientes; revogação de acesso; cálculos e
 arredondamentos (inclusive propriedades); caução e reembolso (inclusive concorrente); timeout após sucesso no
 provedor; recuperação de tarefas e worker com lease vencido; downloads não autorizados; XSS e CSRF;
-contrato Rack (`Rack::Lint`); roteiro de demonstração de 16 passos; condições comerciais: dois resgates do
+contrato Rack (`Rack::Lint`); roteiro de demonstração de 16 passos; confirmação de e-mail: cada ação para fora
+recusada sem efeito antes da confirmação e aceita depois, prazo de 7 dias no segundo exato, navegação de todas as
+páginas da equipe na conta somente leitura, reenvio com limites e atualização do esquema da 0017 para a 0018; condições comerciais: dois resgates do
 último uso de um cupom, uso liberado por cancelamento e por expiração (inclusive bloqueio vencido ainda não
 varrido), confirmação de bloqueio em andamento no vencimento contra o último uso e contra a redução do
 máximo, criação com cupom
@@ -111,9 +127,8 @@ duas ordens), limpeza do histórico contra reenvio concorrente e atualização d
   qualquer processo.
 - Portal do cliente sem API v1.
 - Aceite e encerramento de contrato, avarias, manutenção e transferências sem API v1 (interface web).
-- A confirmação de e-mail (RF-05) é emitida e registrada, mas não restringe funcionalidades: conta não
-  confirmada entra, convida, cria credenciais e envia orçamentos e contratos. O cadastro é limitado por IP e
-  por e-mail (ADR-026); uma política de bloqueio até a confirmação fica para versão futura.
+- A confirmação de e-mail não tem troca de endereço: o e-mail da conta não muda depois do cadastro. Sem envio
+  de e-mail configurado, a confirmação de cadastros novos é manual (`RUNBOOKS.md`, seção 17.3).
 - Configurações da organização são alteradas somente por usuário com `organization.manage`, pela interface web
   ou por `PATCH /api/v1/organization/settings` com sessão; credenciais e CLI apenas consultam (ADR-030). Prévia,
   restauração dos padrões e gestão de filiais ficam na interface web. A lista de fusos oferece os fusos do
