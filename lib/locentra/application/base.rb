@@ -6,7 +6,6 @@ module Locentra
     # CLI ou worker) e revalidada dentro da transação pela UnitOfWork.
     ACTOR_KINDS = %w[user api cli system customer].freeze
 
-    #
     # `email_status` (Domain::Identity::EmailConfirmation::STATUSES) só existe para usuários da equipe e é
     # preenchido pela UnitOfWork na revalidação, com o relógio da aplicação; antes disso vale nil.
     Actor = Data.define(:kind, :user_id, :organization_id, :role, :membership_id, :credential_id, :customer_id,

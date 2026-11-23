@@ -85,7 +85,7 @@ module Locentra
           def resend_confirmation(ctx)
             result = uc(:resend_email_confirmation).call(user_id: ctx.session["user_id"], request_id: ctx.request_id)
             notice = if result == :sent
-                       "Enviamos um novo link de confirmação para #{ctx.session["email"]}. Os links enviados antes deixam de valer."
+                       "Enviamos um novo link de confirmação para #{ctx.session["email"]}. Use o link da mensagem mais recente."
                      else
                        "Seu e-mail já está confirmado."
                      end

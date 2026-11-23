@@ -148,7 +148,7 @@ module Locentra
           "payments.configure" => "configurar o provedor de pagamentos",
           "payments.request" => "solicitar cobranças pelo provedor de pagamentos",
           "quotes.send" => "enviar orçamentos aos clientes",
-          "contracts.issue" => "emitir contratos, que são enviados aos clientes por e-mail",
+          "contracts.issue" => "emitir contratos e enviá-los aos clientes",
           "portal.invite" => "convidar clientes para o portal"
         }.freeze
 
