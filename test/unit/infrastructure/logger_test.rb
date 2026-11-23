@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 require_relative "../unit_helper"
+require "rbconfig"
 require "stringio"
 require "locentra/infrastructure/observability/logger"
 
 # Redação do log estruturado: chaves sensíveis em qualquer nível, senhas de banco em textos livres
-# (mensagens de erro) e truncamento de textos longos.
+# (mensagens de erro), truncamento de textos longos e entrega imediata de cada linha.
 class StructuredLoggerTest < UnitTest
   L = Locentra::Infrastructure::Observability::StructuredLogger
 
@@ -40,5 +41,53 @@ class StructuredLoggerTest < UnitTest
 
     assert_equal 4001, line["texto"].length
     assert_equal "[REDACTED]", line["password"]
+  end
+
+  # Fora de um terminal o Ruby acumula a saída padrão em buffer: sem descarga a cada linha, o log do worker
+  # só aparece quando o buffer enche ou o processo termina.
+  def test_each_line_reaches_a_pipe_before_the_process_exits
+    lib = File.expand_path("../../../lib", __dir__)
+    script = <<~RUBY
+      require "locentra/infrastructure/observability/logger"
+      Locentra::Infrastructure::Observability::StructuredLogger.new.info("event" => "worker.started")
+      sleep 10
+    RUBY
+    reader, writer = IO.pipe
+    pid = Process.spawn(RbConfig.ruby, "-I", lib, "-e", script, out: writer, err: File::NULL)
+    writer.close
+    ready = reader.wait_readable(5)
+
+    refute_nil ready, "a linha do log deve chegar antes do fim do processo"
+    assert_equal "worker.started", JSON.parse(reader.gets)["event"]
+  ensure
+    Process.kill("KILL", pid) if pid
+    Process.wait(pid) if pid
+    reader&.close
+  end
+
+  def test_the_io_is_flushed_after_each_line
+    io = Class.new(StringIO) do
+      attr_reader :flushes
+
+      def flush
+        @flushes = (@flushes || 0) + 1
+        super
+      end
+    end.new
+    logger = L.new(io: io)
+    logger.info("event" => "a")
+    logger.warn("event" => "b")
+
+    assert_equal 2, io.flushes
+    assert_equal 2, io.string.lines.size
+  end
+
+  def test_a_destination_with_only_puts_still_receives_each_line
+    lines = []
+    destination = Object.new
+    destination.define_singleton_method(:puts) { |line| lines << line }
+    L.new(io: destination).info("event" => "cli.command")
+
+    assert_equal "cli.command", JSON.parse(lines.fetch(0))["event"]
   end
 end

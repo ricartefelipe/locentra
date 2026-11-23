@@ -542,7 +542,7 @@ chamada de rede e sem gastar tentativas; nada se perde.
    ocupar as vagas das demais organizações (`locentra_jobs_oldest_age_seconds{queue="webhooks"}`). Se o destino
    voltar a falhar, o endpoint é pausado de novo depois de 20 falhas e 1 h, e a liberação restante para.
 
-## 16. Atualização para a migration 0017 (webhooks por organização e retenção) — procedimento escrito (atualização coberta por `test/repository/migration_0017_test.rb`)
+## 16. Atualização para a migration 0017 (webhooks por organização e retenção) — exercitado em 21/11/2026 (também coberto por `test/repository/migration_0017_test.rb`)
 
 A migration `0017_webhooks_por_organizacao_e_retencao.sql` adiciona colunas anuláveis ou com DEFAULT em
 `webhook_endpoints` e `webhook_deliveries`, sete índices (seis parciais ou simples nas tabelas existentes e a
@@ -611,6 +611,9 @@ o enfileiramento da 1.2.0 e a tela de integrações esperaram praticamente esse 
 5. Substitua web e worker pela versão nova (seção 12, passo 3). Confira no log `worker.started` os campos
    `lanes` (`webhooks` com 4 threads, se o padrão não foi alterado) e `webhook_max_per_organization`.
    Revise o dimensionamento de conexões (seção 10), porque o padrão de `WEBHOOK_CONCURRENCY` subiu de 1 para 4.
+   O padrão mudou no código e no Compose, mas um `.env` criado a partir do `.env.example` anterior continua com
+   `WEBHOOK_CONCURRENCY=1`, e `lanes` mostra `webhooks` com 1 thread: com `WEBHOOK_MAX_PER_ORGANIZATION=2`, o
+   limite por organização não tem efeito. Ajuste o `.env` (4 é o padrão novo) antes de substituir o worker.
 
 ### 16.2 Conferência dos índices
 
@@ -652,3 +655,25 @@ Antes de retornar, liste as entregas retidas por endpoint (com contexto de cada 
 ```sql
 SELECT organization_id, endpoint_id, count(*) FROM webhook_deliveries WHERE held_at IS NOT NULL GROUP BY 1, 2;
 ```
+
+### 16.4 Registro do exercício (21/11/2026, PostgreSQL 18.7, imagens da tag v1.2.0 e do merge da 1.3.0)
+
+Ambiente Compose da 1.2.0 (o mesmo das seções 13.5 e 14.5, já na 0016, com seed e um anexo), com web e worker
+da 1.2.0 em execução e o `.env` da instalação original.
+
+| Passo | Resultado |
+|---|---|
+| 16.1, passo 1 (volume, `locentra_backup`) | tabelas pequenas (`jobs` com 98 linhas estimadas; as demais ainda não analisadas, com -1) |
+| Backup da seção 3 | gravado |
+| 16.1, passo 2 (quatro índices com `CONCURRENTLY`, com a 1.2.0 no ar) | criados; consulta de índices inválidos vazia |
+| 16.1, passo 3 (`db:migrate` com `PGOPTIONS='-c lock_timeout=5s'`) | 0017 aplicada em cerca de 3 s, incluindo a partida do contêiner |
+| 16.1, passo 4 (1.2.0 sobre a 0017) | `/health/ready` 200 e tela **Integrações** 200 |
+| 16.1, passo 5 (troca para a versão nova) | web e worker `healthy`; `worker.started` com `webhook_max_per_organization` 2 e `lanes` `{"default":4,"webhooks":1}`, porque o `.env` antigo mantinha `WEBHOOK_CONCURRENCY=1` (nota acrescentada ao passo 5) |
+| 16.2 (conferência dos índices) | 7 linhas, todas com `indisvalid` verdadeiro |
+| 16.3 (entregas retidas antes do retorno) | nenhuma |
+| Retorno à 1.2.0 e volta à versão nova | os dois sentidos `healthy`; `/health/ready` e **Integrações** 200; parada de web e worker com código 0 |
+
+Não houve entregas de webhook no exercício: o cadastro de endpoint resolve o endereço de destino, e um destino
+real geraria tráfego para terceiros; as entregas, a pausa e a retenção são cobertas pelos testes de integração e
+de concorrência e por `migration_0017_test.rb`. O exercício encontrou também um defeito anterior, corrigido nesta
+versão: o log do worker ficava em buffer e `worker.started` só apareceu depois da parada.

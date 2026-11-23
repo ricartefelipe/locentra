@@ -55,10 +55,19 @@ module Locentra
           return if LEVELS.fetch(level) < @level
 
           payload = { "ts" => Time.now.utc.iso8601(3), "level" => level }.merge(self.class.redact(@base.merge(fields)))
-          line = JSON.generate(payload)
-          @mutex.synchronize { @io.puts(line) }
+          write(JSON.generate(payload))
         rescue StandardError => e
-          @mutex.synchronize { @io.puts(JSON.generate("level" => "error", "event" => "log.failure", "error" => e.class.name)) }
+          write(JSON.generate("level" => "error", "event" => "log.failure", "error" => e.class.name))
+        end
+
+        # Cada linha é descarregada na hora: fora de um terminal (contêiner, pipe, arquivo) o Ruby acumula a saída
+        # em buffer, e o log do worker só apareceria quando o buffer enchesse ou o processo terminasse. O destino
+        # só precisa responder a `puts` (adaptadores como o da CLI não têm `flush`).
+        def write(line)
+          @mutex.synchronize do
+            @io.puts(line)
+            @io.flush if @io.respond_to?(:flush)
+          end
         end
       end
 
