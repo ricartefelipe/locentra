@@ -161,6 +161,29 @@ class EmailConfirmationPagesTest < ApiV1TestCase
     assert_includes last_response.body, "#{REFUSED}: o prazo de confirmação terminou."
   end
 
+  # Ação para fora recusada volta ao formulário (422); a conta somente leitura vai para a página 403, também nas
+  # telas do financeiro e nos formulários que tratam a recusa da ação para fora.
+  def test_outbound_refusals_stay_in_the_form_and_read_only_refusals_get_the_error_page
+    reservation = reserve(@gamma_actor, @gamma_customer, @gamma[:branch], period("2026-03-12T08:00:00Z", "2026-03-13T08:00:00Z"),
+                          [line(@gamma_camera, 1)], mode: "confirm")
+    get "/financeiro/provedor"
+    post_form "/financeiro/provedor", { "provedor" => "simulator", "nome" => "Simulador" }
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "Confirme seu e-mail para configurar o provedor de pagamentos"
+    @clock.advance(EC::GRACE_PERIOD_SECONDS)
+    login("dona@gama.test")
+    [["/financeiro/provedor", { "provedor" => "simulator", "nome" => "Simulador" }],
+     ["/financeiro/reservas/#{reservation.id}/sincronizar", {}],
+     ["/usuarios/convites", { "email" => "novo@gama.test", "papel" => "attendant" }],
+     ["/integracoes", { "url" => "http://127.0.0.1:9/hook", "eventos" => ["*"] }]].each do |path, params|
+      post_form path, params
+
+      assert_equal 403, last_response.status, path
+      assert_includes last_response.body, "#{REFUSED}: o prazo de confirmação terminou.", path
+    end
+  end
+
   def test_read_only_account_can_still_switch_organization_resend_and_log_out
     @clock.advance(EC::GRACE_PERIOD_SECONDS)
     login("dona@gama.test")

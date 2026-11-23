@@ -7,6 +7,18 @@ module Locentra
       class Controller
         Dependencies = Data.define(:system, :templates, :flash)
 
+        # Recusas por e-mail não confirmado (ADR-031) nos `rescue` dos formulários. A ação para fora recusada
+        # volta à página da ação, como os demais erros de negócio; a conta somente leitura segue para a página
+        # 403 do tratamento central, em todas as telas.
+        module OutboundRefusal
+          def self.===(error) = error.is_a?(Domain::EmailUnconfirmed) && error.reason == :outbound
+        end
+
+        # Acesso negado exibido no formulário, exceto a recusa da conta somente leitura.
+        module FormDenial
+          def self.===(error) = error.is_a?(Domain::AccessDenied) && !(error.is_a?(Domain::EmailUnconfirmed) && error.reason == :read_only)
+        end
+
         # Caminho local seguro para redirecionamento: começa com uma única "/" e não tem barra
         # invertida, espaço nem caractere de controle. Navegadores removem TAB e quebras de linha antes
         # de resolver o endereço ("/\t/evil.example" vira "//evil.example"), por isso qualquer

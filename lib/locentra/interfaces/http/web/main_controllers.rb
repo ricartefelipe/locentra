@@ -155,7 +155,7 @@ module Locentra
           def invite(ctx)
             uc(:invite_member).call(ctx.actor, email: ctx.form["email"], role: ctx.form["papel"].to_s)
             redirect(ctx, "/usuarios", notice: "Convite enviado para #{ctx.form["email"]}.")
-          rescue Domain::ValidationError, Domain::Conflict, Domain::PlanLimitExceeded, Domain::EmailUnconfirmed => e
+          rescue Domain::ValidationError, Domain::Conflict, Domain::PlanLimitExceeded, OutboundRefusal => e
             index(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
           end
 
@@ -173,7 +173,7 @@ module Locentra
             row = uc(:create_credential).call(ctx.actor, name: ctx.form["nome"], scopes: Array(ctx.form["escopos"]), kind: ctx.form["tipo"].to_s,
                                                          expires_in_days: ctx.form["validade"].to_s)
             index(ctx, token: row["token"])
-          rescue Domain::ValidationError, Domain::PlanLimitExceeded, Domain::AccessDenied => e
+          rescue Domain::ValidationError, Domain::PlanLimitExceeded, FormDenial => e
             index(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
           end
 

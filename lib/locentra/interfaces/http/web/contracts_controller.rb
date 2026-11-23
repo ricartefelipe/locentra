@@ -18,7 +18,7 @@ module Locentra
             reservation_id = Domain::Identifier.parse(ctx.form["reserva_id"], "reserva")
             contract = uc(:issue_contract).call(ctx.actor, reservation_id, conditions: ctx.form["condicoes"])
             redirect(ctx, "/contratos/#{contract.id}", notice: "Contrato #{contract.code} emitido. Registre o aceite eletrônico simples do cliente.")
-          rescue Domain::Conflict, Domain::EmailUnconfirmed => e
+          rescue Domain::Conflict, OutboundRefusal => e
             redirect(ctx, "/reservas/#{reservation_id}", alert: e.message)
           end
 

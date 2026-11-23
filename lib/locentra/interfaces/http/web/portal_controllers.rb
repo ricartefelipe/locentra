@@ -160,7 +160,7 @@ module Locentra
             token, = @system.services[:sessions].create(user_id: result[:user_id], organization_id: result[:organization_id], kind: "portal",
                                                         ip: ctx.ip, user_agent: ctx.user_agent, rotate_from: ctx.session&.fetch("id"))
             redirect(ctx, "/portal", notice: "Acesso ao portal ativado.") { |response| session_cookie(response, token) }
-          rescue Domain::ValidationError, Domain::Conflict, Domain::AccessDenied, Domain::PlanLimitExceeded => e
+          rescue Domain::ValidationError, Domain::Conflict, FormDenial, Domain::PlanLimitExceeded => e
             errors = e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }
             render(ctx, "portal/invitation", title: "Acesso ao portal do cliente", layout: "layouts/public", status: 422,
                                              token: ctx.form["token"].to_s, errors: errors)
@@ -172,7 +172,7 @@ module Locentra
           def invite(ctx)
             invitation = uc(:invite_portal_contact).call(ctx.actor, customer_id: ctx.param(:id), contact_id: ctx.form["contato_id"])
             back(ctx, notice: "Convite de acesso ao portal enviado para #{invitation.email}.")
-          rescue Domain::ValidationError, Domain::Conflict, Domain::PlanLimitExceeded, Domain::AccessDenied => e
+          rescue Domain::ValidationError, Domain::Conflict, Domain::PlanLimitExceeded, FormDenial => e
             back(ctx, alert: "Convite não enviado: #{e.message}")
           end
 
