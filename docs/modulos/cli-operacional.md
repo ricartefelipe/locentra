@@ -147,7 +147,7 @@ por campo de validação e `details.shortages` as faltas de disponibilidade.
 | 64 | Uso incorreto | comando, subcomando ou opção desconhecidos, argumento ausente ou excedente, `--token` |
 | 69 | Indisponível ou conflito | tarefa que não está `dead`, conflito de estado, provedor de pagamentos fora do ar (relatório `failed` é exibido), código de cupom já usado, condição negociada sobreposta ou já encerrada |
 | 70 | Erro interno inesperado | registrado no log (stderr) com o `request_id` |
-| 77 | Permissão negada | credencial inválida, revogada, expirada, de outro tipo ou de organização suspensa ou encerrada; escopo insuficiente |
+| 77 | Permissão negada | credencial inválida, revogada, expirada, de outro tipo ou de organização suspensa ou encerrada; escopo insuficiente; credencial de quem ainda não confirmou o e-mail em ação para fora ou, depois do prazo, em qualquer alteração (código `email_unconfirmed`, ADR-031) |
 | 130 | Interrompido (Ctrl+C) | |
 
 ## Segredos e logs
@@ -191,7 +191,7 @@ Com arquivo: `install -m 600 /dev/null ~/.locentra-token`, grave o token no arqu
 
 | Arquivo | Cobertura |
 |---|---|
-| `test/cli/identity_test.rb` | `whoami` humano e JSON; credencial revogada, expirada, inexistente, malformada e do tipo `api` (77, sem atualizar o último uso); organização suspensa ou encerrada (77, inclusive para ator já autenticado); escopo insuficiente (77); revalidação da credencial e dos escopos pela UnitOfWork após a autenticação; regras do arquivo de credencial; credencial ausente, credencial de migrations, banco inacessível (2); URL malformada repetida pelo libpq com a senha mascarada (2, sem erro interno); papel do proprietário e do worker recusados sem `MIGRATION_DATABASE_URL` (2); erros de uso sem repetir valores (64); ajuda e versão |
+| `test/cli/identity_test.rb` | `whoami` humano e JSON; credencial revogada, expirada, inexistente, malformada e do tipo `api` (77, sem atualizar o último uso); organização suspensa ou encerrada (77, inclusive para ator já autenticado); escopo insuficiente (77); credencial de criador com o prazo de confirmação vencido somente leitura (77, `email_unconfirmed`); revalidação da credencial e dos escopos pela UnitOfWork após a autenticação; regras do arquivo de credencial; credencial ausente, credencial de migrations, banco inacessível (2); URL malformada repetida pelo libpq com a senha mascarada (2, sem erro interno); papel do proprietário e do worker recusados sem `MIGRATION_DATABASE_URL` (2); erros de uso sem repetir valores (64); ajuda e versão |
 | `test/cli/availability_test.rb` | Saída humana com horário local e filtro por SKU; JSON com ISO 8601, filial por código e id, produtos mistos, período semiaberto; erros de validação (1); filial obrigatória com várias filiais (64); escopo (77) |
 | `test/cli/reservations_test.rb` | Listagem humana e JSON com situação, cliente, janela por data local, busca, ordenação e paginação; validações (1); detalhes por código e id, humano e JSON; nome do cliente (listagem, busca e detalhes) somente com `customers.read`; observações com `password=...` em JSON válido; neutralização de caracteres de controle; não encontrado e isolamento entre organizações |
 | `test/cli/assets_test.rb` | Situação física, bloqueios, ordem de manutenção e histórico (humano); JSON por id; não encontrado, isolamento e escopo |
