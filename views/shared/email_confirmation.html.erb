@@ -10,6 +10,7 @@
     <%- days = standing.remaining_days -%>
     Prazo: <%= days == 1 ? "resta 1 dia" : "restam #{days} dias" %> (até <%= datetime(standing.deadline) %>). Depois dele, a conta fica somente leitura até a confirmação.
     <%- end -%>
+    Enviamos a confirmação para <strong><%= request.session["email"] %></strong>. <a href="/confirmar-email/corrigir">Corrigir e-mail</a>
   </p>
   <form method="post" action="/confirmar-email/reenviar" class="inline">
     <%= csrf_field %>

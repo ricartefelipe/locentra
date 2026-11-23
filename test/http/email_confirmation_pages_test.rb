@@ -240,6 +240,61 @@ class EmailConfirmationPagesTest < ApiV1TestCase
     get!(200, "/customers", {}, token: bearer)
   end
 
+  def correction(params, token: csrf, env: {})
+    post "/confirmar-email/corrigir", { "_csrf" => token }.merge(params), env
+  end
+
+  def test_banner_shows_the_address_and_links_to_the_correction
+    get "/clientes"
+
+    assert_includes banner, "Enviamos a confirmação para <strong>dona@gama.test</strong>."
+    assert_includes banner, %(<a href="/confirmar-email/corrigir">Corrigir e-mail</a>)
+    get "/confirmar-email/corrigir"
+
+    assert_equal 200, last_response.status
+    assert_includes last_response.body, %(action="/confirmar-email/corrigir")
+    assert_includes last_response.body, %(name="senha" type="password" autocomplete="current-password")
+    assert_includes last_response.body, "dona@gama.test"
+  end
+
+  def test_read_only_account_corrects_the_email_with_the_current_password
+    @clock.advance(EC::GRACE_PERIOD_SECONDS)
+    login("dona@gama.test")
+    get "/confirmar-email/corrigir"
+    post "/confirmar-email/corrigir", { "email" => "gama@correta.test", "senha" => "senha-muito-segura-1" }
+
+    assert_equal 403, last_response.status, "sem CSRF"
+    get "/confirmar-email/corrigir"
+    correction({ "email" => "gama@correta.test", "senha" => "senha-errada-1234" })
+
+    assert_equal 422, last_response.status
+    assert_includes last_response.body, "senha atual incorreta"
+    correction({ "email" => "gama@correta.test", "senha" => "senha-muito-segura-1" })
+
+    assert_equal 303, last_response.status
+    follow_redirect!
+
+    assert_includes last_response.body, "E-mail corrigido. Enviamos o link de confirmação para gama@correta.test."
+    assert_includes banner, "Enviamos a confirmação para <strong>gama@correta.test</strong>."
+    assert_includes banner, LOCKED, "a conta continua somente leitura até a confirmação"
+  end
+
+  def test_correction_is_limited_per_ip_and_unavailable_for_confirmed_accounts
+    get "/confirmar-email/corrigir"
+    token = csrf
+    20.times { @system.services[:rate_limiter].hit("email_confirmation:ip:127.0.0.1", limit: 20, window_seconds: 3600) }
+    correction({ "email" => "gama@correta.test", "senha" => "senha-muito-segura-1" }, token: token)
+
+    assert_equal 429, last_response.status
+    confirm_email(@gamma[:user_id])
+    get "/confirmar-email/corrigir"
+
+    assert_equal "/", last_response.location
+    follow_redirect!
+
+    assert_includes last_response.body, "Seu e-mail já está confirmado."
+  end
+
   def test_openapi_documents_the_code
     get "/api/v1/openapi.yaml"
 

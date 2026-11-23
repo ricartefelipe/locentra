@@ -95,6 +95,22 @@ class EmailConfirmationDomainTest < UnitTest
     assert_match(/\AConta somente leitura até a confirmação do e-mail/, error.message)
   end
 
+  # A correção do próprio e-mail vale somente para a conta não confirmada (pendente ou somente leitura).
+  def test_only_an_unconfirmed_email_can_be_corrected
+    assert_nil EC.correctable!(nil)
+    error = assert_raises(Domain::AccessDenied) { EC.correctable!(CREATED_AT) }
+
+    assert_equal "O e-mail já está confirmado: a correção vale somente para conta não confirmada.", error.message
+  end
+
+  def test_email_mask_keeps_only_the_first_character_and_the_domain
+    email = Domain::Identity::Email
+
+    assert_equal "d***@alfa.test", email.mask("dona@alfa.test")
+    assert_equal "a***@b.test", email.mask("a@b.test")
+    assert_nil email.mask(nil)
+  end
+
   def test_read_permissions_are_the_query_permissions_of_the_matrix
     identity = Domain::Identity
 

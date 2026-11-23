@@ -4,8 +4,9 @@ require_relative "browser_helper"
 
 # Aviso de confirmação de e-mail no navegador real (ADR-031): fixo no topo do layout da equipe, com prazo
 # restante; o botão "Reenviar confirmação" envia o formulário com o token CSRF da sessão, volta à mesma
-# página com a mensagem de envio e não viola a CSP. Depois do prazo, o aviso informa a conta somente leitura
-# e a tentativa de alteração mostra a mensagem do bloqueio.
+# página com a mensagem de envio e não viola a CSP; o link "Corrigir e-mail" troca o endereço não confirmado.
+# Depois do prazo, o aviso informa a conta somente leitura e a tentativa de alteração mostra a mensagem do
+# bloqueio.
 class EmailConfirmationBrowserTest < BrowserTest
   EC = Locentra::Domain::Identity::EmailConfirmation
 
@@ -33,6 +34,22 @@ class EmailConfirmationBrowserTest < BrowserTest
     assert_includes text_of("[data-flash]"), "Enviamos um novo link de confirmação para dona@delta.test."
     assert_equal 1, requests("POST", "/confirmar-email/reenviar")
     assert_includes body_text, "Marina Souza"
+    assert_clean_console
+  end
+
+  def test_wrong_address_is_corrected_from_the_banner
+    login_as("dona@delta.test")
+    visit "/clientes"
+
+    assert_includes banner_text, "Enviamos a confirmação para dona@delta.test."
+    navigating { click("#aviso-confirmacao-email a[href='/confirmar-email/corrigir']") }
+    fill("#email", "dona@delta-correta.test")
+    fill("#senha", PASSWORD)
+    navigating { click("main form button[type=submit]") }
+
+    assert_equal "/", current_path
+    assert_includes text_of("[data-flash]"), "E-mail corrigido. Enviamos o link de confirmação para dona@delta-correta.test."
+    assert_includes banner_text, "Enviamos a confirmação para dona@delta-correta.test."
     assert_clean_console
   end
 

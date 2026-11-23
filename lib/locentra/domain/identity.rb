@@ -191,6 +191,14 @@ module Locentra
           status
         end
 
+        # Correção do próprio e-mail: somente para a conta ainda não confirmada (pendente ou somente leitura). A
+        # troca de um e-mail já confirmado não existe.
+        def correctable!(confirmed_at)
+          raise AccessDenied, "O e-mail já está confirmado: a correção vale somente para conta não confirmada." if confirmed_at
+
+          nil
+        end
+
         # Recusa a mutação quando a conta está somente leitura.
         def writable!(status)
           raise EmailUnconfirmed.read_only if status == READ_ONLY
@@ -209,6 +217,14 @@ module Locentra
           raise ValidationError.field(field, "e-mail inválido") unless email.length <= 254 && email.match?(PATTERN)
 
           email
+        end
+
+        # Endereço reduzido ao primeiro caractere e ao domínio ("d***@alfa.test"), para auditoria.
+        def mask(value)
+          return nil if value.nil?
+
+          local, domain = value.to_s.split("@", 2)
+          "#{local.to_s[0]}***@#{domain}"
         end
       end
     end

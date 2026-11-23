@@ -187,6 +187,51 @@ class EmailConfirmationFlowTest < DatabaseTest
     assert_raises(D::NotFound) { uc(:resend_email_confirmation).call(user_id: SecureRandom.uuid) }
   end
 
+  def correct(email, password: "senha-muito-segura-1")
+    uc(:correct_unconfirmed_email).call(user_id: @org[:user_id], email: email, password: password, request_id: "req-correcao")
+  end
+
+  def user_row = owner_query("SELECT email, email_confirmed_at FROM users WHERE id = $1", [@org[:user_id]], tenant: "").first
+
+  # Proprietário que errou o e-mail no cadastro: corrige o endereço, inclusive com a conta somente leitura,
+  # e a confirmação vai para o novo endereço; os links anteriores deixam de valer.
+  def test_unconfirmed_account_corrects_its_own_email
+    old_confirmation = @system.transactor.call { |tx| @system.services[:tokens].issue(tx, @org[:user_id], "email_confirmation", 3600) }
+    old_reset = @system.transactor.call { |tx| @system.services[:tokens].issue(tx, @org[:user_id], "password_reset", 3600) }
+    @clock.advance(EC::GRACE_PERIOD_SECONDS)
+
+    assert_equal "dona.correta@alfa.test", correct(" Dona.Correta@Alfa.test ")
+    assert_equal ["dona.correta@alfa.test", nil], user_row.values
+    assert_raises(D::ValidationError) { uc(:confirm_email).call(old_confirmation) }
+    assert_raises(D::ValidationError) { uc(:reset_password).call(token: old_reset, password: "outra-senha-segura-9") }
+    assert_equal [nil, "req-correcao"], confirmation_jobs, "nova confirmação para o novo endereço"
+    audit = owner_query("SELECT actor_id, details FROM audit_events WHERE action = 'user.email_corrected'").first
+
+    assert_equal @org[:user_id], audit["actor_id"]
+    assert_equal({ "email" => "dona.correta@alfa.test", "previous_email" => "d***@alfa.test" }, JSON.parse(audit["details"]))
+    assert_equal "dona.correta@alfa.test", uc(:authenticate).call(email: "dona.correta@alfa.test", password: "senha-muito-segura-1", ip: "10.0.0.9")["email"]
+    refused(:read_only) { uc(:create_customer).call(@actor, { kind: "individual", name: "Ainda Bloqueado", document: "39053344705" }) }
+  end
+
+  def test_email_correction_validates_password_address_uniqueness_and_limit
+    create_organization(name: "Locadora Beta", email: "dona@beta.test")
+
+    assert_equal ["email"], assert_raises(D::ValidationError) { correct("sem-arroba") }.errors.keys
+    assert_equal ["senha"], assert_raises(D::ValidationError) { correct("nova@alfa.test", password: "senha-errada-123") }.errors.keys
+    assert_equal ["email"], assert_raises(D::ValidationError) { correct("dona@alfa.test") }.errors.keys, "endereço igual ao atual"
+    assert_equal "email_taken", assert_raises(D::Conflict) { correct("dona@beta.test") }.code
+    assert_raises(A::Identity::TooManyRequests) { correct("nova@alfa.test") }
+    assert_equal "dona@alfa.test", user_row["email"]
+  end
+
+  def test_confirmed_account_does_not_use_the_correction
+    confirm_email(@org[:user_id])
+    error = assert_raises(D::AccessDenied) { correct("nova@alfa.test") }
+
+    assert_includes error.message, "já está confirmado"
+    assert_equal "dona@alfa.test", user_row["email"]
+  end
+
   # O link do convite chega só ao endereço convidado: aceitar confirma a conta existente de mesmo e-mail.
   def test_accepting_a_staff_invitation_confirms_an_existing_account
     other = create_organization(name: "Locadora Beta", email: "dona@beta.test")

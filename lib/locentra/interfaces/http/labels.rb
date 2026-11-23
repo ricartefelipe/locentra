@@ -40,7 +40,7 @@ module Locentra
             "branch.updated" => "Filial alterada", "branch.deactivated" => "Filial desativada", "branch.reactivated" => "Filial reativada",
             "webhook.endpoint_created" => "Endpoint de webhook criado", "webhook.endpoint_disabled" => "Endpoint de webhook desativado",
             "webhook.endpoint_paused" => "Endpoint de webhook pausado automaticamente", "webhook.endpoint_resumed" => "Endpoint de webhook reativado",
-            "webhook.redelivery_requested" => "Reenvio de webhook solicitado"
+            "webhook.redelivery_requested" => "Reenvio de webhook solicitado", "user.email_corrected" => "E-mail não confirmado corrigido"
           },
           coupon_kind: Domain::Pricing::COUPON_KINDS, coupon_status: Domain::Pricing::COUPON_STATUSES,
           agreement_status: Domain::Pricing::AGREEMENT_STATUSES, fee_status: Domain::Pricing::FEE_STATUSES,

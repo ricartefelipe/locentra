@@ -40,6 +40,11 @@ module Locentra
           tx.execute("UPDATE users SET email_confirmed_at = COALESCE(email_confirmed_at, $2), updated_at = $2 WHERE id = $1", [id, now])
         end
 
+        # Somente enquanto a conta não tem confirmação; devolve se gravou.
+        def update_unconfirmed_email(tx, id, email, now)
+          tx.execute("UPDATE users SET email = $2, updated_at = $3 WHERE id = $1 AND email_confirmed_at IS NULL", [id, email, now]) == 1
+        end
+
         def update_password(tx, id, digest, now)
           tx.execute("UPDATE users SET password_digest = $2, failed_login_count = 0, locked_until = NULL, updated_at = $3 WHERE id = $1",
                      [id, digest, now])

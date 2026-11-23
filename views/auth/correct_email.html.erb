@@ -1,0 +1,16 @@
+<section class="panel narrow" aria-labelledby="titulo-corrigir-email">
+  <h1 id="titulo-corrigir-email">Corrigir e-mail</h1>
+  <p>O link de confirmação foi enviado para <strong><%= request.session["email"] %></strong>. Se o endereço está errado,
+    informe o correto e a senha atual: enviaremos um novo link e os anteriores deixam de valer.</p>
+  <%= partial("shared/errors") %>
+  <form method="post" action="/confirmar-email/corrigir" class="stack">
+    <%= csrf_field %>
+    <label for="email">E-mail correto</label>
+    <input id="email" name="email" type="email" autocomplete="email" required maxlength="254" value="<%= @values["email"] %>"<%= invalid(@errors, "email") %>>
+    <%= field_errors(@errors, "email") %>
+    <label for="senha">Senha atual</label>
+    <input id="senha" name="senha" type="password" autocomplete="current-password" required<%= invalid(@errors, "senha") %>>
+    <%= field_errors(@errors, "senha") %>
+    <button type="submit" class="primary">Corrigir e enviar confirmação</button>
+  </form>
+</section>

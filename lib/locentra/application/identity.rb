@@ -334,6 +334,88 @@ module Locentra
         end
       end
 
+      # Correção do próprio e-mail enquanto a conta não está confirmada (ADR-031): o proprietário que errou o
+      # endereço no cadastro não fica preso à conta somente leitura. Liberada também na conta somente leitura;
+      # o e-mail já confirmado não é trocado por aqui.
+      #
+      # Exige a senha atual (conferida depois do limite por usuário, que vem antes do bcrypt; o IP é limitado
+      # na rota), normaliza o endereço e recusa o mesmo endereço e o de outra conta. Na mesma transação: grava o
+      # endereço somente se a conta continua sem confirmação, invalida os links de confirmação e de recuperação
+      # de senha enviados ao endereço anterior, enfileira a confirmação para o novo e audita em cada organização
+      # da qual a pessoa é membro ativo, com o endereço anterior mascarado.
+      class CorrectUnconfirmedEmail
+        USER_LIMIT = 3
+        USER_WINDOW = 3600
+        EMAIL_TAKEN = "e-mail já cadastrado em outra conta"
+
+        def initialize(uow:, users:, tokens:, organizations:, hasher:, notifier:, rate_limiter:, audit:, clock:)
+          @uow = uow
+          @users = users
+          @tokens = tokens
+          @organizations = organizations
+          @hasher = hasher
+          @notifier = notifier
+          @rate_limiter = rate_limiter
+          @audit = audit
+          @clock = clock
+        end
+
+        # Devolve o novo endereço.
+        def call(user_id:, email:, password:, request_id: nil, ip: nil)
+          address = Domain::Identity::Email.normalize(email)
+          user = @uow.anonymous(user_id: user_id) { |tx| @users.find(tx, user_id) } || raise(Domain::NotFound, "usuário")
+          Domain::Identity::EmailConfirmation.correctable!(user["email_confirmed_at"])
+          throttle!(user_id)
+          raise Domain::ValidationError.field("email", "informe um endereço diferente do atual") if address == user["email"]
+
+          password!(password, user)
+          correct(user, address, request_id, ip)
+        rescue Domain::Conflict => e
+          raise unless e.code == "duplicate:users_email_key"
+
+          raise Domain::Conflict.new(EMAIL_TAKEN, code: "email_taken")
+        end
+
+        private
+
+        def password!(password, user)
+          text = password.to_s
+          return if text.bytesize <= Domain::Identity::PasswordPolicy::MAX_BYTES && @hasher.verify(text, user["password_digest"])
+
+          raise Domain::ValidationError.field("senha", "senha atual incorreta")
+        end
+
+        def correct(user, address, request_id, ip)
+          @uow.anonymous(user_id: user["id"], request_id: request_id) do |tx|
+            raise Domain::Conflict.new(EMAIL_TAKEN, code: "email_taken") if @users.find_by_email(tx, address)
+
+            now = @clock.now
+            # Confirmada entre a leitura e a gravação: a correção deixa de valer.
+            confirmed_meanwhile = !@users.update_unconfirmed_email(tx, user["id"], address, now)
+            Domain::Identity::EmailConfirmation.correctable!(confirmed_meanwhile || nil)
+            %w[email_confirmation password_reset].each { |purpose| @tokens.invalidate_pending(tx, user["id"], purpose, now) }
+            @notifier.email_confirmation(tx, user["id"])
+            audit(tx, user, address, request_id, ip)
+            address
+          end
+        end
+
+        def audit(tx, user, address, request_id, ip)
+          details = { "email" => address, "previous_email" => Domain::Identity::Email.mask(user["email"]) }
+          @organizations.memberships_for_user(tx, user["id"]).select { |row| row["kind"] == "staff" }.each do |membership|
+            tx.switch_tenant!(membership["organization_id"])
+            actor = Actor.user(user_id: user["id"], organization_id: membership["organization_id"], role: membership["role"],
+                               request_id: request_id, ip: ip)
+            @audit.record(tx, actor, "user.email_corrected", "user", user["id"], details)
+          end
+        end
+
+        def throttle!(user_id)
+          result = @rate_limiter.hit("email_correction:user:#{user_id}", limit: USER_LIMIT, window_seconds: USER_WINDOW)
+          raise TooManyRequests, result.retry_after unless result.allowed
+        end
+      end
+
       # Recuperação de senha. A resposta é idêntica para e-mails existentes e inexistentes; o token
       # é emitido pelo envio do e-mail (worker) e nunca fica gravado em texto claro. A tarefa do e-mail
       # recebe o `request_id` da requisição como correlação.
