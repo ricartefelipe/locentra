@@ -23,6 +23,9 @@
       </form>
     </nav>
   </header>
+  <% if request.email_confirmation && !request.email_confirmation.confirmed? %>
+    <%= partial("shared/email_confirmation") %>
+  <% end %>
   <div class="shell">
     <nav class="sidebar" aria-label="Navegação principal">
       <ul>

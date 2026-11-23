@@ -482,3 +482,80 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   chamador, sem mudar a web nem a CLI. A API ganhou orçamentos, contratos, operação e a alteração das
   configurações por sessão, com testes de conformidade das respostas com o OpenAPI. Integrações continuam sem
   alterar configurações.
+
+## ADR-031 — Confirmação de e-mail obrigatória para agir em nome da organização
+
+- **Contexto:** a confirmação de e-mail (RF-05) era emitida e registrada (`users.email_confirmed_at`), mas não
+  restringia nada: uma conta criada com um endereço que a pessoa não controla convidava membros, criava
+  credenciais, cadastrava webhooks, configurava pagamentos e enviava orçamentos e contratos a clientes. O
+  cadastro já era limitado por IP e por e-mail (ADR-026).
+- **Política (D1):** sem confirmação, a conta entra, navega e opera dentro da organização, mas não executa as
+  ações que fazem a plataforma agir para fora em nome dela: convite de membro, criação de credencial, cadastro,
+  reativação e reenvio de webhook, configuração do provedor e cobrança pelo provedor, envio de orçamento, emissão
+  de contrato e convite do portal (`Domain::Identity::EmailConfirmation::OUTBOUND_ACTIONS`). Os e-mails
+  transacionais de reserva (confirmada, cancelada, estendida) acompanham a operação interna e continuam; bloqueá-los
+  impediria a própria reserva. Reembolsos também continuam: devolvem dinheiro de um pagamento já feito e não
+  iniciam uma nova solicitação ao cliente.
+- **Prazo (D2):** a partir de `users.created_at + 7 dias` (constante inteira `GRACE_PERIOD_SECONDS`, limite
+  inclusivo, relógio injetado), a conta não confirmada fica somente leitura: toda permissão que altera dados é
+  recusada e as consultas continuam. Ficam fora da regra entrar, sair, trocar de organização, confirmar e
+  reenviar a confirmação, que não passam por permissão de alteração.
+- **Onde a regra vale (D3):** na camada de aplicação, para qualquer interface. A `UnitOfWork` calcula a situação
+  na revalidação do vínculo, dentro da transação (`Actor#email_status`); `Authorizer.authorize!` recusa as
+  permissões de alteração da conta somente leitura e `Authorizer.confirmed_email!`, chamado em cada caso de uso da
+  lista, recusa as ações para fora. A classificação das permissões vem da matriz (`.read` é consulta); as poucas
+  consultas que usam uma permissão de alteração declaram `read: true`. Consulta por padrão e alteração declarada
+  um a um seria mais frágil: um caso de uso esquecido liberaria alterações.
+- **Erro e observabilidade (D4):** `Domain::EmailUnconfirmed < AccessDenied`, com `code` `email_unconfirmed` e
+  `reason` (`outbound` ou `read_only`): `403` na interface e na API, com a mensagem da ação recusada. A
+  `UnitOfWork` conta a recusa em `domain_conflicts_total{code="email_unconfirmed"}`, sem rótulos de usuário.
+- **Convites (D5):** o link de convite (equipe ou portal) chega somente ao endereço convidado, que precisa ser o
+  da conta; o aceite confirma o e-mail da conta existente, como já acontecia com a conta criada pelo aceite. O
+  ator `customer` não passa pela regra: as ações do portal são do próprio cliente, e a conta do portal é
+  confirmada pelo convite.
+- **Credenciais (D6):** a credencial herda a situação de confirmação de quem a criou, calculada pela `UnitOfWork`
+  na revalidação da credencial (como nas sessões): criador pendente recebe `email_unconfirmed` nas ações para
+  fora, criador com o prazo vencido deixa a credencial somente leitura. A criação já exige e-mail confirmado, mas
+  uma credencial de conta não confirmada pode existir quando a 1.3.0 a criou durante a implantação gradual ou no
+  retorno. Credencial sem criador registrado não tem situação. A regra de criador com vínculo ativo continua.
+- **Webhooks (D7):** o despacho não cria entregas para endpoint cadastrado por quem ainda não confirmou o e-mail
+  (pela mesma convivência com a 1.3.0); o evento não é guardado para ele, e os eventos seguintes à confirmação
+  voltam a sair. Uma entrega já criada para esse endpoint é encerrada como falha com o motivo, sem chamada de
+  rede, sem tentativa e sem contar no circuito; fica visível na tela **Integrações**, pode ser reenviada depois da
+  confirmação e sai pela retenção das entregas concluídas. Reter as entregas até a confirmação foi descartado:
+  a retenção existente depende da reativação do endpoint pausado, e eventos de dias antes chegariam de uma vez
+  ao destino. Endpoint sem autor registrado não muda.
+- **Cobranças pelo provedor (D8):** a consulta da resolução de envio sem confirmação e o reenvio da cobrança
+  (também quando parte da conciliação) exigem e-mail confirmado, como a solicitação.
+- **Usuários existentes (D9):** a migration 0018 considera confirmados os usuários sem confirmação cujo prazo de
+  7 dias já tinha vencido na atualização (`created_at <= now() - interval '7 days'`), com `email_confirmed_at`
+  igual ao instante da transação (identificável por `schema_migrations.applied_at`). Sem ela, um proprietário
+  cadastrado há mais de 7 dias ficaria somente leitura na troca de versão, sem aviso; numa instalação sem envio de
+  e-mail, sem saída. As contas mais novas continuam pendentes, com o aviso e o restante do prazo, e suas
+  credenciais e endpoints seguem D6 e D7 (consulta de auditoria em `docs/RUNBOOKS.md`, seção 17.2).
+- **Correção do e-mail (D10):** enquanto a conta não está confirmada (pendente ou somente leitura), a própria
+  pessoa corrige o e-mail com a senha atual: endereço normalizado, diferente do atual e sem outra conta, limites
+  de 3 por usuário por hora e o mesmo limite por IP do reenvio, links de confirmação e de recuperação de senha
+  anteriores invalidados, confirmação enviada ao novo endereço e auditoria `user.email_corrected` em cada
+  organização da qual a pessoa é membro, com o endereço anterior mascarado. Sem isso, o proprietário único que
+  errou o e-mail no cadastro ficaria com a organização congelada. A troca de um e-mail já confirmado continua
+  fora do escopo.
+- **Interface (D11):** aviso fixo no topo do layout da equipe com o prazo restante ou a conta somente leitura, o
+  endereço para onde a confirmação foi enviada, o link **Corrigir e-mail** e o botão **Reenviar confirmação**
+  (POST com CSRF, sem script). Limites do reenvio: 20 por IP por hora na rota (somados à correção) e 3 por usuário
+  por hora no caso de uso; o worker emite o token no envio e invalida os links anteriores. A ação para fora
+  recusada volta à página da ação, como os demais erros de negócio; a recusa da conta somente leitura vai sempre
+  para a página 403.
+- **Alternativas rejeitadas:**
+  - bloquear a entrada até a confirmação: impediria a avaliação do produto logo após o cadastro e não protege
+    mais do que o bloqueio das ações para fora;
+  - aplicar a regra só na interface web: a API por sessão e futuras interfaces contornariam o bloqueio;
+  - prazo a partir da atualização para os usuários existentes: exigiria guardar um segundo início do prazo para
+    contas que já operam há meses;
+  - confirmar na 0018 todas as contas sem confirmação: confirmaria sem o link contas criadas minutos antes da
+    atualização;
+  - recusar na autenticação as credenciais de criador não confirmado: impediria também as consultas, que a regra
+    libera.
+- **Consequências:** o cadastro novo precisa confirmar o e-mail para convidar a equipe e se comunicar com
+  clientes; o `seed` e os convites continuam produzindo contas confirmadas. Instalações sem envio de e-mail
+  configurado precisam confirmar manualmente os novos cadastros (`docs/RUNBOOKS.md`, seção 17).

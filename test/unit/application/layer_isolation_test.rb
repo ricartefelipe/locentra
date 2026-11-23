@@ -29,7 +29,8 @@ class LayerIsolationTest < UnitTest
     tx = Object.new
     transactor = Port.new(->(_n, _a, _k, blk) { blk.call(tx) })
     bundle = { "status" => "pending", "active" => true, "event_id" => "e1", "event_type" => "reservation.confirmed", "url" => "https://destino.example/x",
-               "occurred_at" => Time.utc(2026, 3, 2), "payload" => {}, "secret_ciphertext" => "cifrado" }
+               "occurred_at" => Time.utc(2026, 3, 2), "payload" => {}, "secret_ciphertext" => "cifrado",
+               "creator_confirmed" => true }
     recorded = []
     circuit = { "consecutive_failures" => 1, "failing_since" => Time.utc(2026, 3, 2, 12), "paused_at" => nil, "active" => true }
     webhooks = Port.new(lambda do |name, args, _k, _b|

@@ -31,6 +31,8 @@ module Locentra
         PORTAL_INVITATION = ["portal_invitation:ip", 20, 3600].freeze
         PAYMENT_WEBHOOK = ["payment_webhook:ip", 1200, 60].freeze
         PORTAL_REQUEST = ["portal_request:user", 30, 3600].freeze
+        # Reenvio e correção do e-mail não confirmado somam no mesmo limite por IP.
+        EMAIL_CONFIRMATION = ["email_confirmation:ip", 20, 3600].freeze
 
         module_function
 
@@ -51,6 +53,9 @@ module Locentra
           r.get "/organizacoes", auth, :organizations, auth: :login
           r.post "/organizacoes/ativar", auth, :switch, auth: :login
           r.get "/confirmar-email", auth, :confirm_email, auth: :public
+          r.post "/confirmar-email/reenviar", auth, :resend_confirmation, auth: :login, throttle: EMAIL_CONFIRMATION
+          r.get "/confirmar-email/corrigir", auth, :correction_form, auth: :login
+          r.post "/confirmar-email/corrigir", auth, :correct_email, auth: :login, throttle: EMAIL_CONFIRMATION
           r.get "/recuperar-senha", auth, :forgot_form, auth: :public
           r.post "/recuperar-senha", auth, :forgot, auth: :public, csrf: :origin
           r.get "/redefinir-senha", auth, :reset_form, auth: :public

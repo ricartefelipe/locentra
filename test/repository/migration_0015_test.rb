@@ -104,7 +104,9 @@ class Migration0015Test < Minitest::Test
     inverted_id = legacy_agreement(900, valid_until: "2026-01-01T00:00:00Z")
 
     assert_equal ["0015"], migrator(MIGRATIONS).migrate
-    assert_equal %w[0016 0017 0015], applied_order.last(3), "as posteriores foram aplicadas antes da 0015, que não depende delas"
+    later = Dir.children(MIGRATIONS).filter_map { |file| file[/\A(\d{4})_/, 1] }.select { |version| version > "0015" }.sort
+
+    assert_equal [*later, "0015"], applied_order.last(later.size + 1), "as posteriores foram aplicadas antes da 0015, que não depende delas"
     assert_equal(%w[t t t t], %w[coupons customer_price_agreements coupon_redemptions additional_fees].map { |table| forced_rls(table) })
     coupon = owner_query("SELECT updated_at = created_at AS filled, lock_version, redemptions FROM coupons WHERE id = $1", [coupon_id]).first
 

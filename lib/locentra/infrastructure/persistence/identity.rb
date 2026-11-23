@@ -40,6 +40,11 @@ module Locentra
           tx.execute("UPDATE users SET email_confirmed_at = COALESCE(email_confirmed_at, $2), updated_at = $2 WHERE id = $1", [id, now])
         end
 
+        # Somente enquanto a conta não tem confirmação; devolve se gravou.
+        def update_unconfirmed_email(tx, id, email, now)
+          tx.execute("UPDATE users SET email = $2, updated_at = $3 WHERE id = $1 AND email_confirmed_at IS NULL", [id, email, now]) == 1
+        end
+
         def update_password(tx, id, digest, now)
           tx.execute("UPDATE users SET password_digest = $2, failed_login_count = 0, locked_until = NULL, updated_at = $3 WHERE id = $1",
                      [id, digest, now])
@@ -58,7 +63,8 @@ module Locentra
         def find_by_digest(tx, digest)
           tx.query_one(<<~SQL, [digest])
             SELECT s.id, s.kind, s.user_id, s.organization_id, s.csrf_token, s.ip, s.user_agent, s.created_at, s.last_seen_at,
-                   s.idle_expires_at, s.absolute_expires_at, s.revoked_at, u.email, u.name AS user_name, u.email_confirmed_at
+                   s.idle_expires_at, s.absolute_expires_at, s.revoked_at, u.email, u.name AS user_name, u.email_confirmed_at,
+                   u.created_at AS user_created_at
               FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_digest = $1
           SQL
@@ -123,23 +129,29 @@ module Locentra
 
       # Consultas de vínculo usadas pela UnitOfWork para revalidar o ator a cada operação.
       class AccessRepository
+        # Traz também a confirmação de e-mail e a criação do usuário (ADR-031): a UnitOfWork calcula a
+        # situação da conta no instante da operação.
         def active_membership(tx, organization_id, user_id)
           tx.query_one(<<~SQL, [organization_id, user_id])
-            SELECT m.id, m.role FROM memberships m JOIN organizations o ON o.id = m.organization_id
+            SELECT m.id, m.role, u.email_confirmed_at, u.created_at AS user_created_at
+              FROM memberships m JOIN organizations o ON o.id = m.organization_id JOIN users u ON u.id = m.user_id
              WHERE m.organization_id = $1 AND m.user_id = $2 AND m.status = 'active' AND o.status = 'active'
           SQL
         end
 
         # Como no vínculo de usuários, a organização precisa estar ativa (não suspensa nem encerrada).
         # Quem criou a credencial precisa continuar membro ativo; `creator_role` é o papel atual dele
-        # (os escopos efetivos não passam das permissões desse papel).
+        # (os escopos efetivos não passam das permissões desse papel). A confirmação de e-mail e a criação
+        # de quem a criou dão a situação da credencial (ADR-031); sem criador, as colunas vêm nulas.
         def active_credential(tx, credential_id, now)
           return nil unless credential_id
 
           tx.query_one(<<~SQL, [credential_id, now])
-            SELECT c.id, c.organization_id, c.kind, c.scopes, m.role AS creator_role
+            SELECT c.id, c.organization_id, c.kind, c.scopes, m.role AS creator_role,
+                   u.email_confirmed_at AS creator_email_confirmed_at, u.created_at AS creator_created_at
               FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
               LEFT JOIN memberships m ON m.organization_id = c.organization_id AND m.user_id = c.created_by AND m.status = 'active'
+              LEFT JOIN users u ON u.id = c.created_by
              WHERE c.id = $1 AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > $2) AND o.status = 'active'
                AND (c.created_by IS NULL OR m.id IS NOT NULL)
           SQL

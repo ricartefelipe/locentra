@@ -102,6 +102,7 @@ module Locentra
         def call(actor, input, tx: nil)
           purpose = input.fetch(:purpose, "receivable").to_s
           within(actor, @target.permission(purpose), tx) do |tx, current|
+            Authorizer.confirmed_email!(current, "payments.request")
             account = @accounts.active(tx) || raise(Domain::ValidationError.field("provedor", "configure um provedor de pagamentos ativo"))
             target = @target.lock!(tx, purpose, purpose == "deposit" ? input[:deposit_id] : input[:receivable_id])
             amount = @target.check_amount!(target, F::Amount.positive!(input[:amount]))

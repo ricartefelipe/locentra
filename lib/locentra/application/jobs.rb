@@ -55,7 +55,7 @@ module Locentra
 
         def call(actor, limit: nil)
           lim, = Page.params(limit: limit, default: DEFAULT_LIMIT)
-          @uow.run(actor, "jobs.manage") do |tx, _|
+          @uow.run(actor, "jobs.manage", read: true) do |tx, _|
             @queue.failures(tx, limit: lim).map { |row| row.merge("last_error" => ErrorText.redact(row["last_error"])) }
           end
         end

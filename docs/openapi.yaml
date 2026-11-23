@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Locentra API
-  version: "1.3"
+  version: "1.4"
   description: |
     API versionada do Locentra. Autenticação por credencial de integração (`Authorization: Bearer lcn_...`)
     com escopos por permissão. O tenant é determinado pela credencial, nunca por parâmetros.
@@ -25,6 +25,13 @@ info:
     criar outra credencial com o escopo. A alteração das configurações é feita por sessão de usuário com
     `organization.manage` (cookie de sessão + `X-CSRF-Token`) em `PATCH /organization/settings`; credenciais
     recebem 403, mesmo com o escopo (ADR-030). As filiais não são geridas pela API.
+
+    Confirmação de e-mail (ADR-031): requisição autenticada por sessão de usuário cujo e-mail ainda não foi
+    confirmado recebe `403` com o código `email_unconfirmed` nas ações que agem para fora em nome da organização
+    (envio de orçamento e emissão de contrato) e, a partir de 7 dias da criação da conta, em qualquer alteração
+    (inclusive `PATCH /organization/settings`); as consultas continuam liberadas. A mensagem indica a ação recusada.
+    Credenciais (`Bearer`) seguem a situação de quem as criou e recebem o mesmo código; a criação de credenciais
+    exige e-mail confirmado.
 
     Orçamentos (`/quotes`, escopos `quotes.read` e `quotes.write`; a conversão exige também
     `reservations.write`), contratos (`/contracts`, escopos `contracts.read` e `contracts.write`; o aditivo exige
@@ -427,7 +434,8 @@ paths:
       description: >-
         Escopo `quotes.write`. Com `hold_policy` `hold_on_send`, cria na mesma transação a reserva de bloqueio temporário
         (exige também `reservations.write`); sem disponibilidade, `409` `unavailable` com `shortages`. Com `none`, o envio
-        não garante disponibilidade. Orçamento fora de rascunho responde `409` `invalid_transition`.
+        não garante disponibilidade. Orçamento fora de rascunho responde `409` `invalid_transition`. Por sessão de usuário
+        com e-mail não confirmado, `403` `email_unconfirmed` (ADR-031).
       operationId: sendQuote
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
@@ -548,7 +556,8 @@ paths:
         Escopo `contracts.write`. Congela os termos (cliente, itens, preços, política de cancelamento e fuso da
         reserva) e gera a versão 1 do documento em PDF. Responde `201` quando emite e `200` quando a reserva já tinha
         contrato (o mesmo), com `Location` do contrato nos dois casos. Reserva que não está confirmada nem em andamento
-        responde `409` `reservation_not_confirmed`.
+        responde `409` `reservation_not_confirmed`. Por sessão de usuário com e-mail não confirmado, `403`
+        `email_unconfirmed` (ADR-031).
       operationId: issueContract
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody:
@@ -1429,7 +1438,13 @@ components:
           additionalProperties: false
           required: [code, message, details, request_id]
           properties:
-            code: { type: string, example: unavailable }
+            code:
+              type: string
+              example: unavailable
+              description: >-
+                Código estável do erro. Em `403`, entre outros: `forbidden` (permissão ou escopo), `plan_limit` (limite do plano),
+                `csrf` (token de sessão ausente ou inválido) e `email_unconfirmed` (sessão de usuário, ou credencial
+                criada por usuário, com e-mail não confirmado, ADR-031).
             message: { type: string }
             details:
               type: object

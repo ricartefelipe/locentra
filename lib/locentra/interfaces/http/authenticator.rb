@@ -33,6 +33,15 @@ module Locentra
         def load_session(ctx)
           token = ctx.cookie(self.class.cookie_name(@system.config))
           ctx.session = token && @sessions.resolve(token)
+          ctx.email_confirmation = email_confirmation(ctx.session)
+        end
+
+        # O aviso do layout usa a mesma regra e o mesmo relógio dos casos de uso (ADR-031).
+        def email_confirmation(session)
+          return nil unless session && session["kind"] == "staff"
+
+          Domain::Identity::EmailConfirmation.standing(confirmed_at: session["email_confirmed_at"], created_at: session["user_created_at"],
+                                                       now: @system.clock.now)
         end
 
         def require_login!(ctx)

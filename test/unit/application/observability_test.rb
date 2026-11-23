@@ -125,7 +125,9 @@ class ApplicationObservabilityTest < UnitTest
 
   def test_unit_of_work_counts_conflicts_that_end_the_operation
     access = Object.new
-    def access.active_membership(*) = { "id" => "m1", "role" => "owner" }
+    def access.active_membership(*)
+      { "id" => "m1", "role" => "owner", "email_confirmed_at" => Time.utc(2026, 1, 1), "user_created_at" => Time.utc(2026, 1, 1) }
+    end
     user = A::Actor.user(user_id: "u1", organization_id: "o1", role: "owner")
     unavailable = Domain::Unavailable.new([{ "product_id" => "p" }])
     uow = A::UnitOfWork.new(transactor: FakeTransactor.new, access: access, clock: TestClock.new, metrics: metrics)

@@ -24,7 +24,7 @@ module Locentra
           def create(ctx)
             quote = uc(:create_quote).call(ctx.actor, input_from(ctx, customer: true))
             redirect(ctx, "/orcamentos/#{quote.id}", notice: "Orçamento #{quote.code} criado em rascunho (versão 1).")
-          rescue Domain::ValidationError, Domain::NotFound, Domain::AccessDenied => e
+          rescue Domain::ValidationError, Domain::NotFound, FormDenial => e
             new(ctx, errors: errors_of(e), status: 422, values: ctx.form)
           end
 
@@ -52,7 +52,7 @@ module Locentra
           def revise(ctx)
             quote = uc(:revise_quote).call(ctx.actor, ctx.param(:id), input_from(ctx, customer: false))
             redirect(ctx, "/orcamentos/#{quote.id}", notice: "Versão #{quote.current_version} criada. Envie o orçamento novamente ao cliente.")
-          rescue Domain::ValidationError, Domain::NotFound, Domain::AccessDenied, Domain::InvalidTransition => e
+          rescue Domain::ValidationError, Domain::NotFound, FormDenial, Domain::InvalidTransition => e
             revision(ctx, errors: errors_of(e), status: 422, values: ctx.form)
           end
 
@@ -66,7 +66,7 @@ module Locentra
             redirect(ctx, "/orcamentos/#{quote.id}", notice: notice)
           rescue Domain::Unavailable => e
             show(ctx, errors: { "base" => [e.message] }, status: 409, shortages: e.shortages)
-          rescue Domain::ValidationError, Domain::InvalidTransition, Domain::AccessDenied => e
+          rescue Domain::ValidationError, Domain::InvalidTransition, FormDenial => e
             show(ctx, errors: errors_of(e), status: 422)
           end
 
@@ -92,7 +92,7 @@ module Locentra
             redirect(ctx, "/reservas/#{result.reservation.id}", notice: "#{prefix} na reserva #{result.reservation.code}.")
           rescue Domain::Unavailable => e
             show(ctx, errors: { "base" => [e.message] }, status: 409, shortages: e.shortages)
-          rescue Domain::ValidationError, Domain::InvalidTransition, Domain::AccessDenied, Domain::HoldExpired => e
+          rescue Domain::ValidationError, Domain::InvalidTransition, FormDenial, Domain::HoldExpired => e
             show(ctx, errors: errors_of(e), status: 422)
           end
 

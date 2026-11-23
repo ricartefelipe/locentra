@@ -5,7 +5,21 @@
 
 ## Última verificação completa
 
-Executada para a versão 1.3.0 (API v1 ampliada, limite por organização na fila de webhooks, pausa automática de
+Executada para a versão 1.4.0 (confirmação de e-mail obrigatória para ações que agem fora da organização, conta
+somente leitura após 7 dias, credenciais e webhooks seguindo quem os criou, correção do e-mail não confirmado,
+ADR-031 e migration 0018), em 23/11/2026:
+
+| Verificação | Resultado |
+|---|---|
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 1134 testes, 30.670 asserções, 0 falhas |
+| Cobertura de domínio + aplicação | 99,52% de linhas, 94,02% de branches (metas 90% / 80%) |
+| `rake test:browser` (Ferrum, Chrome headless) | 17 testes, 0 falhas |
+| `rubocop` | 342 arquivos, sem ofensas |
+| Revisão de código do PR #23 | 6 apontamentos (2 importantes e 4 menores), todos corrigidos com teste |
+| Atualização de um banco da 1.3.0 para a 0018 (contagem prévia, backup, migration com a 1.3.0 em execução, troca, aviso, bloqueio, correção do e-mail e confirmação pelo Mailpit, conta somente leitura, retorno à 1.3.0) | exercitada; registro em `RUNBOOKS.md` §17.5; também coberta por `test/repository/migration_0018_test.rb` |
+| CI do PR da feature (#23) | 7 checks e análise do SonarCloud aprovados |
+
+Verificação anterior, executada para a versão 1.3.0 (API v1 ampliada, limite por organização na fila de webhooks, pausa automática de
 endpoints, retenção do histórico de integrações, migration 0017 e log descarregado a cada linha), em 22/11/2026:
 
 | Verificação | Resultado |
@@ -62,8 +76,9 @@ restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprova
 | #11 | Estabilização da versão 1.0.0: correções de segurança, concorrência, operação, documentação e interface | Integrado e testado; versão 1.0.0 |
 | #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 |
 | #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 |
-| #19 | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (ADR-029) | Integrado e testado; versão 1.3.0 (ver acima) |
-| #20 | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (ADR-030) | Integrado e testado; versão 1.3.0 (ver acima) |
+| #19 | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (ADR-029) | Integrado e testado; versão 1.3.0 |
+| #23 | Confirmação de e-mail obrigatória: ações para fora em nome da organização bloqueadas até a confirmação, conta somente leitura depois de 7 dias, aviso com reenvio, `403` `email_unconfirmed` na API por sessão, confirmação no aceite de convites e migration 0018 (ADR-031) | Integrado e testado; versão 1.4.0 (ver acima) |
+| #20 | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (ADR-030) | Integrado e testado; versão 1.3.0 |
 
 ## Casos obrigatórios cobertos por testes
 
@@ -73,7 +88,9 @@ invade outra reserva; retirada e devolução duplicadas (sequencial e concorrent
 indisponibilidade; isolamento entre organizações e entre clientes; revogação de acesso; cálculos e
 arredondamentos (inclusive propriedades); caução e reembolso (inclusive concorrente); timeout após sucesso no
 provedor; recuperação de tarefas e worker com lease vencido; downloads não autorizados; XSS e CSRF;
-contrato Rack (`Rack::Lint`); roteiro de demonstração de 16 passos; condições comerciais: dois resgates do
+contrato Rack (`Rack::Lint`); roteiro de demonstração de 16 passos; confirmação de e-mail: cada ação para fora
+recusada sem efeito antes da confirmação e aceita depois, prazo de 7 dias no segundo exato, navegação de todas as
+páginas da equipe na conta somente leitura, reenvio com limites e atualização do esquema da 0017 para a 0018; condições comerciais: dois resgates do
 último uso de um cupom, uso liberado por cancelamento e por expiração (inclusive bloqueio vencido ainda não
 varrido), confirmação de bloqueio em andamento no vencimento contra o último uso e contra a redução do
 máximo, criação com cupom
@@ -111,9 +128,11 @@ duas ordens), limpeza do histórico contra reenvio concorrente e atualização d
   qualquer processo.
 - Portal do cliente sem API v1.
 - Aceite e encerramento de contrato, avarias, manutenção e transferências sem API v1 (interface web).
-- A confirmação de e-mail (RF-05) é emitida e registrada, mas não restringe funcionalidades: conta não
-  confirmada entra, convida, cria credenciais e envia orçamentos e contratos. O cadastro é limitado por IP e
-  por e-mail (ADR-026); uma política de bloqueio até a confirmação fica para versão futura.
+- O e-mail só pode ser corrigido enquanto a conta não está confirmada: a troca de um e-mail já confirmado não
+  existe. Sem envio de e-mail configurado, a confirmação de cadastros novos é manual (`RUNBOOKS.md`, seção 17.3).
+- Durante a implantação gradual ou o retorno à 1.3.0, a versão antiga não aplica a regra: contas não confirmadas
+  criam credenciais e endpoints por ela, e os endpoints delas recebem entregas da 1.3.0. Na versão nova, esses
+  registros seguem a situação de quem os criou (consulta de auditoria em `RUNBOOKS.md`, seção 17.2).
 - Configurações da organização são alteradas somente por usuário com `organization.manage`, pela interface web
   ou por `PATCH /api/v1/organization/settings` com sessão; credenciais e CLI apenas consultam (ADR-030). Prévia,
   restauração dos padrões e gestão de filiais ficam na interface web. A lista de fusos oferece os fusos do
