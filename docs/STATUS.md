@@ -3,22 +3,23 @@
 "Testado" indica testes automatizados executados com sucesso. Comandos de verificação em
 `CONTRIBUTING.md`; documentação de cada módulo em `docs/modulos/`.
 
-## Verificação da branch (não publicado)
+## Última verificação completa
 
-Branch `feature/bloqueio-email-nao-confirmado` (confirmação de e-mail obrigatória, credenciais e webhooks seguindo
-quem os criou, correção do e-mail não confirmado, ADR-031, migration 0018), em 23/11/2026:
+Executada para a versão 1.4.0 (confirmação de e-mail obrigatória para ações que agem fora da organização, conta
+somente leitura após 7 dias, credenciais e webhooks seguindo quem os criou, correção do e-mail não confirmado,
+ADR-031 e migration 0018), em 23/11/2026:
 
 | Verificação | Resultado |
 |---|---|
-| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 1134 testes, 30.763 asserções, 0 falhas |
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 1134 testes, 30.670 asserções, 0 falhas |
 | Cobertura de domínio + aplicação | 99,52% de linhas, 94,02% de branches (metas 90% / 80%) |
 | `rake test:browser` (Ferrum, Chrome headless) | 17 testes, 0 falhas |
 | `rubocop` | 342 arquivos, sem ofensas |
-| Atualização de um banco da 1.3.0 para a 0018 | coberta por `test/repository/migration_0018_test.rb`; procedimento em `RUNBOOKS.md` §17, não exercitado em ambiente Compose |
+| Revisão de código do PR #23 | 6 apontamentos (2 importantes e 4 menores), todos corrigidos com teste |
+| Atualização de um banco da 1.3.0 para a 0018 (contagem prévia, backup, migration com a 1.3.0 em execução, troca, aviso, bloqueio, correção do e-mail e confirmação pelo Mailpit, conta somente leitura, retorno à 1.3.0) | exercitada; registro em `RUNBOOKS.md` §17.5; também coberta por `test/repository/migration_0018_test.rb` |
+| CI do PR da feature (#23) | 7 checks e análise do SonarCloud aprovados |
 
-## Última verificação completa
-
-Executada para a versão 1.3.0 (API v1 ampliada, limite por organização na fila de webhooks, pausa automática de
+Verificação anterior, executada para a versão 1.3.0 (API v1 ampliada, limite por organização na fila de webhooks, pausa automática de
 endpoints, retenção do histórico de integrações, migration 0017 e log descarregado a cada linha), em 22/11/2026:
 
 | Verificação | Resultado |
@@ -75,9 +76,9 @@ restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprova
 | #11 | Estabilização da versão 1.0.0: correções de segurança, concorrência, operação, documentação e interface | Integrado e testado; versão 1.0.0 |
 | #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 |
 | #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 |
-| #19 | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (ADR-029) | Integrado e testado; versão 1.3.0 (ver acima) |
-| — (`feature/bloqueio-email-nao-confirmado`, não publicado) | Confirmação de e-mail obrigatória: ações para fora em nome da organização bloqueadas até a confirmação, conta somente leitura depois de 7 dias, aviso com reenvio, `403` `email_unconfirmed` na API por sessão, confirmação no aceite de convites e migration 0018 (ADR-031) | Implementado e testado na branch (ver "Verificação da branch") |
-| #20 | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (ADR-030) | Integrado e testado; versão 1.3.0 (ver acima) |
+| #19 | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (ADR-029) | Integrado e testado; versão 1.3.0 |
+| #23 | Confirmação de e-mail obrigatória: ações para fora em nome da organização bloqueadas até a confirmação, conta somente leitura depois de 7 dias, aviso com reenvio, `403` `email_unconfirmed` na API por sessão, confirmação no aceite de convites e migration 0018 (ADR-031) | Integrado e testado; versão 1.4.0 (ver acima) |
+| #20 | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (ADR-030) | Integrado e testado; versão 1.3.0 |
 
 ## Casos obrigatórios cobertos por testes
 

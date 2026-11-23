@@ -678,7 +678,7 @@ real geraria tráfego para terceiros; as entregas, a pausa e a retenção são c
 de concorrência e por `migration_0017_test.rb`. O exercício encontrou também um defeito anterior, corrigido nesta
 versão: o log do worker ficava em buffer e `worker.started` só apareceu depois da parada.
 
-## 17. Atualização para a migration 0018 (confirmação de e-mail) — procedimento escrito (coberto por `test/repository/migration_0018_test.rb`)
+## 17. Atualização para a migration 0018 (confirmação de e-mail) — exercitado em 23/11/2026 (também coberto por `test/repository/migration_0018_test.rb`)
 
 A partir desta versão, a conta sem e-mail confirmado não executa ações que agem para fora em nome da organização
 e, 7 dias depois da criação do usuário, fica somente leitura (ADR-031). As credenciais de API e CLI e os
@@ -764,3 +764,20 @@ das confirmações pelo link, use o instante de `schema_migrations.applied_at` d
 à versão nova, as contas criadas durante o retorno seguem a regra pelo `created_at` delas (as que passaram de 7
 dias sem confirmar ficam somente leitura até a confirmação), e as credenciais e os endpoints criados por elas
 seguem a seção 17.2: refaça a consulta de auditoria.
+
+### 17.5 Registro do exercício (23/11/2026, PostgreSQL 18.7, imagens da tag v1.3.0 e da release 1.4.0)
+
+Ambiente Compose da 1.3.0 (o mesmo das seções 13.5, 14.5 e 16.4, na 0017, com seed e um anexo), com web e
+worker da 1.3.0 em execução. Antes da migration, dois cadastros foram feitos pela tela da 1.3.0, sem
+confirmação: um com a criação recuada em 10 dias por SQL (conta antiga) e outro recente.
+
+| Passo | Resultado |
+|---|---|
+| 17.1, passo 1 (contagem com `locentra_backup`) | 1 será confirmado e 1 continuará pendente |
+| Backup da seção 3 | gravado, com 1 arquivo de anexo |
+| 17.1, passo 2 (`db:migrate` com `lock_timeout` e a 1.3.0 no ar) | 0018 aplicada em cerca de 3 s, incluindo a partida do contêiner; a 1.3.0 continuou com `/health/ready` 200; a conta antiga ficou confirmada e a recente, pendente |
+| 17.1, passo 4 (troca para a 1.4.0) | web e worker `healthy`; `/health/ready` 200; `worker.started` presente no log logo na partida |
+| Conta recente na 1.4.0 | aviso com o prazo de 7 dias e o endereço; convite de membro recusado (422) com "Confirme seu e-mail para liberar convites, credenciais, webhooks, pagamentos e envios a clientes." |
+| Correção do e-mail e confirmação | **Corrigir e-mail** com a senha; a confirmação chegou ao novo endereço no Mailpit e o link confirmou a conta; o aviso sumiu, o convite passou e a auditoria registrou `user.email_corrected` e `member.invited` |
+| Conta com o prazo vencido (cadastro com a criação recuada em 8 dias) | páginas abrem (200) com "Conta somente leitura até a confirmação."; cadastro de cliente recusado com a página 403 |
+| Retorno à 1.3.0 e volta à 1.4.0 | os dois sentidos `healthy` e `/health/ready` 200; parada de web e worker com código 0 |
