@@ -98,7 +98,8 @@ como `metrics.collect_failed`).
   arquivos estáticos; `method` fora de GET, HEAD, POST, PUT, PATCH, DELETE e OPTIONS vira `OTHER`.
 - `code` dos conflitos é o código fixo do erro de domínio (por exemplo `unavailable`, `hold_expired`,
   `early_pickup_unavailable`, `concurrent_update`, `idempotency_key_reused`, `duplicate:<constraint>`)
-  ou `invalid_transition` para transições recusadas pela máquina de estados.
+  ou `invalid_transition` para transições recusadas pela máquina de estados. A recusa por e-mail não
+  confirmado (403) entra com `email_unconfirmed` (ADR-031), sem rótulo de usuário ou organização.
 
 ### Conflitos de disponibilidade
 

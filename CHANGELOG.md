@@ -3,6 +3,35 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versões seguem
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Adicionado
+
+- **Confirmação de e-mail obrigatória para agir em nome da organização (ADR-031):** sem confirmar o e-mail, a
+  conta entra, navega e opera dentro da organização, mas não convida membros, não cria credenciais de API e CLI,
+  não cadastra, reativa nem reenvia webhooks, não configura o provedor de pagamentos nem solicita cobranças por
+  ele, não envia orçamentos, não emite contratos e não convida clientes para o portal. A regra vale nos casos de
+  uso, para a interface web e para a API por sessão.
+- **Conta somente leitura depois de 7 dias sem confirmação**, contados da criação do usuário: alterações
+  recusadas e consultas liberadas; entrar, sair, trocar de organização, confirmar e reenviar a confirmação
+  continuam disponíveis.
+- **Aviso no topo das páginas da equipe** com o prazo restante (ou a conta somente leitura) e o botão
+  **Reenviar confirmação** (`POST /confirmar-email/reenviar`, com CSRF; 20 pedidos por IP e 3 por usuário por
+  hora).
+- **API v1:** `403` com o código `email_unconfirmed` para a sessão de usuário não confirmado, documentado no
+  OpenAPI; credenciais não são afetadas.
+- **Métrica:** as recusas entram em `locentra_domain_conflicts_total{code="email_unconfirmed"}`.
+- **Migration 0018:** os usuários existentes sem confirmação passam a ser considerados confirmados, com o
+  instante da migration (`docs/RUNBOOKS.md`, seção 17).
+
+### Alterado
+
+- O aceite de convite da equipe ou do portal pelo link do e-mail confirma o e-mail da conta existente que o
+  aceita (a conta criada pelo aceite já nascia confirmada).
+- Nos formulários de convite de membro, cadastro de webhook, provedor e cobranças do financeiro, e na emissão de
+  contrato, reativação e reenvio de webhook, a recusa por e-mail não confirmado aparece na própria página, como os
+  demais erros de negócio.
+
 ## [1.3.0] — 2026-11-21
 
 ### Adicionado
