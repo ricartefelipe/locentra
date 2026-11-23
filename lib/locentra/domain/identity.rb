@@ -57,6 +57,10 @@ module Locentra
         "jobs.manage" => %w[owner admin]
       }.freeze
 
+      # Permissões de consulta; as demais da matriz alteram dados. A conta somente leitura (e-mail não
+      # confirmado depois do prazo) mantém apenas estas.
+      READ_PERMISSIONS = PERMISSIONS.keys.select { |permission| permission.end_with?(".read") }.freeze
+
       # Desconto manual máximo por papel, em pontos-base.
       DISCOUNT_LIMITS_BPS = {
         "owner" => 10_000, "admin" => 10_000, "manager" => 2_000, "attendant" => 500
@@ -74,6 +78,12 @@ module Locentra
 
       def permissions_for(role)
         PERMISSIONS.select { |_permission, roles| roles.include?(role) }.keys
+      end
+
+      # Permissão da matriz que altera dados. Permissões fora da matriz (como `portal.access`, do ator
+      # cliente) não pertencem a usuários da equipe e ficam de fora.
+      def mutation?(permission)
+        PERMISSIONS.key?(permission) && !READ_PERMISSIONS.include?(permission)
       end
 
       def discount_limit_bps(role) = DISCOUNT_LIMITS_BPS.fetch(role, 0)
@@ -111,6 +121,81 @@ module Locentra
           raise ValidationError.new({ "senha" => errors }) unless errors.empty?
 
           text
+        end
+      end
+
+      # Confirmação de e-mail (RF-05, ADR-031). Sem a confirmação, a conta entra e opera normalmente dentro
+      # da organização, mas não executa as ações que fazem a plataforma agir para fora em nome dela
+      # (OUTBOUND_ACTIONS). A partir de GRACE_PERIOD_SECONDS contados da criação do usuário, a conta não
+      # confirmada fica somente leitura. Os instantes vêm sempre do relógio injetado.
+      module EmailConfirmation
+        GRACE_PERIOD_DAYS = 7
+        DAY_SECONDS = 86_400
+        GRACE_PERIOD_SECONDS = GRACE_PERIOD_DAYS * DAY_SECONDS
+
+        CONFIRMED = "confirmed"
+        PENDING = "pending"
+        READ_ONLY = "read_only"
+        STATUSES = [CONFIRMED, PENDING, READ_ONLY].freeze
+
+        # Ação bloqueada até a confirmação => complemento de "Confirme seu e-mail para ...".
+        OUTBOUND_ACTIONS = {
+          "members.invite" => "convidar membros da equipe",
+          "credentials.create" => "criar credenciais de API e CLI",
+          "webhooks.create" => "cadastrar endpoints de webhook",
+          "webhooks.resume" => "reativar endpoints de webhook",
+          "webhooks.redeliver" => "reenviar entregas de webhook",
+          "payments.configure" => "configurar o provedor de pagamentos",
+          "payments.request" => "solicitar cobranças pelo provedor de pagamentos",
+          "quotes.send" => "enviar orçamentos aos clientes",
+          "contracts.issue" => "emitir contratos, que são enviados aos clientes por e-mail",
+          "portal.invite" => "convidar clientes para o portal"
+        }.freeze
+
+        # Situação da conta num instante. `deadline` e `remaining_seconds` (inteiro, arredondado para cima)
+        # existem somente para a conta não confirmada.
+        Standing = Data.define(:status, :deadline, :remaining_seconds) do
+          def confirmed? = status == CONFIRMED
+          def read_only? = status == READ_ONLY
+
+          # Dias restantes arredondados para cima: de 1 segundo a 1 dia, conta como 1 dia.
+          def remaining_days = (remaining_seconds.to_i + DAY_SECONDS - 1) / DAY_SECONDS
+        end
+
+        module_function
+
+        def deadline(created_at)
+          raise ArgumentError, "instante de criação do usuário ausente" if created_at.nil?
+
+          created_at + GRACE_PERIOD_SECONDS
+        end
+
+        # O prazo termina exatamente em `created_at + 7 dias`: a partir desse instante, inclusive, a conta
+        # não confirmada é somente leitura.
+        def standing(confirmed_at:, created_at:, now:)
+          return Standing.new(status: CONFIRMED, deadline: nil, remaining_seconds: nil) if confirmed_at
+
+          limit = deadline(created_at)
+          return Standing.new(status: READ_ONLY, deadline: limit, remaining_seconds: 0) if now >= limit
+
+          Standing.new(status: PENDING, deadline: limit, remaining_seconds: (limit.to_r - now.to_r).ceil)
+        end
+
+        def status(confirmed_at:, created_at:, now:) = standing(confirmed_at: confirmed_at, created_at: created_at, now: now).status
+
+        # Recusa a ação para fora quando a situação não é "confirmada" (situação desconhecida também recusa).
+        def outbound!(status, action)
+          label = OUTBOUND_ACTIONS.fetch(action) { raise ArgumentError, "ação desconhecida: #{action}" }
+          raise EmailUnconfirmed.outbound(label) unless status == CONFIRMED
+
+          status
+        end
+
+        # Recusa a mutação quando a conta está somente leitura.
+        def writable!(status)
+          raise EmailUnconfirmed.read_only if status == READ_ONLY
+
+          status
         end
       end
 
