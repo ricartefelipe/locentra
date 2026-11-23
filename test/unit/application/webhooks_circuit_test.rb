@@ -84,7 +84,7 @@ class WebhooksCircuitUseCasesTest < UnitTest
 
   BUNDLE = { "id" => "d1", "status" => "pending", "active" => true, "paused_at" => nil, "endpoint_id" => "e1", "event_id" => "ev1",
              "event_type" => "reservation.confirmed", "url" => "https://destino.example/hook/segredo?token=abc", "occurred_at" => NOW,
-             "payload" => {}, "secret_ciphertext" => "cifrado" }.freeze
+             "payload" => {}, "secret_ciphertext" => "cifrado", "creator_confirmed" => true }.freeze
 
   def deliver(webhooks, http: FakeHttp.new)
     @http = http
@@ -99,6 +99,18 @@ class WebhooksCircuitUseCasesTest < UnitTest
   end
 
   def failing_state(failures, since: FAILING_SINCE) = { "consecutive_failures" => failures, "failing_since" => since, "paused_at" => nil, "active" => true }
+
+  # Endpoint de quem ainda não confirmou o e-mail (ADR-031): encerrada sem rede, sem tentativa e fora do circuito.
+  def test_endpoint_of_an_unconfirmed_creator_is_refused_without_network
+    webhooks = FakeWebhooks.new(delivery_bundle: BUNDLE.merge("creator_confirmed" => false, "paused_at" => NOW), refuse_delivery: 1)
+
+    assert_equal :creator_unconfirmed, deliver(webhooks).call("org-1", "d1", correlation_id: "req-1")
+    assert_equal ["d1", A::Webhooks::Deliver::CREATOR_UNCONFIRMED, NOW], webhooks.args_of(:refuse_delivery)
+    assert_equal 0, @http.posts
+    refute webhooks.called?(:hold_delivery)
+    refute webhooks.called?(:register_endpoint_result)
+    assert_empty @totals.entries
+  end
 
   def test_paused_endpoint_holds_the_delivery_without_network
     webhooks = FakeWebhooks.new(delivery_bundle: BUNDLE.merge("paused_at" => NOW), hold_delivery: 1)

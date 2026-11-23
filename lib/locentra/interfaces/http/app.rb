@@ -24,6 +24,7 @@ module Locentra
           [Domain::ValidationError, 422, "validation_error"],
           [Domain::NotFound, 404, "not_found"],
           [Domain::PlanLimitExceeded, 403, "plan_limit"],
+          [Domain::EmailUnconfirmed, 403, Domain::EmailUnconfirmed::CODE],
           [Domain::AccessDenied, 403, "forbidden"],
           [Application::Identity::TooManyRequests, 429, "too_many_requests"],
           [Application::Identity::AuthenticationFailed, 401, "authentication_failed"],

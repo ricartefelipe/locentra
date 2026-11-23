@@ -5,6 +5,7 @@ require_relative "../unit_helper"
 # Casos de uso testados com fakes pequenos nas fronteiras (sem banco).
 class ApplicationBaseTest < UnitTest
   A = Locentra::Application
+  CONFIRMED_AT = Time.utc(2026, 1, 5, 9, 0, 0)
 
   FakeTx = Struct.new(:tenant_id, :user_id, :actor) do
     def tenant_id! = tenant_id || raise(Locentra::Domain::AccessDenied)
@@ -39,7 +40,8 @@ class ApplicationBaseTest < UnitTest
   end
 
   def test_unit_of_work_refreshes_role_from_current_membership
-    access = FakeAccess.new(memberships: { %w[o1 u1] => { "id" => "m1", "role" => "auditor" } })
+    membership = { "id" => "m1", "role" => "auditor", "email_confirmed_at" => CONFIRMED_AT, "user_created_at" => CONFIRMED_AT }
+    access = FakeAccess.new(memberships: { %w[o1 u1] => membership })
     actor = A::Actor.user(user_id: "u1", organization_id: "o1", role: "owner")
 
     assert_raises(Locentra::Domain::AccessDenied) { uow(access).run(actor, "reservations.write") { :ok } }

@@ -144,6 +144,12 @@ module Locentra
       uc[:authenticate] =
         A::Identity::Authenticate.new(uow: uow, users: r[:users], hasher: s[:hasher], rate_limiter: s[:rate_limiter], clock: clock)
       uc[:confirm_email] = A::Identity::ConfirmEmail.new(uow: uow, tokens: s[:tokens], users: r[:users], clock: clock)
+      uc[:resend_email_confirmation] = A::Identity::ResendEmailConfirmation.new(uow: uow, users: r[:users], notifier: s[:notifier],
+                                                                                rate_limiter: s[:rate_limiter])
+      uc[:correct_unconfirmed_email] = A::Identity::CorrectUnconfirmedEmail.new(
+        uow: uow, users: r[:users], tokens: r[:user_tokens], organizations: r[:organizations], hasher: s[:hasher], notifier: s[:notifier],
+        rate_limiter: s[:rate_limiter], audit: audit, clock: clock
+      )
       uc[:request_password_reset] = A::Identity::RequestPasswordReset.new(uow: uow, users: r[:users], rate_limiter: s[:rate_limiter],
                                                                           notifier: s[:notifier])
       uc[:reset_password] = A::Identity::ResetPassword.new(uow: uow, users: r[:users], tokens: s[:tokens], hasher: s[:hasher],

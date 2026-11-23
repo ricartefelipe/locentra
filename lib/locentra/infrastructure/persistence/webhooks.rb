@@ -29,10 +29,13 @@ module Locentra
         # Endpoints inscritos no evento, com FOR KEY SHARE: a reativação (FOR UPDATE) espera o despacho
         # terminar, e assim nenhuma entrega é retida depois do commit da reativação. Não conflita com a
         # atualização do contador de falhas nem com a pausa.
+        # Somente endpoints de quem confirmou o e-mail (ou sem autor registrado) recebem eventos (ADR-031).
         def endpoints_for(tx, event_type)
           tx.query(<<~SQL, [tx.tenant_id!, event_type])
-            SELECT id, paused_at FROM webhook_endpoints WHERE organization_id = $1 AND active AND ($2 = ANY (events) OR '*' = ANY (events))
-               FOR KEY SHARE
+            SELECT w.id, w.paused_at FROM webhook_endpoints w LEFT JOIN users u ON u.id = w.created_by
+             WHERE w.organization_id = $1 AND w.active AND ($2 = ANY (w.events) OR '*' = ANY (w.events))
+               AND (w.created_by IS NULL OR u.email_confirmed_at IS NOT NULL)
+               FOR KEY SHARE OF w
           SQL
         end
 
@@ -58,11 +61,21 @@ module Locentra
         def delivery_bundle(tx, id)
           tx.query_one(<<~SQL, [tx.tenant_id!, id])
             SELECT d.id, d.status, d.event_id, d.event_type, d.endpoint_id, d.held_at, e.payload, e.occurred_at, w.url, w.secret_ciphertext,
-                   w.active, w.paused_at
+                   w.active, w.paused_at, (w.created_by IS NULL OR u.email_confirmed_at IS NOT NULL) AS creator_confirmed
               FROM webhook_deliveries d
               JOIN webhook_endpoints w ON w.organization_id = d.organization_id AND w.id = d.endpoint_id
               JOIN outbox_events e ON e.organization_id = d.organization_id AND e.id = d.event_id
+              LEFT JOIN users u ON u.id = w.created_by
              WHERE d.organization_id = $1 AND d.id = $2
+          SQL
+        end
+
+        # Encerra como falha, sem tentativa, a entrega que não pode sair (endpoint de autor sem e-mail
+        # confirmado): fica visível com o motivo, pode ser reenviada e sai pela retenção das concluídas.
+        def refuse_delivery(tx, id, reason, now)
+          tx.execute(<<~SQL, [tx.tenant_id!, id, reason, now])
+            UPDATE webhook_deliveries SET status = 'failed', last_error = $3, last_attempt_at = $4, held_at = NULL
+             WHERE organization_id = $1 AND id = $2 AND status <> 'delivered'
           SQL
         end
 

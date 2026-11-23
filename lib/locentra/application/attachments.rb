@@ -130,7 +130,7 @@ module Locentra
           if actor.customer?
             raise Domain::NotFound, "anexo" unless @portal_scope.customer_owns?(tx, actor.customer_id, row)
           else
-            Authorizer.authorize!(actor, PERMISSIONS.fetch(row["owner_type"]).first)
+            Authorizer.authorize!(actor, PERMISSIONS.fetch(row["owner_type"]).first, read: true)
           end
         end
       end

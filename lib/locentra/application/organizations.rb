@@ -91,6 +91,7 @@ module Locentra
         def call(actor, email:, role:)
           address = Domain::Identity::Email.normalize(email)
           @uow.run(actor, "members.manage") do |tx, current|
+            Authorizer.confirmed_email!(current, "members.invite")
             unless Domain::Identity.assignable_roles(current.role).include?(role)
               raise Domain::AccessDenied, "papel não pode ser atribuído por #{Domain::Identity.role_label(current.role)}"
             end
@@ -112,7 +113,9 @@ module Locentra
         end
       end
 
-      # Aceite de convite. O tenant é extraído do próprio token e confirmado pelo hash do segredo.
+      # Aceite de convite. O tenant é extraído do próprio token e confirmado pelo hash do segredo. O link
+      # chega somente ao endereço convidado, que precisa ser o da conta: o aceite confirma o e-mail da conta
+      # criada e também o da conta existente que ainda não o tinha confirmado (ADR-031).
       class AcceptInvitation
         def initialize(uow:, organizations:, users:, hasher:, audit:, clock:, ids:)
           @uow = uow
@@ -166,6 +169,7 @@ module Locentra
             user = @users.find(tx, user_id)
             raise Domain::AccessDenied, "o convite foi enviado para outro e-mail" unless user && user["email"] == invitation["email"]
 
+            @users.confirm_email(tx, user_id, now)
             return user_id
           end
           if @users.find_by_email(

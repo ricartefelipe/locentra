@@ -48,6 +48,18 @@ class CliIdentityTest < CliTest
     assert_nil owner_query("SELECT last_used_at FROM api_credentials WHERE id = $1", [api["id"]]).first["last_used_at"], "API não é tocada"
   end
 
+  # A credencial segue a situação de confirmação de e-mail de quem a criou (ADR-031): depois do prazo do criador
+  # sem confirmação, só consulta, e a recusa sai com o código próprio.
+  def test_credential_of_a_read_only_creator_only_reads
+    owner_query("UPDATE users SET email_confirmed_at = NULL WHERE id = $1", [@org[:user_id]], tenant: "")
+    @clock.advance(Locentra::Domain::Identity::EmailConfirmation::GRACE_PERIOD_SECONDS)
+    denied = cli("finance", "reconcile", "--json")
+
+    assert_equal [77, "email_unconfirmed"], [denied.status, denied.error["code"]]
+    assert_includes denied.error["message"], "Conta somente leitura até a confirmação do e-mail"
+    assert_equal 0, cli("reservations", "list").status
+  end
+
   def test_insufficient_scope_is_denied
     limited = cli_credential(@actor, scopes: %w[availability.read], name: "Somente disponibilidade")["token"]
     human = cli("reservations", "list", token: limited)

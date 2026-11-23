@@ -14,7 +14,7 @@ module Locentra
           def create(ctx)
             row = uc(:create_webhook).call(ctx.actor, url: ctx.form["url"], events: Array(ctx.form["eventos"]), description: ctx.form["descricao"])
             index(ctx, secret: row["secret"])
-          rescue Domain::ValidationError, Domain::PlanLimitExceeded => e
+          rescue Domain::ValidationError, Domain::PlanLimitExceeded, OutboundRefusal => e
             index(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
           end
 
@@ -27,14 +27,14 @@ module Locentra
           def resume(ctx)
             result = uc(:resume_webhook).call(ctx.actor, ctx.param(:id))
             redirect(ctx, "/integracoes", notice: "Endpoint reativado. Entregas retidas a reenviar em segundo plano: #{result["held_deliveries"]}.")
-          rescue Domain::Conflict => e
+          rescue Domain::Conflict, OutboundRefusal => e
             redirect(ctx, "/integracoes", alert: e.message)
           end
 
           def redeliver(ctx)
             uc(:redeliver_webhook).call(ctx.actor, ctx.param(:id))
             redirect(ctx, "/integracoes", notice: "Reenvio agendado.")
-          rescue Domain::Conflict => e
+          rescue Domain::Conflict, OutboundRefusal => e
             redirect(ctx, "/integracoes", alert: e.message)
           end
         end

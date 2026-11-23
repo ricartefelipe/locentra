@@ -80,6 +80,38 @@ module Locentra
             redirect(ctx, "/entrar", alert: "Link de confirmação inválido ou expirado.")
           end
 
+          # Reenvio pelo aviso do layout da equipe, com o token CSRF da sessão; vale também para a conta somente
+          # leitura. Acima dos limites (por IP na rota e por usuário no caso de uso), a resposta é 429.
+          def resend_confirmation(ctx)
+            result = uc(:resend_email_confirmation).call(user_id: ctx.session["user_id"], request_id: ctx.request_id)
+            notice = if result == :sent
+                       "Enviamos um novo link de confirmação para #{ctx.session["email"]}. Use o link da mensagem mais recente."
+                     else
+                       "Seu e-mail já está confirmado."
+                     end
+            redirect(ctx, safe_back(ctx.form["voltar"]) || "/", notice: notice)
+          end
+
+          # Correção do e-mail da conta ainda não confirmada (também na somente leitura), com a senha atual e o
+          # token CSRF da sessão. Conta confirmada volta ao início. Acima dos limites (por IP na rota e por usuário
+          # no caso de uso), 429.
+          def correction_form(ctx, errors: {}, status: 200, values: {})
+            return redirect(ctx, "/", notice: "Seu e-mail já está confirmado.") if ctx.session["email_confirmed_at"]
+
+            render(ctx, "auth/correct_email", title: "Corrigir e-mail", status: status, errors: errors, values: values)
+          end
+
+          def correct_email(ctx)
+            address = uc(:correct_unconfirmed_email).call(user_id: ctx.session["user_id"], email: ctx.form["email"], password: ctx.form["senha"],
+                                                          request_id: ctx.request_id, ip: ctx.ip)
+            redirect(ctx, "/", notice: "E-mail corrigido. Enviamos o link de confirmação para #{address}.")
+          rescue Domain::ValidationError, Domain::Conflict => e
+            errors = e.is_a?(Domain::ValidationError) ? e.errors : { "email" => [e.message] }
+            correction_form(ctx, errors: errors, status: 422, values: { "email" => ctx.form["email"] })
+          rescue Domain::AccessDenied => e
+            redirect(ctx, "/", notice: e.message)
+          end
+
           def forgot_form(ctx)
             render(ctx, "auth/forgot", title: "Recuperar senha", layout: "layouts/public", sent: false)
           end

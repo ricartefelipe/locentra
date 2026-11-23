@@ -69,12 +69,18 @@ class DatabaseTest < Minitest::Test
 
   def uc(name) = @system.use_cases[name]
 
-  # Cria organização completa e devolve o ator proprietário.
-  def create_organization(name: "Locadora Alfa", email: "dona@alfa.test", plan: "profissional")
+  # Cria organização completa e devolve o ator proprietário. Como no seed, o e-mail do proprietário fica
+  # confirmado; `confirmed: false` mantém a conta como o cadastro a deixa (ADR-031).
+  def create_organization(name: "Locadora Alfa", email: "dona@alfa.test", plan: "profissional", confirmed: true)
     result = uc(:sign_up).call(name: "Dona #{name}", email: email, password: "senha-muito-segura-1", organization_name: name, plan_id: plan)
+    confirm_email(result[:user_id]) if confirmed
     actor = A::Actor.user(user_id: result[:user_id], organization_id: result[:organization_id], role: "owner")
     branch = uc(:get_organization).call(actor)[:branches].first
     { actor: actor, branch: branch, organization_id: result[:organization_id], user_id: result[:user_id] }
+  end
+
+  def confirm_email(user_id)
+    @system.uow.anonymous { |tx| @system.repos[:users].confirm_email(tx, user_id, @clock.now) }
   end
 
   def create_customer(actor, name: "Cliente Teste", document: "52998224725", kind: "individual")

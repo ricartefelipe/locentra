@@ -39,6 +39,9 @@ module Locentra
 
         attr_reader :env, :rack, :route_params, :request_id
         attr_accessor :session, :actor, :organization, :response_headers
+        # Situação da confirmação de e-mail do usuário da sessão de equipe (Domain::Identity::EmailConfirmation::Standing),
+        # usada pelo aviso do layout; nil sem sessão de equipe.
+        attr_accessor :email_confirmation
 
         def initialize(env, route_params, request_id)
           @env = env

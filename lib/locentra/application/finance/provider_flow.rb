@@ -28,7 +28,8 @@ module Locentra
 
         def call(actor, payment_id)
           id = Domain::Identifier.parse(payment_id, "pagamento")
-          prepared = @uow.run(actor, "finance.write") do |tx, _|
+          prepared = @uow.run(actor, "finance.write") do |tx, current|
+            Authorizer.confirmed_email!(current, "payments.request")
             payment = @payments.find(tx, id) || raise(Domain::NotFound, "pagamento")
             next :"already_#{payment.status}" unless payment.status == "submission_unknown"
 
@@ -40,7 +41,8 @@ module Locentra
           @uow.run(actor, "finance.write") { |tx, current| resolve(tx, current, id, found) }
         end
 
-        # Aplica o resultado de uma consulta (também dentro da transação da conciliação).
+        # Aplica o resultado de uma consulta (também dentro da transação da conciliação). O reenvio da
+        # cobrança é uma ação para fora (ADR-031): exige e-mail confirmado de quem a dispara.
         def resolve(tx, actor, id, lookup)
           payment = @payments.lock(tx, id)
           return :"already_#{payment.status}" unless payment.status == "submission_unknown"
@@ -49,6 +51,7 @@ module Locentra
           return adopt(tx, actor, payment, lookup.charges) unless lookup.charges.empty?
           return await(tx, actor, payment) unless payment.submission_settled?(lookup.at)
 
+          Authorizer.confirmed_email!(actor, "payments.request")
           @payments.update(tx, payment.transition("pending_submission"), from: payment.status, now: @clock.now)
           @queue.enqueue(tx, "payments.submit", { "payment_id" => id }, priority: 30, correlation_id: actor.request_id)
           @audit.record(tx, actor, "payment.resubmission_scheduled", "payment", id, "external_reference" => payment.external_reference)

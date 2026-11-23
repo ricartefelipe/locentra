@@ -209,7 +209,7 @@ module Locentra
             redirect(ctx, "/reservas/#{reservation.id}", notice: "Reserva #{reservation.code} registrada (#{reservation.status_label}).")
           rescue Domain::Unavailable => e
             new(ctx, errors: { "base" => [e.message] }, status: 409, shortages: e.shortages)
-          rescue Domain::ValidationError, Domain::NotFound, Domain::AccessDenied => e
+          rescue Domain::ValidationError, Domain::NotFound, FormDenial => e
             new(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
           end
 

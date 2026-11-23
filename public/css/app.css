@@ -121,6 +121,9 @@ button.danger { color: var(--danger); border-color: var(--danger); }
 .flash-close { border: none; background: none; font-size: 1.2rem; cursor: pointer; }
 .form-errors, .shortages { background: #fde7e5; color: #7a1a12; border: 1px solid #f5c2bd; border-radius: var(--radius); padding: .75rem 1rem; margin-bottom: 1rem; }
 .field-error { color: var(--danger); margin: .2rem 0 0; font-size: .9rem; }
+.email-banner { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; justify-content: space-between; padding: .6rem 1.25rem; background: #fff4d6; color: #5c3d00; border-bottom: 1px solid #f0d58c; position: sticky; top: 0; z-index: 5; }
+.email-banner p { margin: 0; }
+.email-banner-locked { background: #fde7e5; color: #7a1a12; border-bottom-color: #f5c2bd; }
 .notice { background: #e8f0fb; border: 1px solid #c3d6f1; border-radius: var(--radius); padding: .75rem 1rem; margin-bottom: 1rem; }
 .notice-danger { background: #fde7e5; border-color: #f5c2bd; }
 .token { display: inline-block; padding: .4rem; background: #fff; border: 1px dashed var(--border); word-break: break-all; }

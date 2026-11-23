@@ -27,6 +27,7 @@ module Locentra
 
           key = provider == "asaas" ? api_key!(api_key, environment) : nil
           @uow.run(actor, "integrations.manage") do |tx, current|
+            Authorizer.confirmed_email!(current, "payments.configure")
             @limits.feature!(tx, "pagamentos_online")
             now = @clock.now
             previous = @accounts.active(tx)

@@ -100,6 +100,7 @@ module Locentra
         private
 
         def issue_new(tx, current, reservation, conditions, now)
+          Authorizer.confirmed_email!(current, "contracts.issue")
           org = @organizations.find(tx, tx.tenant_id!)
           terms = build_terms(tx, org, reservation, conditions, now)
           contract = C::Contract.issue(id: @ids.uuid, organization_id: tx.tenant_id!, reservation: reservation, terms: terms, now: now)

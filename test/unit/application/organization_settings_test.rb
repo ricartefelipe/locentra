@@ -19,8 +19,8 @@ class OrganizationSettingsApplicationTest < UnitTest
   end
 
   class Uow
-    def run(actor, permission = nil)
-      A::Authorizer.authorize!(actor, permission) if permission
+    def run(actor, permission = nil, read: false)
+      A::Authorizer.authorize!(actor, permission, read: read) if permission
       yield Tx.new, actor
     end
   end

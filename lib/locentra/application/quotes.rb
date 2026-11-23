@@ -258,6 +258,7 @@ module Locentra
         private
 
         def execute(tx, current, quote_id)
+          Authorizer.confirmed_email!(current, "quotes.send")
           now = @clock.now
           quote = Scope.lock!(@quotes, tx, current, quote_id)
           version = @quotes.find_version(tx, quote.id, quote.current_version)

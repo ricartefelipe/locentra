@@ -254,7 +254,7 @@ construídas localmente; o download da imagem publicada no GHCR não foi exercit
 está habilitada no repositório.
 
 Versões com verificação prévia ou restrição de retorno têm seção própria: migration 0015 na seção 13,
-migration 0016 na seção 14 e migration 0017 na seção 16.
+migration 0016 na seção 14, migration 0017 na seção 16 e migration 0018 na seção 17.
 
 ## 13. Atualização para a migration 0015 (condições comerciais) — exercitado em 21/11/2026
 
@@ -677,3 +677,90 @@ Não houve entregas de webhook no exercício: o cadastro de endpoint resolve o e
 real geraria tráfego para terceiros; as entregas, a pausa e a retenção são cobertas pelos testes de integração e
 de concorrência e por `migration_0017_test.rb`. O exercício encontrou também um defeito anterior, corrigido nesta
 versão: o log do worker ficava em buffer e `worker.started` só apareceu depois da parada.
+
+## 17. Atualização para a migration 0018 (confirmação de e-mail) — procedimento escrito (coberto por `test/repository/migration_0018_test.rb`)
+
+A partir desta versão, a conta sem e-mail confirmado não executa ações que agem para fora em nome da organização
+e, 7 dias depois da criação do usuário, fica somente leitura (ADR-031). As credenciais de API e CLI e os
+endpoints de webhook seguem a situação de quem os criou. A migration `0018_confirmacao_email_usuarios_existentes.sql`
+altera somente dados: considera confirmados os usuários sem confirmação cujo prazo de 7 dias já tinha vencido no
+momento da atualização, para que nenhuma conta em uso há mais de 7 dias fique bloqueada na troca de versão. As
+contas mais novas continuam pendentes, com o aviso e o restante do prazo. Não há verificação prévia: nenhum dado
+existente impede a migration.
+
+### 17.1 Aplicação
+
+1. Faça o backup (seção 3). Com o proprietário ou o papel `locentra_backup`, registre quantos usuários serão
+   confirmados pela migration e quantos continuarão pendentes:
+
+   ```sql
+   SELECT count(*) FILTER (WHERE created_at <= now() - interval '7 days') AS serao_confirmados,
+          count(*) FILTER (WHERE created_at > now() - interval '7 days') AS continuarao_pendentes
+     FROM users WHERE email_confirmed_at IS NULL;
+   ```
+2. Aplique (seção 12, passo 2). A migration roda numa transação curta: atualiza somente as linhas de `users`
+   sem confirmação com o prazo vencido. Entradas e cadastros simultâneos dessas contas esperam até o commit.
+3. A 1.3.0 continua funcionando com o banco atualizado. Um cadastro feito pela 1.3.0 depois da migration nasce
+   sem confirmação e segue a regra nova quando a versão nova estiver no ar; as duas versões enviam o e-mail de
+   confirmação. Enquanto a 1.3.0 estiver no ar, contas não confirmadas ainda conseguem criar credenciais e
+   endpoints por ela; na versão nova, eles seguem a situação de quem os criou (seção 17.2).
+4. Substitua web e worker pela versão nova (seção 12, passo 3).
+
+### 17.2 Conferência e auditoria
+
+Nenhum usuário com o prazo vencido na atualização fica sem confirmação, e os confirmados pela migration têm o
+instante gravado em `schema_migrations`:
+
+```sql
+SELECT count(*) FILTER (WHERE u.email_confirmed_at IS NULL AND u.created_at <= m.applied_at - interval '7 days') AS vencidos_sem_confirmacao,
+       count(*) FILTER (WHERE u.email_confirmed_at = m.applied_at) AS confirmados_pela_migration
+  FROM users u CROSS JOIN (SELECT applied_at FROM schema_migrations WHERE version = '0018') m;
+```
+
+São esperados `vencidos_sem_confirmacao` igual a 0 e `confirmados_pela_migration` igual a `serao_confirmados` do
+passo 1 (contas confirmadas por convite ou pelo link exatamente nesse instante também entram na contagem).
+
+Credenciais ativas e endpoints de webhook ativos cujo criador ainda não confirmou o e-mail (criados pela 1.3.0
+durante a implantação gradual ou no retorno). Na versão nova, essas credenciais não executam ações para fora e,
+depois do prazo do criador, só consultam; esses endpoints não recebem entregas. Com o papel `locentra_backup`:
+
+```sql
+SELECT 'credencial' AS tipo, c.organization_id, c.id, c.name AS nome, u.email AS criador, u.created_at AS criador_desde
+  FROM api_credentials c JOIN users u ON u.id = c.created_by
+ WHERE u.email_confirmed_at IS NULL AND c.revoked_at IS NULL
+UNION ALL
+SELECT 'endpoint', w.organization_id, w.id, w.url, u.email, u.created_at
+  FROM webhook_endpoints w JOIN users u ON u.id = w.created_by
+ WHERE u.email_confirmed_at IS NULL AND w.active
+ ORDER BY 2, 1;
+```
+
+Confirme o e-mail desses criadores (pelo link, pela correção do endereço na tela ou pela seção 17.3) ou revogue
+as credenciais e desative os endpoints na tela da organização. Depois da troca, acompanhe
+`locentra_domain_conflicts_total{code="email_unconfirmed"}` em `/metrics`: recusas de contas e credenciais não
+confirmadas. Entregas recusadas aparecem na tela **Integrações** como falha com o motivo "quem cadastrou o
+endpoint ainda não confirmou o e-mail".
+
+### 17.3 Confirmação manual de uma conta
+
+Quem errou o endereço no cadastro corrige o e-mail pela tela (link **Corrigir e-mail** no aviso do topo, com a
+senha atual), também com a conta somente leitura. Em instalação sem envio de e-mail configurado, ou quando a
+pessoa não recebe a mensagem, o e-mail pode ser confirmado manualmente depois de verificar por outro meio que o
+endereço pertence a ela. Com o proprietário:
+
+```sql
+UPDATE users SET email_confirmed_at = now(), updated_at = now() WHERE email = lower('pessoa@exemplo.com.br') AND email_confirmed_at IS NULL;
+```
+
+A confirmação vale na operação seguinte, sem encerrar sessões, também para as credenciais e os endpoints da
+pessoa. O aviso do topo deixa de aparecer na próxima página.
+
+### 17.4 Retorno à versão 1.3.0
+
+O retorno não exige mudança no banco: a 1.3.0 lê e grava `email_confirmed_at` como antes e não restringe nada
+pela confirmação; durante o retorno, contas não confirmadas voltam a criar credenciais e endpoints e os
+endpoints delas voltam a receber entregas. As confirmações feitas pela migration permanecem; para distingui-las
+das confirmações pelo link, use o instante de `schema_migrations.applied_at` da versão 0018 (seção 17.2). Ao voltar
+à versão nova, as contas criadas durante o retorno seguem a regra pelo `created_at` delas (as que passaram de 7
+dias sem confirmar ficam somente leitura até a confirmação), e as credenciais e os endpoints criados por elas
+seguem a seção 17.2: refaça a consulta de auditoria.

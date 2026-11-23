@@ -18,6 +18,11 @@ plataforma é separada dos contratos de locação entre a organização e seus c
 - **Organizações e acesso:** filiais, usuários, convites, papéis (proprietário, administrador, gerente,
   atendente, operador de estoque, financeiro, auditor), alternância de organização, revogação imediata,
   credenciais de integração com escopos. [Permissões](docs/PERMISSOES.md)
+- **Confirmação de e-mail:** sem confirmar o e-mail, a conta opera normalmente dentro da organização, mas não
+  convida pessoas, não cria credenciais, não cadastra nem reativa webhooks, não configura pagamentos online e não
+  envia orçamentos, contratos nem convites do portal; depois de 7 dias sem confirmação, fica somente leitura. Aviso
+  no topo das páginas da equipe com reenvio e correção do e-mail digitado errado; credenciais e webhooks seguem a
+  situação de quem os criou. [Módulo](docs/modulos/confirmacao-email.md)
 - **Configurações da organização e filiais:** nome, fuso horário (com as consequências da troca e confirmação),
   validade padrão do bloqueio temporário e política de cancelamento editáveis pela interface web, com
   pré-visualização e histórico; a política fica congelada na reserva, na versão do orçamento e no contrato.

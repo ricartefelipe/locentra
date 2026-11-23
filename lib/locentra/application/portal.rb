@@ -43,6 +43,7 @@ module Locentra
           @uow.run(actor, "customers.write") do |tx, current|
             raise Domain::AccessDenied, "convites do portal são enviados por usuários da equipe" unless current.user?
 
+            Authorizer.confirmed_email!(current, "portal.invite")
             @limits.feature!(tx, FEATURE)
             now = @clock.now
             customer = @customers.find(tx, Domain::Identifier.parse(customer_id, "cliente")) || raise(Domain::NotFound, "cliente")
@@ -99,7 +100,9 @@ module Locentra
       end
 
       # Aceite do convite. O tenant vem do próprio token e é confirmado pelo hash do segredo. Sem
-      # `user_id`, cria a conta (nome e senha); com ele, vincula a conta autenticada de mesmo e-mail.
+      # `user_id`, cria a conta (nome e senha); com ele, vincula a conta autenticada de mesmo e-mail. Como
+      # no convite da equipe, o link prova a posse do endereço: a conta criada nasce confirmada e a conta
+      # existente de mesmo e-mail fica confirmada (ADR-031).
       class AcceptInvitation
         def initialize(uow:, portal:, customers:, users:, limits:, hasher:, audit:, clock:, ids:)
           @uow = uow
@@ -153,6 +156,7 @@ module Locentra
             user = @users.find(tx, user_id)
             raise Domain::AccessDenied, "o convite foi enviado para outro e-mail" unless user && user["email"] == invitation.email
 
+            @users.confirm_email(tx, user_id, now)
             return user_id
           end
           if @users.find_by_email(tx, invitation.email)

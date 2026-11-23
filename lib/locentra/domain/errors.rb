@@ -95,6 +95,32 @@ module Locentra
       end
     end
 
+    # Operação recusada porque o usuário ainda não confirmou o e-mail (ADR-031): ação que age para fora
+    # em nome da organização ou, depois do prazo de confirmação, qualquer alteração. É uma recusa de
+    # permissão (403) com código próprio, contada como conflito de domínio pela unidade de trabalho.
+    class EmailUnconfirmed < AccessDenied
+      CODE = "email_unconfirmed"
+      HINT = "abra o link enviado ao seu e-mail ou peça o reenvio da confirmação"
+
+      attr_reader :reason
+
+      def initialize(message, reason:)
+        @reason = reason
+        super(message)
+      end
+
+      def self.outbound(action_label)
+        new("Confirme seu e-mail para #{action_label}: #{HINT}.", reason: :outbound)
+      end
+
+      def self.read_only
+        new("Conta somente leitura até a confirmação do e-mail: o prazo de confirmação terminou. Para voltar a alterar dados, #{HINT}.",
+            reason: :read_only)
+      end
+
+      def code = CODE
+    end
+
     # Limite contratado do plano da organização foi atingido.
     class PlanLimitExceeded < Error
       attr_reader :limit

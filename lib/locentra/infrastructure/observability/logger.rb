@@ -89,7 +89,7 @@ module Locentra
           "db_pool_wait_seconds" => "Espera por conexão do pool de banco",
           "db_pool_timeouts_total" => "Esperas por conexão do pool que excederam o tempo limite",
           "db_transaction_retries_total" => "Transações repetidas por deadlock ou falha de serialização",
-          "domain_conflicts_total" => "Operações recusadas por conflito com o estado atual, por código (disponibilidade, concorrência)",
+          "domain_conflicts_total" => "Operações recusadas por conflito com o estado atual ou por e-mail não confirmado, por código",
           "jobs_queue_size" => "Tarefas por fila e situação (agregado gravado pelo worker)",
           "jobs_oldest_age_seconds" => "Idade da tarefa mais antiga já liberada para execução, por fila e situação",
           "jobs_queue_stats_age_seconds" => "Tempo desde a última atualização dos agregados da fila pelo worker",
