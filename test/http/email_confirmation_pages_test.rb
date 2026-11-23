@@ -137,24 +137,13 @@ class EmailConfirmationPagesTest < ApiV1TestCase
     assert_equal 3, refusals
   end
 
-  def test_read_only_account_keeps_browsing_and_refuses_changes
+  # A navegação completa da conta somente leitura está em email_confirmation_navigation_test.rb.
+  def test_read_only_account_refuses_changes
     @clock.advance(EC::GRACE_PERIOD_SECONDS)
     login("dona@gama.test")
 
     assert_includes banner, LOCKED
     assert_includes banner, "terminou em 09/03/2026 09:00"
-    pages = Locentra::Interfaces::HTTP::App.new(@system).router.routes
-                                           .select { |route| route.verb == "GET" && route.auth == :session && !route.pattern.include?(":") }
-                                           .map(&:pattern)
-    pages += ["/clientes/#{@gamma_customer.id}", "/produtos/#{@gamma_camera.id}", "/orcamentos/#{@gamma_quote.id}"]
-
-    pages.each do |path|
-      get path
-
-      assert_operator last_response.status, :<, 500, path
-      refute_equal 403, last_response.status, path
-      refute_includes last_response.body, REFUSED, path
-    end
     post_form "/clientes", { "tipo" => "individual", "nome" => "Cliente Novo", "documento" => "39053344705" }
 
     assert_equal 403, last_response.status
