@@ -24,6 +24,7 @@ end
 # Servidor HTTP mínimo que registra requisições recebidas (destino de webhooks em testes).
 class CaptureServer
   attr_reader :port, :requests
+  attr_writer :status
 
   def initialize(status: 200)
     @server = TCPServer.new("127.0.0.1", 0)
@@ -54,6 +55,75 @@ class CaptureServer
     socket.write("HTTP/1.1 #{@status} OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
   ensure
     socket.close
+  end
+end
+
+# Destino lento (somente testes): uma thread por conexão, conta as requisições em voo e o pico e só
+# responde depois de `release!`.
+class HoldingServer
+  attr_reader :port, :requests
+
+  def initialize(status: 200)
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.addr[1]
+    @status = status
+    @requests = Queue.new
+    @mutex = Thread::Mutex.new
+    @released = Thread::ConditionVariable.new
+    @open = false
+    @in_flight = 0
+    @max_in_flight = 0
+    @handlers = []
+    @thread = Thread.new { loop { accept(@server.accept) } }
+  end
+
+  def url(path = "/hook") = "http://127.0.0.1:#{port}#{path}"
+  def in_flight = @mutex.synchronize { @in_flight }
+  def max_in_flight = @mutex.synchronize { @max_in_flight }
+
+  # Libera as respostas retidas e as próximas.
+  def release!
+    @mutex.synchronize do
+      @open = true
+      @released.broadcast
+    end
+  end
+
+  def stop
+    release!
+    @thread.kill
+    @handlers.each { |handler| handler.join(1) }
+    @server.close
+  end
+
+  private
+
+  def accept(socket)
+    @handlers << Thread.new { handle(socket) }
+  end
+
+  def handle(socket)
+    request_line = socket.gets
+    headers = {}
+    while (line = socket.gets) && line != "\r\n"
+      name, value = line.split(":", 2)
+      headers[name.downcase] = value.to_s.strip
+    end
+    body = socket.read(headers["content-length"].to_i)
+    hold
+    @requests << { line: request_line, headers: headers, body: body }
+    socket.write("HTTP/1.1 #{@status} OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+  ensure
+    socket.close
+  end
+
+  def hold
+    @mutex.synchronize do
+      @in_flight += 1
+      @max_in_flight = [@max_in_flight, @in_flight].max
+      @released.wait(@mutex, 10) until @open
+      @in_flight -= 1
+    end
   end
 end
 

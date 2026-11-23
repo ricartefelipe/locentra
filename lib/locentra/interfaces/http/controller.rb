@@ -148,6 +148,13 @@ module Locentra
           Array.new([left.size, right.size].max) { |index| [left[index], right[index]] }
         end
 
+        # Content-Disposition com nome ASCII seguro e o nome original em UTF-8 (RFC 6266 e RFC 5987).
+        # `kind`: "inline" ou "attachment".
+        def content_disposition(filename, kind)
+          ascii = filename.encode("ASCII", invalid: :replace, undef: :replace, replace: "_").gsub(/[^A-Za-z0-9._ -]/, "_")
+          %(#{kind}; filename="#{ascii}"; filename*=UTF-8''#{ERB::Util.url_encode(filename)})
+        end
+
         def session_cookie(response, token)
           response.set_cookie(Authenticator.cookie_name(@system.config),
                               value: token, path: "/", httponly: true, secure: secure_cookies?, same_site: :lax)

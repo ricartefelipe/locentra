@@ -1,4 +1,4 @@
-<header class="page-header"><h1>Integrações</h1><p class="muted">Webhooks assinados (HMAC-SHA256) enviados a partir de eventos de negócio.</p></header>
+<header class="page-header"><h1>Integrações</h1><p class="muted">Webhooks assinados (HMAC-SHA256) enviados a partir de eventos de negócio. Endpoints com falhas consecutivas são pausados automaticamente e reativados aqui.</p></header>
 <%= partial("shared/errors") %>
 <% if @secret %>
   <div class="notice" role="status">
@@ -15,8 +15,8 @@
       <tbody>
         <% @data[:endpoints].each do |e| %>
           <tr><td><code><%= e["url"] %></code><br><span class="muted"><%= e["description"] %></span></td><td><%= Array(e["events"]).join(", ") %></td>
-            <td><%= e["active"] ? badge("Ativo", "success") : badge("Desativado", "muted") %></td>
-            <td><% if e["active"] %><form method="post" action="/integracoes/<%= e["id"] %>/desativar" class="inline"><%= csrf_field %><button type="submit" class="danger">Desativar</button></form><% end %></td></tr>
+            <td><% if !e["active"] %><%= badge("Desativado", "muted") %><% elsif e["paused_at"] %><%= badge("Pausado", "warning") %><br><span class="muted">Pausa automática após <%= e["consecutive_failures"] %> falhas consecutivas desde <%= datetime(e["failing_since"]) %>; <%= e["held_deliveries"] %> entrega(s) retida(s).</span><% else %><%= badge("Ativo", "success") %><% end %></td>
+            <td><% if e["active"] && e["paused_at"] %><form method="post" action="/integracoes/<%= e["id"] %>/reativar" class="inline"><%= csrf_field %><button type="submit" class="primary">Reativar</button></form><% end %><% if e["active"] %><form method="post" action="/integracoes/<%= e["id"] %>/desativar" class="inline"><%= csrf_field %><button type="submit" class="danger">Desativar</button></form><% end %></td></tr>
         <% end %>
       </tbody>
     </table>
@@ -41,9 +41,9 @@
       <tbody>
         <% @data[:deliveries].each do |d| %>
           <tr><td><code><%= d["event_type"] %></code><br><span class="muted"><%= datetime(d["created_at"]) %></span></td><td><code class="small"><%= d["url"] %></code></td>
-            <td><%= status_badge(d["status"] == "delivered" ? "confirmed" : (d["status"] == "failed" ? "cancelled" : "held"), label(:delivery_status, d["status"])) %></td>
+            <td><% if d["held_at"] %><%= status_badge("held", "Retida (endpoint pausado)") %><% else %><%= status_badge(d["status"] == "delivered" ? "confirmed" : (d["status"] == "failed" ? "cancelled" : "held"), label(:delivery_status, d["status"])) %><% end %></td>
             <td><%= d["attempts"] %></td><td><%= d["last_status_code"] || d["last_error"] || "—" %></td>
-            <td><% if d["status"] == "failed" %><form method="post" action="/integracoes/entregas/<%= d["id"] %>/reenviar" class="inline"><%= csrf_field %><button type="submit">Reenviar</button></form><% end %></td></tr>
+            <td><% if d["status"] == "failed" && !d["held_at"] %><form method="post" action="/integracoes/entregas/<%= d["id"] %>/reenviar" class="inline"><%= csrf_field %><button type="submit">Reenviar</button></form><% end %></td></tr>
         <% end %>
       </tbody>
     </table>

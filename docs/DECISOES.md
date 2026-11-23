@@ -163,7 +163,8 @@ atualizado.
   tentativa automática do `Net::HTTP`. Entregas na fila `webhooks`, atendida por threads próprias do
   worker (`WEBHOOK_CONCURRENCY`), isoladas das demais tarefas. Assinatura
   `t=<timestamp>,v1=<HMAC-SHA256>` com identificadores estáveis de evento e entrega. O segredo de
-  assinatura é cifrado com AES-256-GCM (chave derivada por HKDF).
+  assinatura é cifrado com AES-256-GCM (chave derivada por HKDF). O limite de execuções simultâneas por
+  organização na fila `webhooks`, a pausa automática por endpoint e a retenção das entregas estão na ADR-029.
 
 ## ADR-022 — Anexos fora do diretório público
 
@@ -332,8 +333,9 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
 - **Leitura e alteração (D10, D11):** `organization.read` (todos os papéis) governa a página, o detalhe de
   filial, a API e a CLI; quem só lê não vê formulários nem o painel de assinatura. As configurações são
   alteradas somente por usuário: a troca de fuso exige leitura e confirmação humanas e a auditoria liga a
-  alteração a uma pessoa. Por isso não há alteração pela API nem pela CLI nesta versão. As mutações de filial
-  exigem apenas a permissão, como a criação.
+  alteração a uma pessoa. Por isso não há alteração pela API nem pela CLI nesta versão (atualizado pelo ADR-030:
+  a API v1 passou a alterar as configurações por sessão de usuário; credenciais e CLI continuam sem alterar). As
+  mutações de filial exigem apenas a permissão, como a criação.
 - **Auditoria e métricas (D12):** valores anterior e novo, sem webhook novo; os conflitos novos entram em
   `domain_conflicts_total`.
 - **Plano (D13):** só a reativação de filial conta em `max_branches`.
@@ -373,3 +375,110 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
   orçamento e o portal mostram a política registrada. Uma troca de fuso preserva o cálculo de tudo o que já foi
   precificado. A organização ganhou uma tela própria de configurações e as filiais, um ciclo ativa ⇄ inativa
   documentado em `MAQUINAS-DE-ESTADO.md`.
+
+## ADR-029 — Justiça entre organizações na fila de webhooks, circuito por endpoint e retenção do histórico de integrações
+
+- **Contexto:** a reivindicação da fila (`Queue#claim`) não tinha critério por organização e o worker usava uma
+  thread para webhooks: uma organização com muitos destinos lentos ou fora do ar monopolizava a fila. Não havia
+  contador de falhas por endpoint, então um destino morto consumia tentativas indefinidamente. Eventos da
+  outbox, entregas e webhooks recebidos nunca eram removidos. `webhook_deliveries` e `inbound_webhooks` só são
+  visíveis com contexto de tenant, de modo que uma limpeza global veria zero entregas e apagaria eventos com
+  entrega pendente.
+- **Decisão (detalhes em [`modulos/worker-webhooks-retencao.md`](modulos/worker-webhooks-retencao.md)):**
+  - limite global de execuções com lease válido por organização na fila `webhooks`
+    (`WEBHOOK_MAX_PER_ORGANIZATION`, padrão 2), aplicado no SQL da reivindicação: candidatos por varredura
+    recursiva das organizações (`jobs_ready_org_idx`), ordenados pelas execuções em curso;
+    `pg_try_advisory_xact_lock` por fila e organização antes da recontagem e bloqueio da linha com
+    revalidação. O lock nunca espera e é liberado no commit da reivindicação;
+  - `WEBHOOK_CONCURRENCY` passa de 1 para 4, para que o limite deixe vagas a outros tenants;
+  - circuito por endpoint: falhas consecutivas e início da sequência no endpoint, pausa automática com ≥ 20
+    falhas e ≥ 1 h (`Domain::Webhooks::Circuit`), auditada como ação do sistema e sem URL. Endpoint pausado
+    retém as entregas (`held_at`) sem rede e sem gastar tentativas; a reativação é feita somente pela
+    interface web (`integrations.manage`, auditada) e libera as retidas em lotes de 500 por tarefa própria.
+    Despacho e retenção usam `FOR KEY SHARE` no endpoint e a reativação usa `FOR UPDATE`;
+  - retenção por organização, no contexto do tenant, em tarefa horária (`organization.retention`), em lotes
+    de 1.000 com até 10 lotes por execução, com janelas configuráveis e mínimos verificados na configuração (7
+    dias para entregas e eventos e 45 para recebidos). Todo `DELETE` repete as condições na tabela-alvo;
+  - totais por desfecho em `worker_outcome_totals` (global, sem dados de tenant), expostos no `/metrics`.
+- **Alternativas rejeitadas:** política de leitura entre tenants para uma limpeza global (amplia a RLS);
+  limite apenas em memória por processo (não vale entre workers); contagem sem lock consultivo (passa do
+  limite em READ COMMITTED); `FOR UPDATE` no endpoint durante o despacho (faria a pausa esperar o despacho);
+  pausa só por número de falhas (pausaria destinos com muito tráfego numa queda curta); parâmetros do circuito
+  por variável de ambiente (mais superfície de configuração sem caso de uso); reativação pela API (não há API
+  de webhooks enviados); contador de reivindicações (ponto de contenção).
+- **Consequências:** uma organização não ocupa mais do que o limite das threads de webhooks de todos os
+  workers; destinos fora do ar param de consumir tentativas e as entregas esperam a reativação sem se perder;
+  o histórico de integrações tem tamanho limitado. A migration 0017 é compatível com a 1.2.0 em execução e no
+  retorno: o gatilho `webhook_deliveries_release_hold` encerra a retenção quando a 1.2.0 reenvia ou conclui
+  uma entrega retida, e as demais continuam retidas até a reativação na versão nova (`RUNBOOKS.md` §16).
+
+## ADR-030 — API v1 ampliada: orçamentos, contratos, operação e alteração das configurações por sessão
+
+- **Contexto:** a API v1 cobria reservas, clientes, catálogo, disponibilidade, financeiro, condições
+  comerciais e a leitura da organização. Orçamentos, contratos, retirada, devolução, inspeções e alertas só
+  existiam na interface web, e as configurações não tinham alteração pela API (ADR-028). Toda mutação da API
+  roda na transação da chave de idempotência (ADR-017), e os casos de uso desses módulos só sabiam abrir a
+  própria transação: o coordenador recusa transação aninhada.
+- **Composição transacional genérica (D1):** `Application::Composition.run(uow, actor, permission, tx)` delega
+  a `uow.run` sem `tx` e, com `tx`, confere a permissão sobre o ator recebido e executa na transação do
+  chamador. Generaliza `CommercialTerms::Support.run` (mantido) e funciona com as unidades de trabalho falsas
+  dos testes unitários, que só implementam `run`. Os casos de uso usados por mutações da API ganharam `tx: nil`;
+  sem `tx`, o caminho da web e da CLI é o de antes.
+- **Detalhe lido na mesma transação (D2):** a mutação responde com o detalhe atualizado, lido pelo caso de uso
+  de leitura com `tx:` (a gravação ainda não foi confirmada). Esse corpo fica gravado na chave e o replay
+  devolve exatamente a mesma resposta. Nessa leitura composta confere-se a permissão da própria mutação
+  (`permission:` dos casos de uso de detalhe), e não a de leitura: a credencial só com o escopo de escrita
+  recebe o resultado, como nas mutações de reservas e de condições comerciais.
+- **Configurações somente por sessão de usuário (D3):** `PATCH /organization/settings` vale só para sessão de
+  usuário com `organization.manage` (cookie de sessão e `X-CSRF-Token`). Credenciais recebem 403 `forbidden`,
+  mesmo com o escopo: a tela de credenciais oferece todos os escopos e as credenciais com `organization.manage`
+  foram emitidas sob a regra documentada de que não alteram configurações; liberar agora ampliaria em silêncio
+  o poder de tokens existentes, contra o precedente de que credenciais antigas não ganham capacidade nova. A
+  troca de fuso exige leitura humana das consequências, e a auditoria liga a alteração a uma pessoa. A
+  liberação para integrações fica como evolução futura, com permissão nova e dedicada e credenciais novas.
+- **PATCH parcial com versão obrigatória (D4):** chave presente altera o campo e chave ausente mantém o valor
+  (`Organization#revision_attrs` é a base da revisão). As faixas iguais às gravadas mantêm a política como está,
+  sem revalidá-la: uma política gravada antes das regras atuais não impede a alteração de outro campo. `lock_version` é obrigatório, ao contrário do "opcional
+  na API" das condições comerciais (ADR-027): a escrita parcial de configurações que afetam todo o tenant não
+  pode sobrescrever às cegas uma alteração concorrente. A troca de fuso exige `confirm_time_zone_change: true`.
+  Chaves desconhecidas ou não editáveis respondem 422 no nome da chave, em vez de serem ignoradas. Sem mudança
+  efetiva, 200 com `changed: false` e sem auditoria; a auditoria registra o canal (`via: api`).
+- **Política em pontos-base (D5):** o mesmo formato de `GET /organization`, validado por
+  `CancellationPolicy.build` (`from_tiers`), com as regras do ADR-028 e as mensagens agrupadas em
+  `faixas_cancelamento`. Só inteiros do JSON são aceitos.
+- **Criação que pode encontrar o existente (D6):** emissão de contrato, separação e conversão respondem 201
+  quando criam e 200 quando devolvem o existente, com `Location` nos dois casos. `IssueContract#issue` e
+  `StartPickup#open` devolvem o registro com `created`; `call` continua devolvendo o registro.
+- **Aprovação de orçamento vencido (D7):** na composição, a expiração gravada pela tentativa seria desfeita com
+  a transação da chave. O controlador trata o `quote_expired` chamando `ApproveQuote#record_expiration`, que só
+  expira e nunca aprova, e propaga o 409.
+- **Dados pessoais (D8):** os detalhes trazem `customer_id`, sem nome nem documento; os retirantes autorizados
+  aparecem somente com `customers.read`; documento, IP e navegador do aceite e o snapshot do documento não são
+  expostos.
+- **Escopos (D9):** a mesma matriz de permissões, sem permissão nova; as permissões adicionais continuam
+  conferidas dentro dos casos de uso (conversão e aditivo com `reservations.write`, cancelamento de contrato com
+  `reservations.cancel`, desconto manual recusado para credenciais pelo limite 0 do `VersionBuilder`).
+- **Fora do escopo (D10):** portal do cliente, aceite e encerramento de contrato, avarias, manutenção,
+  transferências, prévia e restauração de configurações, gestão de filiais e alteração das configurações por
+  credencial e pela CLI.
+- **PDF (D11):** `GET /contracts/{id}/documents/{version}` reutiliza `Attachments::Download` (permissão do dono,
+  404 entre organizações e para conteúdo ausente) e responde como anexo, sem cache, com `Repr-Digest`
+  (RFC 9530) a partir do SHA-256 gravado.
+- **Contrato OpenAPI exato (D12):** os schemas de resposta novos declaram `additionalProperties: false` e
+  `required` com todas as propriedades; um validador mínimo nos testes confere tipo, enum, formato,
+  obrigatórias e chaves extras contra respostas reais, inclusive de erro.
+- **Alternativas rejeitadas:**
+  - liberar `organization.manage` para credenciais: ampliaria o poder de credenciais já emitidas e tiraria da
+    troca de fuso a confirmação humana;
+  - permissão nova exclusiva para alterar configurações por integração: muda a matriz e exige decisão de
+    produto e credenciais novas; fica como evolução;
+  - não oferecer o PATCH: deixaria a API sem a alteração que a interface já faz com as mesmas regras, e o
+    caminho por sessão mantém a pessoa responsável na auditoria;
+  - repetir a aprovação no tratamento do `quote_expired`, como a confirmação de reserva com bloqueio vencido: a
+    repetição poderia aprovar fora da chave de idempotência;
+  - `lock_version` opcional no PATCH: uma escrita parcial sem versão sobrescreveria alterações concorrentes de
+    outra pessoa sem aviso.
+- **Consequências:** os casos de uso de orçamentos, contratos, operação e configurações aceitam a transação do
+  chamador, sem mudar a web nem a CLI. A API ganhou orçamentos, contratos, operação e a alteração das
+  configurações por sessão, com testes de conformidade das respostas com o OpenAPI. Integrações continuam sem
+  alterar configurações.

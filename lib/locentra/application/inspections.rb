@@ -20,20 +20,20 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, inspection_id, notes: nil)
-          @uow.run(actor, "inspections.write") do |tx, current|
-            inspection = @inspections.lock(tx, Domain::Identifier.parse(inspection_id)) || raise(Domain::NotFound, "inspeção")
+        def call(actor, inspection_id, notes: nil, tx: nil)
+          Composition.run(@uow, actor, "inspections.write", tx) do |t, current|
+            inspection = @inspections.lock(t, Domain::Identifier.parse(inspection_id)) || raise(Domain::NotFound, "inspeção")
             now = @clock.now
             approved = inspection.approve(notes, now)
             if inspection.asset?
-              asset = @catalog.lock_asset(tx, inspection.asset_id)
-              @ledger.move(tx, current, asset, "available", kind: "inspection_approved", now: now, reference_type: "inspection",
-                                                            reference_id: inspection.id, notes: approved.decision_notes)
+              asset = @catalog.lock_asset(t, inspection.asset_id)
+              @ledger.move(t, current, asset, "available", kind: "inspection_approved", now: now, reference_type: "inspection",
+                                                           reference_id: inspection.id, notes: approved.decision_notes)
             else
-              @allocations.end_stock_block(tx, inspection.block_allocation_id, now)
+              @allocations.end_stock_block(t, inspection.block_allocation_id, now)
             end
-            @inspections.update(tx, approved, current.audit_actor_id)
-            @audit.record(tx, current, "inspection.approved", "inspection", inspection.id,
+            @inspections.update(t, approved, current.audit_actor_id)
+            @audit.record(t, current, "inspection.approved", "inspection", inspection.id,
                           "asset_id" => inspection.asset_id, "stock_pool_id" => inspection.stock_pool_id, "quantity" => inspection.quantity)
             approved
           end
@@ -55,22 +55,22 @@ module Locentra
           @clock = clock
         end
 
-        def call(actor, inspection_id, notes:, description: nil)
-          @uow.run(actor, "inspections.write") do |tx, current|
-            inspection = @inspections.lock(tx, Domain::Identifier.parse(inspection_id)) || raise(Domain::NotFound, "inspeção")
+        def call(actor, inspection_id, notes:, description: nil, tx: nil)
+          Composition.run(@uow, actor, "inspections.write", tx) do |t, current|
+            inspection = @inspections.lock(t, Domain::Identifier.parse(inspection_id)) || raise(Domain::NotFound, "inspeção")
             raise Domain::InvalidTransition.new("inspeção", inspection.status, "rejected") unless inspection.pending?
 
             now = @clock.now
             reason = Domain::Organizations::Text.required(notes, "motivo", max: 1000)
-            order = @desk.open_order(tx, current, product_id: inspection.product_id, branch_id: inspection.branch_id, now: now,
-                                                  description: description.to_s.strip.empty? ? reason : description, asset_id: inspection.asset_id,
-                                                  pool_id: inspection.stock_pool_id, quantity: inspection.quantity,
-                                                  block_allocation_id: inspection.block_allocation_id, inspection_id: inspection.id,
-                                                  previous_status: inspection.asset? ? "in_inspection" : nil)
-            divert_asset(tx, current, inspection, order, now) if inspection.asset?
+            order = @desk.open_order(t, current, product_id: inspection.product_id, branch_id: inspection.branch_id, now: now,
+                                                 description: description.to_s.strip.empty? ? reason : description, asset_id: inspection.asset_id,
+                                                 pool_id: inspection.stock_pool_id, quantity: inspection.quantity,
+                                                 block_allocation_id: inspection.block_allocation_id, inspection_id: inspection.id,
+                                                 previous_status: inspection.asset? ? "in_inspection" : nil)
+            divert_asset(t, current, inspection, order, now) if inspection.asset?
             rejected = inspection.reject(reason, order.id, now)
-            @inspections.update(tx, rejected, current.audit_actor_id)
-            @audit.record(tx, current, "inspection.rejected", "inspection", inspection.id, "maintenance_order_id" => order.id, "code" => order.code)
+            @inspections.update(t, rejected, current.audit_actor_id)
+            @audit.record(t, current, "inspection.rejected", "inspection", inspection.id, "maintenance_order_id" => order.id, "code" => order.code)
             { inspection: rejected, order: order }
           end
         end
@@ -97,6 +97,26 @@ module Locentra
           raise Domain::ValidationError.field("situacao", "inválida") unless %w[pending decided].include?(status)
 
           @uow.run(actor, "reservations.read") { |tx, _| @inspections.list(tx, status: status, limit: limit) }
+        end
+      end
+
+      # Lista paginada de inspeções (API): pendentes ou decididas, com o total da situação.
+      class SearchInspections
+        STATUSES = %w[pending decided].freeze
+
+        def initialize(uow:, inspections:)
+          @uow = uow
+          @inspections = inspections
+        end
+
+        def call(actor, status: "pending", limit: nil, offset: nil)
+          lim, off = Page.params(limit: limit, offset: offset)
+          raise Domain::ValidationError.field("situacao", "use pending ou decided") unless STATUSES.include?(status)
+
+          @uow.run(actor, "reservations.read") do |tx, _|
+            Page.new(items: @inspections.list(tx, status: status, limit: lim, offset: off), limit: lim, offset: off,
+                     total: @inspections.count(tx, status: status))
+          end
         end
       end
 

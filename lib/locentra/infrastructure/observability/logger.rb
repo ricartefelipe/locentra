@@ -55,10 +55,19 @@ module Locentra
           return if LEVELS.fetch(level) < @level
 
           payload = { "ts" => Time.now.utc.iso8601(3), "level" => level }.merge(self.class.redact(@base.merge(fields)))
-          line = JSON.generate(payload)
-          @mutex.synchronize { @io.puts(line) }
+          write(JSON.generate(payload))
         rescue StandardError => e
-          @mutex.synchronize { @io.puts(JSON.generate("level" => "error", "event" => "log.failure", "error" => e.class.name)) }
+          write(JSON.generate("level" => "error", "event" => "log.failure", "error" => e.class.name))
+        end
+
+        # Cada linha é descarregada na hora: fora de um terminal (contêiner, pipe, arquivo) o Ruby acumula a saída
+        # em buffer, e o log do worker só apareceria quando o buffer enchesse ou o processo terminasse. O destino
+        # só precisa responder a `puts` (adaptadores como o da CLI não têm `flush`).
+        def write(line)
+          @mutex.synchronize do
+            @io.puts(line)
+            @io.flush if @io.respond_to?(:flush)
+          end
         end
       end
 
@@ -89,7 +98,11 @@ module Locentra
           "jobs_dead_total" => "Tarefas encerradas sem novas tentativas (falha permanente), somadas entre todos os workers",
           "job_duration_seconds" => "Duração da execução de tarefas no processo do worker",
           "external_calls_total" => "Chamadas a sistemas externos por provedor, operação e desfecho",
-          "external_call_duration_seconds" => "Duração das chamadas a sistemas externos por provedor e operação"
+          "external_call_duration_seconds" => "Duração das chamadas a sistemas externos por provedor e operação",
+          "webhook_deliveries_total" =>
+            "Entregas de webhook por desfecho (entregue, falha, retida por pausa, liberada), somadas entre todos os workers",
+          "webhook_endpoint_pauses_total" => "Pausas automáticas de endpoints de webhook por falhas consecutivas",
+          "retention_purged_total" => "Registros removidos pela retenção, por tipo de registro"
         }.freeze
 
         def initialize

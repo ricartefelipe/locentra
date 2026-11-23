@@ -13,6 +13,10 @@ require_relative "web/contracts_controller"
 require_relative "web/portal_controllers"
 require_relative "api/v1"
 require_relative "api/v1_finance"
+require_relative "api/v1_quotes"
+require_relative "api/v1_contracts"
+require_relative "api/v1_operations"
+require_relative "api/v1_organization"
 require_relative "routes_commercial_terms"
 
 module Locentra
@@ -56,8 +60,11 @@ module Locentra
 
           draw_portal(r, deps, w)
           draw_staff(r, deps, w)
-          draw_api(r, API::V1Controller.new(deps))
+          draw_api(r, deps)
           CommercialTermsRoutes.draw_api(r, deps)
+          draw_api_quotes(r, API::QuotesV1Controller.new(deps))
+          draw_api_contracts(r, API::ContractsV1Controller.new(deps))
+          draw_api_operations(r, API::OperationsV1Controller.new(deps))
         end
 
         def draw_staff(router, deps, web)
@@ -122,6 +129,7 @@ module Locentra
           r.get "/integracoes", integrations, :index
           r.post "/integracoes", integrations, :create
           r.post "/integracoes/:id/desativar", integrations, :disable
+          r.post "/integracoes/:id/reativar", integrations, :resume
           r.post "/integracoes/entregas/:id/reenviar", integrations, :redeliver
 
           attachments = w::AttachmentsController.new(deps)
@@ -306,10 +314,56 @@ module Locentra
           r.post "/clientes/:id/portal/acessos/:acesso_id/revogar", access, :revoke
         end
 
-        def draw_api(router, api)
+        # Orçamentos na API v1. Toda mutação exige Idempotency-Key.
+        def draw_api_quotes(router, api)
           r = router
+          r.get "/api/v1/quotes", api, :quotes, auth: :api
+          r.post "/api/v1/quotes", api, :create_quote, auth: :api
+          r.get "/api/v1/quotes/:id", api, :quote, auth: :api
+          r.post "/api/v1/quotes/:id/versions", api, :revise_quote, auth: :api
+          r.post "/api/v1/quotes/:id/send", api, :send_quote, auth: :api
+          r.post "/api/v1/quotes/:id/approve", api, :approve_quote, auth: :api
+          r.post "/api/v1/quotes/:id/reject", api, :reject_quote, auth: :api
+          r.post "/api/v1/quotes/:id/convert", api, :convert_quote, auth: :api
+        end
+
+        # Contratos na API v1: emissão, PDF de cada versão, aditivo e cancelamento.
+        def draw_api_contracts(router, api)
+          r = router
+          r.get "/api/v1/contracts", api, :contracts, auth: :api
+          r.post "/api/v1/contracts", api, :create_contract, auth: :api
+          r.get "/api/v1/contracts/:id", api, :contract, auth: :api
+          r.get "/api/v1/contracts/:id/documents/:version", api, :contract_document, auth: :api
+          r.post "/api/v1/contracts/:id/amendments", api, :amend_contract, auth: :api
+          r.post "/api/v1/contracts/:id/cancel", api, :cancel_contract, auth: :api
+        end
+
+        # Operação na API v1: retirada, devolução, inspeções e alertas.
+        def draw_api_operations(router, api)
+          r = router
+          r.post "/api/v1/reservations/:id/pickups", api, :start_pickup, auth: :api
+          r.get "/api/v1/reservations/:id/return-items", api, :return_items, auth: :api
+          r.post "/api/v1/reservations/:id/returns", api, :create_return, auth: :api
+          r.get "/api/v1/pickups/:id", api, :pickup, auth: :api
+          r.post "/api/v1/pickups/:id/check", api, :check_pickup, auth: :api
+          r.post "/api/v1/pickups/:id/deliver", api, :deliver_pickup, auth: :api
+          r.post "/api/v1/pickups/:id/cancel", api, :cancel_pickup, auth: :api
+          r.get "/api/v1/returns/:id", api, :return_detail, auth: :api
+          r.get "/api/v1/inspections", api, :inspections, auth: :api
+          r.post "/api/v1/inspections/:id/approve", api, :approve_inspection, auth: :api
+          r.post "/api/v1/inspections/:id/reject", api, :reject_inspection, auth: :api
+          r.get "/api/v1/alerts", api, :alerts, auth: :api
+          r.post "/api/v1/alerts/:id/resolve", api, :resolve_alert, auth: :api
+        end
+
+        # A alteração das configurações aceita somente sessão de usuário (ADR-030): a credencial recebe 403 no
+        # caso de uso, e a sessão exige X-CSRF-Token.
+        def draw_api(router, deps)
+          r = router
+          api = API::V1Controller.new(deps)
           r.get "/api/v1/openapi.yaml", api, :openapi, auth: :public
           r.get "/api/v1/organization", api, :organization, auth: :api
+          r.patch "/api/v1/organization/settings", API::OrganizationV1Controller.new(deps), :update_settings, auth: :api
           r.get "/api/v1/availability", api, :availability, auth: :api
           r.get "/api/v1/customers", api, :customers, auth: :api
           r.post "/api/v1/customers", api, :create_customer, auth: :api

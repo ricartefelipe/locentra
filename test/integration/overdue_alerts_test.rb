@@ -71,7 +71,9 @@ class OverdueAlertsTest < DatabaseTest
     resolved = uc(:resolve_alert).call(@actor, overdue_alert["id"], resolution: "Cliente avisado; devolução amanhã às 9h")
 
     assert_equal "resolved", resolved.status
-    assert_raises(D::InvalidTransition) { uc(:resolve_alert).call(@actor, overdue_alert["id"], resolution: "outra decisão") }
+    again = assert_raises(D::Conflict) { uc(:resolve_alert).call(@actor, overdue_alert["id"], resolution: "outra decisão") }
+
+    assert_equal "alert_resolved", again.code
     uc(:detect_overdue).call(system_actor)
 
     assert_equal 1, count("SELECT count(*) FROM reservation_alerts WHERE kind = 'overdue'"), "alerta resolvido não é recriado"

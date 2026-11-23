@@ -138,6 +138,26 @@ module Locentra
       end
     end
 
+    # Execução com transação própria ou composta: com `tx`, o chamador já abriu a transação e revalidou o
+    # ator; a permissão é conferida de novo sobre o ator recebido. Sem `tx`, a unidade de trabalho abre a
+    # transação, revalida o ator e confere a permissão (caminho da interface web e da CLI).
+    module Composition
+      module_function
+
+      def run(uow, actor, permission, tx, &)
+        return uow.run(actor, permission, &) unless tx
+
+        Authorizer.authorize!(actor, permission) if permission
+        yield tx, actor
+      end
+
+      # Permissão da leitura do detalhe. Quando a própria mutação devolve o detalhe, lido na transação dela,
+      # confere-se a permissão da mutação (`mutation`), já exigida nessa transação: quem tem somente o escopo
+      # de escrita recebe o resultado sem precisar também do de leitura. Fora da transação composta vale
+      # sempre a permissão de leitura.
+      def detail_permission(tx, read, mutation) = tx && mutation ? mutation : read
+    end
+
     # Trilha de auditoria gravada na mesma transação da operação.
     class AuditTrail
       def initialize(repository:, clock:, ids:)

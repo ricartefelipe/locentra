@@ -23,6 +23,14 @@ module Locentra
             redirect(ctx, "/integracoes", notice: "Endpoint desativado.")
           end
 
+          # Reativação de endpoint pausado pelo circuito; as entregas retidas saem em segundo plano.
+          def resume(ctx)
+            result = uc(:resume_webhook).call(ctx.actor, ctx.param(:id))
+            redirect(ctx, "/integracoes", notice: "Endpoint reativado. Entregas retidas a reenviar em segundo plano: #{result["held_deliveries"]}.")
+          rescue Domain::Conflict => e
+            redirect(ctx, "/integracoes", alert: e.message)
+          end
+
           def redeliver(ctx)
             uc(:redeliver_webhook).call(ctx.actor, ctx.param(:id))
             redirect(ctx, "/integracoes", notice: "Reenvio agendado.")
@@ -76,9 +84,7 @@ module Locentra
           private
 
           def disposition(filename, content_type)
-            ascii = filename.encode("ASCII", invalid: :replace, undef: :replace, replace: "_").gsub(/[^A-Za-z0-9._ -]/, "_")
-            kind = content_type == "application/pdf" || content_type.start_with?("image/") ? "inline" : "attachment"
-            %(#{kind}; filename="#{ascii}"; filename*=UTF-8''#{ERB::Util.url_encode(filename)})
+            content_disposition(filename, content_type == "application/pdf" || content_type.start_with?("image/") ? "inline" : "attachment")
           end
         end
       end

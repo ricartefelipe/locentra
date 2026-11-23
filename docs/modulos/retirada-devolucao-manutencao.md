@@ -183,6 +183,30 @@ Recursos de outra organização resultam em `NotFound` (RLS e filtros explícito
   ações conforme o estado (iniciar/continuar retirada, registrar devolução) e resumo de retiradas, devoluções,
   avarias e alertas. Na tela do ativo disponível, atalhos para manutenção e transferência.
 
+## API v1
+
+Rotas em `docs/openapi.yaml` (detalhes em [`api-v1.md`](api-v1.md)); toda mutação exige `Idempotency-Key`, roda
+na transação da chave e devolve o recurso atualizado.
+
+| Rota | Escopo | Função |
+|---|---|---|
+| `POST /reservations/{id}/pickups` | `fulfillment.write` | Separação: 201 quando cria, 200 quando já havia separação em andamento, `Location` da retirada |
+| `GET /pickups/{id}` | `reservations.read` | Retirada com as linhas; `authorized_pickers` somente com `customers.read` |
+| `POST /pickups/{id}/check` | `fulfillment.write` | Conferência por `tag` (ativo) ou `quantity` (estoque), com os erros reunidos |
+| `POST /pickups/{id}/deliver` | `fulfillment.write` | Entrega (`picker`: cliente ou contato autorizado); segunda entrega, 409 `already_picked_up` |
+| `POST /pickups/{id}/cancel` | `fulfillment.write` | Cancelamento da separação |
+| `GET /reservations/{id}/return-items` | `reservations.read` | Linhas entregues com a quantidade pendente e as devoluções registradas |
+| `POST /reservations/{id}/returns`, `GET /returns/{id}` | `fulfillment.write`, `reservations.read` | Devolução total ou parcial (201 com `Location`) e detalhe |
+| `GET /inspections` | `reservations.read` | Inspeções pendentes ou decididas, paginadas |
+| `POST /inspections/{id}/approve`, `/reject` | `inspections.write` | Aprovação (libera o item) e reprovação (ordem de manutenção) |
+| `GET /alerts`, `POST /alerts/{id}/resolve` | `reservations.read`, `fulfillment.write` | Alertas por situação, tipo e reserva, e resolução com a decisão |
+
+- Formatos estritos: `quantity` inteiro (`quantidade`), `requires_inspection` booleano (`inspecao`), `notes` e
+  `outcome` textos; a lista vazia segue para a regra do domínio (`itens`).
+- O retirante aparece pelo nome, sem o documento.
+- Avarias (registro, revisão, aprovação de cobrança e descarte), manutenção e transferências continuam somente na
+  interface web.
+
 ## Decisões
 
 - **Bloqueio de estoque sem fim definido**: inspeções e manutenções de estoque usam alocação `kind = 'block'` com
@@ -224,7 +248,8 @@ Recursos de outra organização resultam em `NotFound` (RLS e filtros explícito
 - Recebimento de transferência de estoque é integral (sem recebimento parcial).
 - Ativo extraviado que reaparece segue o fluxo existente da tela do ativo (`lost → in_inspection → available`), sem
   registro em `inspections`.
-- Não há endpoints de API nem comandos de CLI para estas operações; somente a interface web.
+- Retirada, devolução, inspeções e alertas estão na API v1; avarias, manutenção e transferências não estão na
+  API, e nenhuma destas operações tem comando na CLI.
 
 ## Como testar
 
