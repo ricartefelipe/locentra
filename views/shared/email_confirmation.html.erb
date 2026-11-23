@@ -1,0 +1,19 @@
+<%- standing = request.email_confirmation -%>
+<div class="email-banner<%= " email-banner-locked" if standing.read_only? %>" id="aviso-confirmacao-email" role="status">
+  <p>
+    <%- if standing.read_only? -%>
+    <strong>Conta somente leitura até a confirmação.</strong>
+    O prazo de <%= Locentra::Domain::Identity::EmailConfirmation::GRACE_PERIOD_DAYS %> dias para confirmar o e-mail terminou em <%= datetime(standing.deadline) %>.
+    Confirme seu e-mail para voltar a alterar dados e liberar convites, credenciais, webhooks, pagamentos e envios a clientes.
+    <%- else -%>
+    <strong>Confirme seu e-mail para liberar convites, credenciais, webhooks, pagamentos e envios a clientes.</strong>
+    <%- days = standing.remaining_days -%>
+    Prazo: <%= days == 1 ? "resta 1 dia" : "restam #{days} dias" %> (até <%= datetime(standing.deadline) %>). Depois dele, a conta fica somente leitura até a confirmação.
+    <%- end -%>
+  </p>
+  <form method="post" action="/confirmar-email/reenviar" class="inline">
+    <%= csrf_field %>
+    <input type="hidden" name="voltar" value="<%= request.get? ? request.rack.fullpath : "/" %>">
+    <button type="submit">Reenviar confirmação</button>
+  </form>
+</div>

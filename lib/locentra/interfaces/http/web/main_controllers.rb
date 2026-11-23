@@ -155,7 +155,7 @@ module Locentra
           def invite(ctx)
             uc(:invite_member).call(ctx.actor, email: ctx.form["email"], role: ctx.form["papel"].to_s)
             redirect(ctx, "/usuarios", notice: "Convite enviado para #{ctx.form["email"]}.")
-          rescue Domain::ValidationError, Domain::Conflict, Domain::PlanLimitExceeded => e
+          rescue Domain::ValidationError, Domain::Conflict, Domain::PlanLimitExceeded, Domain::EmailUnconfirmed => e
             index(ctx, errors: e.is_a?(Domain::ValidationError) ? e.errors : { "base" => [e.message] }, status: 422)
           end
 

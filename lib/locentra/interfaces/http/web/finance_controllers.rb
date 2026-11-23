@@ -6,7 +6,7 @@ module Locentra
       module Web
         # Conversões e erros compartilhados pelas telas do financeiro.
         module FinanceForms
-          FAILURES = [Domain::ValidationError, Domain::Conflict, Domain::InvalidTransition, Domain::PlanLimitExceeded].freeze
+          FAILURES = [Domain::ValidationError, Domain::Conflict, Domain::InvalidTransition, Domain::PlanLimitExceeded, Domain::EmailUnconfirmed].freeze
 
           private
 

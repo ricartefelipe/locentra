@@ -80,6 +80,18 @@ module Locentra
             redirect(ctx, "/entrar", alert: "Link de confirmação inválido ou expirado.")
           end
 
+          # Reenvio pelo aviso do layout da equipe, com o token CSRF da sessão; vale também para a conta somente
+          # leitura. Acima dos limites (por IP na rota e por usuário no caso de uso), a resposta é 429.
+          def resend_confirmation(ctx)
+            result = uc(:resend_email_confirmation).call(user_id: ctx.session["user_id"], request_id: ctx.request_id)
+            notice = if result == :sent
+                       "Enviamos um novo link de confirmação para #{ctx.session["email"]}. Os links enviados antes deixam de valer."
+                     else
+                       "Seu e-mail já está confirmado."
+                     end
+            redirect(ctx, safe_back(ctx.form["voltar"]) || "/", notice: notice)
+          end
+
           def forgot_form(ctx)
             render(ctx, "auth/forgot", title: "Recuperar senha", layout: "layouts/public", sent: false)
           end
