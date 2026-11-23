@@ -29,8 +29,8 @@ ampliação com orçamentos, contratos, retirada, devolução, inspeções, aler
   (`stale_quote_version`, `quote_expired`, `already_picked_up`, `already_returned`, `contract_not_cancellable`,
   `stale_organization`...) e transições recusadas, `invalid_transition`. Na sessão de usuário com e-mail não
   confirmado, as ações para fora (envio de orçamento, emissão de contrato) e, depois de 7 dias, todas as
-  alterações respondem 403 `email_unconfirmed` (ADR-031, [módulo](confirmacao-email.md)); credenciais não recebem
-  esse código.
+  alterações respondem 403 `email_unconfirmed` (ADR-031, [módulo](confirmacao-email.md)); a credencial segue a
+  situação de quem a criou e recebe o mesmo código.
 - **Paginação:** `limit` de 1 a 100 (padrão 25) e `offset` de 0 a 1.000.000, com
   `pagination: {limit, offset, total, next_offset}`; fora da faixa, 422.
 - **Formatos estritos:** inteiros são inteiros do JSON (centavos e pontos-base); números com casas decimais,

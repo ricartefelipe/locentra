@@ -51,7 +51,7 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
   ator (membro ativo, credencial válida e não expirada, ou acesso de portal ativo). Revogação e mudança de
   papel valem na requisição seguinte.
 - **Confirmação de e-mail** (ADR-031; ver [módulo](modulos/confirmacao-email.md)): vale para usuários da equipe
-  e se soma à matriz, sem alterá-la.
+  e para as credenciais criadas por eles, e se soma à matriz, sem alterá-la.
   - Sem e-mail confirmado, o usuário entra, navega e opera dentro da organização (clientes, catálogo, ativos,
     disponibilidade, reservas, orçamentos em rascunho, retirada, devolução, manutenção, financeiro manual,
     configurações), mas não executa as ações que agem para fora em nome da organização, mesmo com a permissão do
@@ -61,13 +61,15 @@ Desconto manual máximo: Proprietário 100%, Administrador 100%, Gerente 20%, At
     (`contracts.write`) e convidar contato para o portal (`customers.write`).
   - A partir de 7 dias contados da criação do usuário (`users.created_at`), a conta não confirmada fica somente
     leitura: toda permissão que altera dados (as que não terminam em `.read`) é recusada, e as consultas
-    continuam liberadas. Entrar, sair, trocar de organização, confirmar pelo link e reenviar a confirmação
-    continuam disponíveis.
-  - A recusa é `403` com o código `email_unconfirmed` (API por sessão) ou a mensagem "Confirme seu e-mail para
+    continuam liberadas. Entrar, sair, trocar de organização, confirmar pelo link, reenviar a confirmação e corrigir
+    o próprio e-mail (com a senha atual) continuam disponíveis.
+  - A recusa é `403` com o código `email_unconfirmed` (API e CLI) ou a mensagem "Confirme seu e-mail para
     …" / "Conta somente leitura até a confirmação do e-mail …" na interface.
   - O aceite de convite (equipe ou portal) pelo link do e-mail confirma o endereço da conta.
-  - Credenciais de API e CLI, o worker (`system`) e o cliente do portal não passam pela regra: credenciais só são
-    criadas por usuário confirmado, e a conta do portal é confirmada pelo convite.
+  - Credenciais de API e CLI seguem a situação de quem as criou (criação exige e-mail confirmado; credenciais da
+    1.3.0 criadas por conta não confirmada recebem a regra), e endpoints de webhook de quem não confirmou não
+    recebem entregas. Credencial sem criador registrado, o worker (`system`) e o cliente do portal não passam pela
+    regra; a conta do portal é confirmada pelo convite.
 - **Atribuição de papéis:** o proprietário atribui qualquer papel exceto proprietário; o administrador atribui
   papéis abaixo de administrador e só altera membros com esses papéis; o proprietário não pode ser
   removido nem rebaixado; administradores só são alterados e removidos pelo proprietário.

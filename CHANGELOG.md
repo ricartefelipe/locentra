@@ -9,28 +9,35 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); 
 
 - **Confirmação de e-mail obrigatória para agir em nome da organização (ADR-031):** sem confirmar o e-mail, a
   conta entra, navega e opera dentro da organização, mas não convida membros, não cria credenciais de API e CLI,
-  não cadastra, reativa nem reenvia webhooks, não configura o provedor de pagamentos nem solicita cobranças por
-  ele, não envia orçamentos, não emite contratos e não convida clientes para o portal. A regra vale nos casos de
-  uso, para a interface web e para a API por sessão.
+  não cadastra, reativa nem reenvia webhooks, não configura o provedor de pagamentos nem solicita, consulta ou
+  reenvia cobranças por ele, não envia orçamentos, não emite contratos e não convida clientes para o portal. A
+  regra vale nos casos de uso, para a interface web, a API e a CLI.
 - **Conta somente leitura depois de 7 dias sem confirmação**, contados da criação do usuário: alterações
-  recusadas e consultas liberadas; entrar, sair, trocar de organização, confirmar e reenviar a confirmação
-  continuam disponíveis.
-- **Aviso no topo das páginas da equipe** com o prazo restante (ou a conta somente leitura) e o botão
-  **Reenviar confirmação** (`POST /confirmar-email/reenviar`, com CSRF; 20 pedidos por IP e 3 por usuário por
-  hora).
-- **API v1:** `403` com o código `email_unconfirmed` para a sessão de usuário não confirmado, documentado no
-  OpenAPI; credenciais não são afetadas.
+  recusadas e consultas liberadas; entrar, sair, trocar de organização, confirmar, reenviar a confirmação e
+  corrigir o e-mail continuam disponíveis.
+- **Credenciais e webhooks seguem quem os criou:** a credencial de API ou CLI criada por conta não confirmada
+  (possível com a 1.3.0 durante a implantação gradual ou no retorno) recebe as mesmas recusas que a conta, e o
+  endpoint de webhook dela não recebe entregas até a confirmação (a entrega já criada é encerrada como falha com
+  o motivo, sem chamada de rede).
+- **Correção do e-mail não confirmado:** quem errou o endereço no cadastro corrige o e-mail com a senha atual,
+  também na conta somente leitura (`/confirmar-email/corrigir`); os links anteriores deixam de valer, a confirmação
+  vai para o novo endereço e a correção é auditada. A troca de e-mail confirmado continua fora do escopo.
+- **Aviso no topo das páginas da equipe** com o prazo restante (ou a conta somente leitura), o endereço da
+  confirmação, o link **Corrigir e-mail** e o botão **Reenviar confirmação** (`POST /confirmar-email/reenviar`,
+  com CSRF; 20 pedidos por IP por hora, somados à correção, e 3 por usuário por hora).
+- **API v1 e CLI:** recusa com o código `email_unconfirmed` (403 na API, saída 77 na CLI), documentado no OpenAPI.
 - **Métrica:** as recusas entram em `locentra_domain_conflicts_total{code="email_unconfirmed"}`.
-- **Migration 0018:** os usuários existentes sem confirmação passam a ser considerados confirmados, com o
-  instante da migration (`docs/RUNBOOKS.md`, seção 17).
+- **Migration 0018:** os usuários sem confirmação com o prazo de 7 dias já vencido na atualização passam a ser
+  considerados confirmados, com o instante da migration; os mais novos continuam pendentes com o restante do prazo
+  (`docs/RUNBOOKS.md`, seção 17, com a consulta de auditoria de credenciais e endpoints).
 
 ### Alterado
 
 - O aceite de convite da equipe ou do portal pelo link do e-mail confirma o e-mail da conta existente que o
   aceita (a conta criada pelo aceite já nascia confirmada).
 - Nos formulários de convite de membro, cadastro de webhook, provedor e cobranças do financeiro, e na emissão de
-  contrato, reativação e reenvio de webhook, a recusa por e-mail não confirmado aparece na própria página, como os
-  demais erros de negócio.
+  contrato, reativação e reenvio de webhook, a ação para fora recusada por e-mail não confirmado aparece na própria
+  página, como os demais erros de negócio; a recusa da conta somente leitura vai sempre para a página 403.
 
 ## [1.3.0] — 2026-11-21
 

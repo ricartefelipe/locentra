@@ -127,8 +127,11 @@ duas ordens), limpeza do histórico contra reenvio concorrente e atualização d
   qualquer processo.
 - Portal do cliente sem API v1.
 - Aceite e encerramento de contrato, avarias, manutenção e transferências sem API v1 (interface web).
-- A confirmação de e-mail não tem troca de endereço: o e-mail da conta não muda depois do cadastro. Sem envio
-  de e-mail configurado, a confirmação de cadastros novos é manual (`RUNBOOKS.md`, seção 17.3).
+- O e-mail só pode ser corrigido enquanto a conta não está confirmada: a troca de um e-mail já confirmado não
+  existe. Sem envio de e-mail configurado, a confirmação de cadastros novos é manual (`RUNBOOKS.md`, seção 17.3).
+- Durante a implantação gradual ou o retorno à 1.3.0, a versão antiga não aplica a regra: contas não confirmadas
+  criam credenciais e endpoints por ela, e os endpoints delas recebem entregas da 1.3.0. Na versão nova, esses
+  registros seguem a situação de quem os criou (consulta de auditoria em `RUNBOOKS.md`, seção 17.2).
 - Configurações da organização são alteradas somente por usuário com `organization.manage`, pela interface web
   ou por `PATCH /api/v1/organization/settings` com sessão; credenciais e CLI apenas consultam (ADR-030). Prévia,
   restauração dos padrões e gestão de filiais ficam na interface web. A lista de fusos oferece os fusos do

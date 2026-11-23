@@ -30,7 +30,8 @@ info:
     confirmado recebe `403` com o código `email_unconfirmed` nas ações que agem para fora em nome da organização
     (envio de orçamento e emissão de contrato) e, a partir de 7 dias da criação da conta, em qualquer alteração
     (inclusive `PATCH /organization/settings`); as consultas continuam liberadas. A mensagem indica a ação recusada.
-    Credenciais (`Bearer`) não recebem esse código: só são criadas por usuário com e-mail confirmado.
+    Credenciais (`Bearer`) seguem a situação de quem as criou e recebem o mesmo código; a criação de credenciais
+    exige e-mail confirmado.
 
     Orçamentos (`/quotes`, escopos `quotes.read` e `quotes.write`; a conversão exige também
     `reservations.write`), contratos (`/contracts`, escopos `contracts.read` e `contracts.write`; o aditivo exige
@@ -1442,8 +1443,8 @@ components:
               example: unavailable
               description: >-
                 Código estável do erro. Em `403`, entre outros: `forbidden` (permissão ou escopo), `plan_limit` (limite do plano),
-                `csrf` (token de sessão ausente ou inválido) e `email_unconfirmed` (sessão de usuário com e-mail não
-                confirmado, ADR-031).
+                `csrf` (token de sessão ausente ou inválido) e `email_unconfirmed` (sessão de usuário, ou credencial
+                criada por usuário, com e-mail não confirmado, ADR-031).
             message: { type: string }
             details:
               type: object
