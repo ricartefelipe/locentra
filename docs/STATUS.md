@@ -5,15 +5,15 @@
 
 ## Verificação da branch (não publicado)
 
-Branch `feature/bloqueio-email-nao-confirmado` (confirmação de e-mail obrigatória, ADR-031, migration 0018), em
-22/11/2026:
+Branch `feature/bloqueio-email-nao-confirmado` (confirmação de e-mail obrigatória, credenciais e webhooks seguindo
+quem os criou, correção do e-mail não confirmado, ADR-031, migration 0018), em 23/11/2026:
 
 | Verificação | Resultado |
 |---|---|
-| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 1115 testes, 30.576 asserções, 0 falhas |
-| Cobertura de domínio + aplicação | 99,50% de linhas, 94,01% de branches (metas 90% / 80%) |
-| `rake test:browser` (Ferrum, Chrome headless) | 16 testes, 0 falhas |
-| `rubocop` | 340 arquivos, sem ofensas |
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 1134 testes, 30.763 asserções, 0 falhas |
+| Cobertura de domínio + aplicação | 99,52% de linhas, 94,02% de branches (metas 90% / 80%) |
+| `rake test:browser` (Ferrum, Chrome headless) | 17 testes, 0 falhas |
+| `rubocop` | 342 arquivos, sem ofensas |
 | Atualização de um banco da 1.3.0 para a 0018 | coberta por `test/repository/migration_0018_test.rb`; procedimento em `RUNBOOKS.md` §17, não exercitado em ambiente Compose |
 
 ## Última verificação completa
