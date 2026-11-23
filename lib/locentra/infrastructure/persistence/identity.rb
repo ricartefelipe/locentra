@@ -136,14 +136,17 @@ module Locentra
 
         # Como no vínculo de usuários, a organização precisa estar ativa (não suspensa nem encerrada).
         # Quem criou a credencial precisa continuar membro ativo; `creator_role` é o papel atual dele
-        # (os escopos efetivos não passam das permissões desse papel).
+        # (os escopos efetivos não passam das permissões desse papel). A confirmação de e-mail e a criação
+        # de quem a criou dão a situação da credencial (ADR-031); sem criador, as colunas vêm nulas.
         def active_credential(tx, credential_id, now)
           return nil unless credential_id
 
           tx.query_one(<<~SQL, [credential_id, now])
-            SELECT c.id, c.organization_id, c.kind, c.scopes, m.role AS creator_role
+            SELECT c.id, c.organization_id, c.kind, c.scopes, m.role AS creator_role,
+                   u.email_confirmed_at AS creator_email_confirmed_at, u.created_at AS creator_created_at
               FROM api_credentials c JOIN organizations o ON o.id = c.organization_id
               LEFT JOIN memberships m ON m.organization_id = c.organization_id AND m.user_id = c.created_by AND m.status = 'active'
+              LEFT JOIN users u ON u.id = c.created_by
              WHERE c.id = $1 AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > $2) AND o.status = 'active'
                AND (c.created_by IS NULL OR m.id IS NOT NULL)
           SQL

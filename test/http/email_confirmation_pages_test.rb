@@ -229,6 +229,17 @@ class EmailConfirmationPagesTest < ApiV1TestCase
     assert_equal 200, last_response.status, "consulta liberada na conta somente leitura"
   end
 
+  # Credencial criada por conta ainda não confirmada (implantação gradual com a 1.3.0) herda a situação do criador.
+  def test_credential_of_an_unconfirmed_creator_answers_forbidden_with_the_same_code
+    confirm_email(@gamma[:user_id])
+    bearer = token(%w[quotes.write quotes.read customers.read], actor: @gamma_actor)
+    owner_query("UPDATE users SET email_confirmed_at = NULL WHERE id = $1", [@gamma[:user_id]], tenant: "")
+    post!(403, "/quotes/#{@gamma_quote.id}/send", {}, token: bearer)
+
+    assert_error "email_unconfirmed"
+    get!(200, "/customers", {}, token: bearer)
+  end
+
   def test_openapi_documents_the_code
     get "/api/v1/openapi.yaml"
 

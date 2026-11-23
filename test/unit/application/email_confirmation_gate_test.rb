@@ -23,7 +23,12 @@ class EmailConfirmationGateTest < UnitTest
       { "id" => "m1", "role" => "owner", "email_confirmed_at" => confirmed_at, "user_created_at" => CREATED_AT }
     end
 
-    def active_credential(_tx, _id, _now) = { "organization_id" => "o1", "kind" => "api", "scopes" => ["members.manage"] }
+    # "k1" sem criador; "k2" criada pelo usuário u1 (mesma situação de e-mail).
+    def active_credential(_tx, id, _now)
+      row = { "organization_id" => "o1", "kind" => "api", "scopes" => %w[members.manage customers.write] }
+      id == "k2" ? row.merge("creator_email_confirmed_at" => confirmed_at, "creator_created_at" => CREATED_AT) : row
+    end
+
     def active_portal_access(_tx, _org, _user) = { "id" => "p1", "customer_id" => "c1" }
   end
 
@@ -97,11 +102,26 @@ class EmailConfirmationGateTest < UnitTest
     assert_equal EC::PENDING, A::Authorizer.writable!(read_only.with(email_status: EC::PENDING)).email_status
   end
 
-  def test_credentials_system_and_customers_are_not_subject_to_the_rule
+  def test_credentials_inherit_the_creator_status
+    api = A::Actor.credential(kind: "api", credential_id: "k2", organization_id: "o1", scopes: [])
+
+    assert_raises(Domain::EmailUnconfirmed) { outbound(api) }
+    assert_equal :ok, @uow.run(api, "customers.write") { :ok }
+    @clock.advance(EC::GRACE_PERIOD_SECONDS)
+
+    assert_equal :read_only, assert_raises(Domain::EmailUnconfirmed) { @uow.run(api, "customers.write") { :ok } }.reason
+    @access.confirmed_at = @clock.now
+
+    assert_equal "k2", outbound(api).credential_id
+    assert_equal 2, refusals
+  end
+
+  def test_credentials_without_creator_system_and_customers_are_not_subject_to_the_rule
     @clock.advance(EC::GRACE_PERIOD_SECONDS)
     api = A::Actor.credential(kind: "api", credential_id: "k1", organization_id: "o1", scopes: [], user_id: "u1")
 
     assert_equal "k1", outbound(api).credential_id
+    assert_nil @uow.run(api) { |_tx, current| current.email_status }
     system = A::Actor.system(organization_id: "o1")
 
     assert_same system, A::Authorizer.confirmed_email!(system, "contracts.issue")

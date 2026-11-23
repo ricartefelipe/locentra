@@ -42,11 +42,12 @@ module Locentra
     # Autorização por papel (usuários) ou por escopos (credenciais de integração e CLI).
     # O worker (`system`) executa somente tarefas internas enfileiradas pela própria aplicação.
     #
-    # Confirmação de e-mail (ADR-031), somente para usuários da equipe: `authorize!` recusa as permissões que
-    # alteram dados quando a conta está somente leitura (consultas que usam uma permissão de alteração passam
+    # Confirmação de e-mail (ADR-031), para usuários da equipe e credenciais: `authorize!` recusa as permissões
+    # que alteram dados quando a conta está somente leitura (consultas que usam uma permissão de alteração passam
     # `read: true`), e `confirmed_email!` recusa as ações que agem para fora em nome da organização enquanto o
-    # e-mail não estiver confirmado. Credenciais não passam por essas regras: só são criadas por usuário
-    # confirmado, e a confirmação não é desfeita. `allowed?` continua sendo somente a matriz de papéis.
+    # e-mail não estiver confirmado. A credencial herda a situação de quem a criou, calculada pela UnitOfWork;
+    # credencial sem criador, o worker e o cliente do portal não passam pela regra. Para usuários, situação
+    # ainda não calculada recusa a ação para fora. `allowed?` continua sendo somente a matriz de papéis.
     module Authorizer
       CUSTOMER_PERMISSIONS = %w[portal.access].freeze
       EC = Domain::Identity::EmailConfirmation
@@ -72,15 +73,17 @@ module Locentra
 
       # Conta somente leitura recusa a alteração.
       def writable!(actor)
-        EC.writable!(actor.email_status) if actor.user?
+        EC.writable!(actor.email_status) if email_subject?(actor)
         actor
       end
 
       # Ação que age para fora em nome da organização (Domain::Identity::EmailConfirmation::OUTBOUND_ACTIONS).
       def confirmed_email!(actor, action)
-        EC.outbound!(actor.email_status, action) if actor.user?
+        EC.outbound!(actor.email_status, action) if email_subject?(actor)
         actor
       end
+
+      def email_subject?(actor) = actor.user? || (actor.credential? && !actor.email_status.nil?)
     end
 
     # Coordena transação, contexto de tenant e revalidação do vínculo do ator.
@@ -152,7 +155,7 @@ module Locentra
                   "credencial inválida ou revogada"
           end
 
-          actor.with(scopes: Integrations.effective_scopes(credential))
+          actor.with(scopes: Integrations.effective_scopes(credential), email_status: creator_email_status(credential))
         when "customer"
           portal = @access.active_portal_access(tx, actor.organization_id, actor.user_id)
           raise Domain::AccessDenied, "acesso ao portal revogado" unless portal && portal.fetch("customer_id") == actor.customer_id
@@ -167,6 +170,14 @@ module Locentra
       def email_status(membership)
         Domain::Identity::EmailConfirmation.status(confirmed_at: membership.fetch("email_confirmed_at"),
                                                    created_at: membership.fetch("user_created_at"), now: @clock.now)
+      end
+
+      # A credencial herda a situação de quem a criou; sem criador, não tem situação (nil).
+      def creator_email_status(credential)
+        created_at = credential["creator_created_at"]
+        return nil if created_at.nil?
+
+        Domain::Identity::EmailConfirmation.status(confirmed_at: credential["creator_email_confirmed_at"], created_at: created_at, now: @clock.now)
       end
     end
 

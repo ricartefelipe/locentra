@@ -215,6 +215,36 @@ class EmailConfirmationFlowTest < DatabaseTest
     assert_equal EC::CONFIRMED, @system.uow.run(@actor) { |_tx, current| current.email_status }
   end
 
+  # Credencial criada por conta ainda não confirmada (por exemplo, pela 1.3.0 durante a implantação gradual):
+  # herda a situação de quem a criou, como as sessões. Credencial sem criador não tem situação de e-mail.
+  def test_credentials_follow_the_email_status_of_their_creator
+    confirm_email(@org[:user_id])
+    token = uc(:create_credential).call(@actor, name: "ERP", scopes: %w[quotes.write customers.write customers.read])["token"]
+    owner_query("UPDATE users SET email_confirmed_at = NULL WHERE id = $1", [@org[:user_id]], tenant: "")
+    api = uc(:authenticate_credential).call(token, kind: "api")
+    quote = quote_draft
+
+    error = refused { uc(:send_quote).call(api, quote.id) }
+
+    assert_includes error.message, "enviar orçamentos aos clientes"
+    refute_nil uc(:create_customer).call(api, { kind: "individual", name: "Pela Integração", document: "39053344705" }), "operação interna liberada"
+    @clock.advance(EC::GRACE_PERIOD_SECONDS)
+
+    refused(:read_only) { uc(:create_customer).call(api, { kind: "individual", name: "Depois do Prazo", document: "11144477735" }) }
+
+    assert_equal 2, uc(:list_customers).call(api).total, "consultas liberadas"
+    owner_query("UPDATE api_credentials SET created_by = NULL", [])
+
+    assert_equal "Sem Criador", uc(:create_customer).call(api, { kind: "individual", name: "Sem Criador", document: "11144477735" }).name
+    owner_query("UPDATE api_credentials SET created_by = $1", [@org[:user_id]])
+    confirm_email(@org[:user_id])
+
+    fresh = uc(:create_quote).call(@actor, { customer_id: @customer.id, branch_id: @branch.id, period: rental(20), lines: [line(@camera, 1)],
+                                             valid_until: t("2026-03-15T12:00:00Z") })
+
+    assert_equal "sent", uc(:send_quote).call(api, fresh.id).status
+  end
+
   def test_new_accounts_created_by_invitations_are_born_confirmed
     confirm_email(@org[:user_id])
     member = staff_member(@org, "gerente@alfa.test", "manager")
