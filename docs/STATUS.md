@@ -5,17 +5,17 @@
 
 ## Última verificação completa
 
-Executada na branch `feature/webhooks-por-organizacao` (limite de execuções simultâneas por organização na fila
-de webhooks, circuito por endpoint com entregas retidas e reativação, retenção do histórico de integrações por
-organização, métricas por desfecho e migration 0017), em 21/11/2026:
+Executada para a versão 1.3.0 (API v1 ampliada, limite por organização na fila de webhooks, pausa automática de
+endpoints, retenção do histórico de integrações, migration 0017 e log descarregado a cada linha), em 22/11/2026:
 
 | Verificação | Resultado |
 |---|---|
-| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 991 testes, 28.772 asserções, 0 falhas (15 min 23 s) |
-| Cobertura de domínio + aplicação | 99,48% de linhas, 93,73% de branches (metas 90% / 80%) |
+| `rake test:all` com `COVERAGE_CHECK=1` (unitários, repositórios, integração, Rack, CLI, concorrência) | 1079 testes, 30.135 asserções, 0 falhas |
+| Cobertura de domínio + aplicação | 99,48% de linhas, 93,99% de branches (metas 90% / 80%) |
 | `rake test:browser` (Ferrum, Chrome headless) | 14 testes, 0 falhas |
-| `rubocop` | 319 arquivos, sem ofensas |
-| Atualização de um banco da 1.2.0 para a 0017 | coberta por `test/repository/migration_0017_test.rb`; o procedimento com a 1.2.0 em execução (`RUNBOOKS.md` §16) está escrito, sem exercício em ambiente Compose |
+| `rubocop` | 334 arquivos, sem ofensas |
+| Atualização de um banco da 1.2.0 para a 0017 (volume, índices com `CONCURRENTLY`, migration com `lock_timeout` e a 1.2.0 em execução, troca, conferência dos índices, retorno à 1.2.0) | exercitada; registro em `RUNBOOKS.md` §16.4; também coberta por `test/repository/migration_0017_test.rb` |
+| CI dos PRs das features (#19 e #20) | 7 checks e análise do SonarCloud aprovados |
 
 Verificação anterior, executada para a versão 1.2.0 (configurações da organização, política congelada na reserva e na versão do
 orçamento, fuso de referência da reserva, gestão de filiais e migration 0016), em 21/11/2026:
@@ -61,10 +61,9 @@ restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprova
 | #10 | Documentação consolidada, backup e restauração, publicação de imagem por tag | Integrado; backup e restauração exercitados (ver `RUNBOOKS.md`) |
 | #11 | Estabilização da versão 1.0.0: correções de segurança, concorrência, operação, documentação e interface | Integrado e testado; versão 1.0.0 |
 | #13 | Cadastro de cupons (com livro de usos), condições negociadas por cliente e tarifas adicionais; aplicação em reservas e orçamentos; telas, API v1, CLI, seed e migration 0015 | Integrado e testado; versão 1.1.0 |
-| #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 (ver acima) |
-| — | Configurações da organização (nome, fuso, validade padrão do bloqueio, política de cancelamento), política congelada na reserva e na versão do orçamento, fuso de referência da reserva, gestão de filiais, `organization.read`, API, CLI e migration 0016 (branch `feature/configuracoes-organizacao`) | Testado na branch; não integrado |
-| — | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (branch `feature/api-v1-ampliada`, ADR-030) | Testado na branch; não integrado. `rake test:all` com `COVERAGE_CHECK=1`: 1015 testes, 0 falhas; cobertura de domínio + aplicação 99,30% de linhas e 93,64% de branches; `rake test:browser`: 14 testes, 0 falhas; `rubocop`: 320 arquivos, sem ofensas |
-| — | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (branch `feature/webhooks-por-organizacao`) | Testado na branch; não integrado |
+| #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 |
+| #19 | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (ADR-029) | Integrado e testado; versão 1.3.0 (ver acima) |
+| #20 | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (ADR-030) | Integrado e testado; versão 1.3.0 (ver acima) |
 
 ## Casos obrigatórios cobertos por testes
 
