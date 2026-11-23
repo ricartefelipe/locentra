@@ -103,7 +103,7 @@ module Locentra
         end
 
         def accounts(actor)
-          @uow.run(actor, "integrations.manage") { |tx, _| @accounts.list(tx) }
+          @uow.run(actor, "integrations.manage", read: true) { |tx, _| @accounts.list(tx) }
         end
 
         private

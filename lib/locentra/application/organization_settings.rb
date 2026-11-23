@@ -57,7 +57,7 @@ module Locentra
         end
 
         def call(actor)
-          @uow.run(actor, "organization.manage") do |tx, _current|
+          @uow.run(actor, "organization.manage", read: true) do |tx, _current|
             now = @clock.now
             org = @organizations.find(tx, tx.tenant_id!) || raise(Domain::NotFound.new("organização", feminine: true))
             { organization: org, impact: @organizations.timezone_impact(tx, now), history: @audit_log.for_resource(tx, "organization", org.id),
@@ -75,7 +75,7 @@ module Locentra
         end
 
         def call(actor, attrs)
-          @uow.run(actor, "organization.manage") do |tx, _current|
+          @uow.run(actor, "organization.manage", read: true) do |tx, _current|
             org = @organizations.find(tx, tx.tenant_id!) || raise(Domain::NotFound.new("organização", feminine: true))
             revised = org.revise(**attrs.except(:confirm_timezone_change), confirm_timezone_change: true)
             { current: org, revised: revised, timezone_changed: org.timezone_changed?(revised) }

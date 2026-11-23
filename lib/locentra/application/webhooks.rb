@@ -54,6 +54,7 @@ module Locentra
             raise Domain::ValidationError.field("url", e.message)
           end
           @uow.run(actor, "integrations.manage") do |tx, current|
+            Authorizer.confirmed_email!(current, "webhooks.create")
             @limits.feature!(tx, "webhooks")
             secret = "whsec_#{@ids.token(32)}"
             row = { "id" => @ids.uuid, "url" => url.to_s, "events" => list, "description" => Domain::Organizations::Text.optional(description, max: 200),
@@ -92,7 +93,7 @@ module Locentra
         end
 
         def call(actor)
-          @uow.run(actor, "integrations.manage") do |tx, _|
+          @uow.run(actor, "integrations.manage", read: true) do |tx, _|
             { endpoints: @webhooks.endpoints(tx), deliveries: @webhooks.recent_deliveries(tx, 50) }
           end
         end
@@ -110,6 +111,7 @@ module Locentra
 
         def call(actor, delivery_id)
           @uow.run(actor, "integrations.manage") do |tx, current|
+            Authorizer.confirmed_email!(current, "webhooks.redeliver")
             delivery = @webhooks.lock_delivery(tx, Domain::Identifier.parse(delivery_id)) || raise(Domain::NotFound, "entrega")
             raise Domain::Conflict.new("entrega já concluída", code: "already_delivered") if delivery["status"] == "delivered"
 
@@ -287,6 +289,7 @@ module Locentra
 
         def call(actor, endpoint_id)
           @uow.run(actor, "integrations.manage") do |tx, current|
+            Authorizer.confirmed_email!(current, "webhooks.resume")
             id = Domain::Identifier.parse(endpoint_id, "endpoint")
             endpoint = @webhooks.lock_endpoint(tx, id) || raise(Domain::NotFound, "endpoint")
             raise Domain::Conflict.new("endpoint desativado não pode ser reativado", code: "endpoint_disabled") unless endpoint["active"]

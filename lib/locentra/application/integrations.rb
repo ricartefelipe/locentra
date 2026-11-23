@@ -41,6 +41,7 @@ module Locentra
           raise Domain::ValidationError.field("validade", "entre 1 e #{MAX_DAYS} dias") unless days.between?(1, MAX_DAYS)
 
           @uow.run(actor, "integrations.manage") do |tx, current|
+            Authorizer.confirmed_email!(current, "credentials.create")
             @limits.feature!(tx, "api") if kind == "api"
             granted = Domain::Identity.permissions_for(current.role)
             raise Domain::AccessDenied, "escopos acima das permissões do criador" unless (list - granted).empty?
@@ -86,7 +87,7 @@ module Locentra
         end
 
         def call(actor)
-          @uow.run(actor, "integrations.manage") { |tx, _| @credentials.list(tx) }
+          @uow.run(actor, "integrations.manage", read: true) { |tx, _| @credentials.list(tx) }
         end
       end
 

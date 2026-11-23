@@ -6,28 +6,31 @@ module Locentra
     # CLI ou worker) e revalidada dentro da transação pela UnitOfWork.
     ACTOR_KINDS = %w[user api cli system customer].freeze
 
+    #
+    # `email_status` (Domain::Identity::EmailConfirmation::STATUSES) só existe para usuários da equipe e é
+    # preenchido pela UnitOfWork na revalidação, com o relógio da aplicação; antes disso vale nil.
     Actor = Data.define(:kind, :user_id, :organization_id, :role, :membership_id, :credential_id, :customer_id,
-                        :scopes, :request_id, :ip) do
-      def self.user(user_id:, organization_id:, role:, membership_id: nil, request_id: nil, ip: nil)
+                        :scopes, :request_id, :ip, :email_status) do
+      def self.user(user_id:, organization_id:, role:, membership_id: nil, request_id: nil, ip: nil, email_status: nil)
         new(kind: "user", user_id: user_id, organization_id: organization_id, role: role, membership_id: membership_id,
-            credential_id: nil, customer_id: nil, scopes: [], request_id: request_id, ip: ip)
+            credential_id: nil, customer_id: nil, scopes: [], request_id: request_id, ip: ip, email_status: email_status)
       end
 
       def self.credential(kind:, credential_id:, organization_id:, scopes:, request_id: nil, ip: nil, user_id: nil)
         raise ArgumentError, "tipo inválido" unless %w[api cli].include?(kind)
 
         new(kind: kind, user_id: user_id, organization_id: organization_id, role: nil, membership_id: nil,
-            credential_id: credential_id, customer_id: nil, scopes: scopes.freeze, request_id: request_id, ip: ip)
+            credential_id: credential_id, customer_id: nil, scopes: scopes.freeze, request_id: request_id, ip: ip, email_status: nil)
       end
 
       def self.system(organization_id:, request_id: nil)
         new(kind: "system", user_id: nil, organization_id: organization_id, role: nil, membership_id: nil,
-            credential_id: nil, customer_id: nil, scopes: [], request_id: request_id, ip: nil)
+            credential_id: nil, customer_id: nil, scopes: [], request_id: request_id, ip: nil, email_status: nil)
       end
 
       def self.customer(user_id:, organization_id:, customer_id:, request_id: nil, ip: nil)
         new(kind: "customer", user_id: user_id, organization_id: organization_id, role: nil, membership_id: nil,
-            credential_id: nil, customer_id: customer_id, scopes: [], request_id: request_id, ip: ip)
+            credential_id: nil, customer_id: customer_id, scopes: [], request_id: request_id, ip: ip, email_status: nil)
       end
 
       def user? = kind == "user"
@@ -39,8 +42,15 @@ module Locentra
 
     # Autorização por papel (usuários) ou por escopos (credenciais de integração e CLI).
     # O worker (`system`) executa somente tarefas internas enfileiradas pela própria aplicação.
+    #
+    # Confirmação de e-mail (ADR-031), somente para usuários da equipe: `authorize!` recusa as permissões que
+    # alteram dados quando a conta está somente leitura (consultas que usam uma permissão de alteração passam
+    # `read: true`), e `confirmed_email!` recusa as ações que agem para fora em nome da organização enquanto o
+    # e-mail não estiver confirmado. Credenciais não passam por essas regras: só são criadas por usuário
+    # confirmado, e a confirmação não é desfeita. `allowed?` continua sendo somente a matriz de papéis.
     module Authorizer
       CUSTOMER_PERMISSIONS = %w[portal.access].freeze
+      EC = Domain::Identity::EmailConfirmation
 
       module_function
 
@@ -54,9 +64,22 @@ module Locentra
         end
       end
 
-      def authorize!(actor, permission)
+      def authorize!(actor, permission, read: false)
         raise Domain::AccessDenied, "permissão necessária: #{permission}" unless allowed?(actor, permission)
 
+        writable!(actor) if !read && Domain::Identity.mutation?(permission)
+        actor
+      end
+
+      # Conta somente leitura recusa a alteração.
+      def writable!(actor)
+        EC.writable!(actor.email_status) if actor.user?
+        actor
+      end
+
+      # Ação que age para fora em nome da organização (Domain::Identity::EmailConfirmation::OUTBOUND_ACTIONS).
+      def confirmed_email!(actor, action)
+        EC.outbound!(actor.email_status, action) if actor.user?
         actor
       end
     end
@@ -70,7 +93,11 @@ module Locentra
     # Conflitos que encerram a operação (disponibilidade, bloqueio vencido, concorrência,
     # idempotência e transição recusada pelo estado atual, que a interface também responde com 409)
     # são contados em `domain_conflicts_total{code}` independentemente da interface (formulário web,
-    # API, worker ou CLI). `metrics` é uma porta com `increment(nome, **rótulos)`.
+    # API, worker ou CLI). A recusa por e-mail não confirmado (403) entra na mesma métrica, com o código
+    # `email_unconfirmed` e sem rótulos de usuário. `metrics` é uma porta com `increment(nome, **rótulos)`.
+    #
+    # `read: true` declara consulta que usa uma permissão de alteração (por exemplo, a lista de credenciais
+    # com `integrations.manage`): a conta somente leitura continua podendo consultá-la.
     class UnitOfWork
       INVALID_TRANSITION = "invalid_transition"
 
@@ -81,13 +108,13 @@ module Locentra
         @metrics = metrics
       end
 
-      def run(actor, permission = nil, retries: 2)
+      def run(actor, permission = nil, retries: 2, read: false)
         raise Domain::AccessDenied, "contexto de organização ausente" if actor.organization_id.nil?
 
         counting_conflicts do
           @transactor.call(tenant_id: actor.organization_id, user_id: actor.user_id, actor: actor, retries: retries) do |tx|
             current = refresh(tx, actor)
-            Authorizer.authorize!(current, permission) if permission
+            Authorizer.authorize!(current, permission, read: read) if permission
             yield tx, current
           end
         end
@@ -103,7 +130,7 @@ module Locentra
 
       def counting_conflicts
         yield
-      rescue Domain::Conflict => e
+      rescue Domain::Conflict, Domain::EmailUnconfirmed => e
         @metrics&.increment("domain_conflicts_total", code: e.code)
         raise
       rescue Domain::InvalidTransition
@@ -117,7 +144,7 @@ module Locentra
           membership = @access.active_membership(tx, actor.organization_id, actor.user_id)
           raise Domain::AccessDenied, "acesso à organização revogado" unless membership
 
-          actor.with(role: membership.fetch("role"), membership_id: membership.fetch("id"))
+          actor.with(role: membership.fetch("role"), membership_id: membership.fetch("id"), email_status: email_status(membership))
         when "api", "cli"
           # O tipo também é conferido: um ator "cli" só é aceito com credencial do tipo cli.
           credential = @access.active_credential(tx, actor.credential_id, @clock.now)
@@ -135,6 +162,12 @@ module Locentra
         else
           actor
         end
+      end
+
+      # Situação da confirmação de e-mail do usuário do vínculo, no instante da operação.
+      def email_status(membership)
+        Domain::Identity::EmailConfirmation.status(confirmed_at: membership.fetch("email_confirmed_at"),
+                                                   created_at: membership.fetch("user_created_at"), now: @clock.now)
       end
     end
 
