@@ -131,7 +131,9 @@ module Locentra
       #
       # Endpoint pausado: a entrega já nasce retida (`held_at`), sem tarefa; sai depois da reativação
       # (ReleaseHeld). Os endpoints são lidos com FOR KEY SHARE, e a reativação (FOR UPDATE) espera este
-      # commit: nenhuma entrega fica retida depois de o endpoint voltar.
+      # commit: nenhuma entrega fica retida depois de o endpoint voltar. Endpoint cadastrado por quem ainda não
+      # confirmou o e-mail não recebe entrega (ADR-031): o evento não é guardado para ele, e os eventos
+      # seguintes à confirmação voltam a sair.
       class DispatchEvent
         def initialize(webhooks:, queue:, notifications:, clock:, ids:, totals:, subscribers: [])
           @webhooks = webhooks
@@ -180,8 +182,11 @@ module Locentra
       # grava a tentativa; com o endpoint já pausado, o sucesso em voo não zera (a reativação zera).
       # Com Domain::Webhooks::Circuit.trip? o endpoint é pausado uma única vez e a pausa é auditada
       # como ação do sistema (sem a URL). Endpoint pausado: a entrega é retida sem chamada de rede e
-      # sem gastar tentativa, e a tarefa conclui com `:endpoint_paused`.
+      # sem gastar tentativa, e a tarefa conclui com `:endpoint_paused`. Endpoint de quem ainda não confirmou
+      # o e-mail (entrega criada antes, por exemplo pela 1.3.0): a entrega é encerrada como falha com
+      # CREATOR_UNCONFIRMED, sem chamada de rede, sem tentativa e sem contar no circuito (ADR-031).
       class Deliver
+        CREATOR_UNCONFIRMED = "não enviada: quem cadastrou o endpoint ainda não confirmou o e-mail"
         HTTP_OUTCOME = ->(response) { response.status.between?(200, 299) ? "ok" : "http_#{response.status / 100}xx" }
         AUDIT_ERROR_LENGTH = 200
 
@@ -202,6 +207,7 @@ module Locentra
           return :missing unless data
           return :already_delivered if data["status"] == "delivered"
           return :endpoint_disabled unless data["active"]
+          return refuse(organization_id, delivery_id) unless data["creator_confirmed"]
           return :endpoint_paused if data["paused_at"] && hold(organization_id, data)
 
           outcome = attempt(data["url"], *request(organization_id, delivery_id, data), context(organization_id, delivery_id, data, correlation_id))
@@ -220,6 +226,11 @@ module Locentra
         class DeliveryFailed < StandardError; end
 
         private
+
+        def refuse(organization_id, delivery_id)
+          @transactor.call(tenant_id: organization_id) { |tx| @webhooks.refuse_delivery(tx, delivery_id, CREATOR_UNCONFIRMED, @clock.now) }
+          :creator_unconfirmed
+        end
 
         # Verdadeiro quando a entrega ficou retida. Falso quando o endpoint foi reativado entre a leitura
         # e a retenção: a entrega segue normalmente.
