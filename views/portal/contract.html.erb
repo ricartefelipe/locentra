@@ -3,94 +3,115 @@
 <% r = @data[:reservation] %>
 <% current_doc = @data[:documents].find { |d| d["version"] == c.current_document_version } %>
 <header class="page-header">
-  <h1>Contrato <%= c.code %> <%= status_badge(c.status, c.status_label) %></h1>
-  <p class="muted">Reserva <a href="/portal/reservas/<%= r.id %>"><%= r.code %></a> (<%= r.status_label %>) · <a href="/portal/contratos">Voltar para contratos</a></p>
+  <div>
+    <a class="eyebrow" href="/portal/contratos">Contratos</a>
+    <h1>Contrato <%= c.code %> <%= status_badge(c.status, c.status_label) %></h1>
+    <p class="page-meta"><span>Reserva <a href="/portal/reservas/<%= r.id %>"><%= r.code %></a> <%= status_badge(r.status, r.status_label) %></span><span>Emitido em <%= datetime(c.issued_at) %></span></p>
+  </div>
 </header>
 <%= partial("shared/errors") %>
 <div class="notice" role="note"><%= Locentra::Domain::Contracts::ACCEPTANCE_NOTICE %></div>
-<div class="grid-2">
-  <section class="panel" aria-labelledby="termos-titulo">
-    <h2 id="termos-titulo">Termos contratados</h2>
-    <dl class="details">
-      <dt>Locatário</dt><dd><%= terms.dig("customer", "name") %></dd>
-      <dt>Emitido em</dt><dd><%= datetime(c.issued_at) %></dd>
-      <dt>Retirada</dt><dd><%= datetime(r.period.starts_at) %></dd>
-      <dt>Devolução vigente</dt><dd><%= datetime(r.period.ends_at) %></dd>
-      <dt>Total contratado vigente</dt><dd><strong><%= money(@data[:current_total]) %></strong></dd>
-      <dt>Caução prevista</dt><dd><%= money(terms["deposit_cents"].to_i) %></dd>
-      <% if c.cancelled_at %><dt>Cancelado em</dt><dd><%= datetime(c.cancelled_at) %></dd><% end %>
-      <% if c.closed_at %><dt>Encerrado em</dt><dd><%= datetime(c.closed_at) %></dd><% end %>
-    </dl>
-    <h3>Itens</h3>
-    <ul class="row-list">
-      <% terms["items"].each do |item| %>
-        <li><%= item["quantity"] %> × <%= item["name"] %> <span class="muted"><%= item["description"] %><% if item["negotiated_discount_cents"].to_i.positive? %> · condição negociada <%= negotiated_discount(item) %><% end %></span> — <%= money(item["total_cents"]) %></li>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="documentos-titulo">
+      <div class="panel-header">
+        <h2 id="documentos-titulo">Documentos e aceite <span class="count"><%= @data[:documents].size %></span></h2>
+      </div>
+      <div class="table-scroll">
+        <table class="table">
+          <caption class="sr-only">Documentos do contrato <%= c.code %></caption>
+          <thead><tr><th scope="col">Documento</th><th scope="col">Motivo</th><th scope="col">Gerado em</th><th scope="col">Aceite</th></tr></thead>
+          <tbody>
+            <% @data[:documents].each do |doc| %>
+              <tr>
+                <td><a href="/anexos/<%= doc["attachment_id"] %>">Baixar PDF da versão <%= doc["version"] %></a><span class="cell-sub"><code class="small" title="SHA-256">SHA-256 <%= doc["sha256"] %></code></span></td>
+                <td><%= Locentra::Domain::Contracts::DOCUMENT_REASONS.fetch(doc["reason"]) %></td>
+                <td><%= datetime(doc["generated_at"]) %></td>
+                <td>
+                  <% if doc["accepted_at"] %>
+                    <%= badge("Aceite eletrônico simples", "success") %>
+                    <span class="cell-sub"><%= doc["accepted_by_name"] %> · <%= Locentra::Domain::Customers::Document.format(doc["accepted_by_document"]) %></span>
+                    <span class="cell-sub"><%= datetime(doc["accepted_at"]) %> · <%= Locentra::Domain::Contracts::ACCEPTANCE_CHANNELS.fetch(doc["accepted_via"]) %></span>
+                  <% else %>
+                    <%= badge("Sem aceite registrado", "muted") %>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+      <% if c.open? && current_doc && current_doc["accepted_at"].nil? %>
+        <form method="post" action="/portal/contratos/<%= c.id %>/aceite" class="stack">
+          <%= csrf_field %>
+          <input type="hidden" name="versao" value="<%= c.current_document_version %>">
+          <h3>Aceitar a versão <%= c.current_document_version %></h3>
+          <p class="muted">Leia o PDF da versão <%= c.current_document_version %> antes de registrar o aceite eletrônico simples.</p>
+          <div class="form-grid">
+            <div><label for="aceite-nome">Nome completo de quem aceita</label>
+              <input id="aceite-nome" name="nome" required maxlength="160" value="<%= session_user_name %>"<%= invalid(@errors, "nome") %>>
+              <%= field_errors(@errors, "nome") %></div>
+            <div><label for="aceite-documento">CPF ou CNPJ de quem aceita</label>
+              <input id="aceite-documento" name="documento" required inputmode="numeric"<%= invalid(@errors, "documento") %>>
+              <%= field_errors(@errors, "documento") %></div>
+          </div>
+          <label class="checkbox"><input type="checkbox" name="declaracao" value="1" required<%= invalid(@errors, "declaracao") %>> <%= Locentra::Domain::Contracts::ACCEPTANCE_STATEMENT %></label>
+          <%= field_errors(@errors, "declaracao") %>
+          <p class="muted small">Serão registrados o IP e o navegador desta requisição e o instante do aceite.</p>
+          <button type="submit" class="primary">Registrar aceite eletrônico simples</button>
+        </form>
       <% end %>
-    </ul>
-    <h3>Valores na emissão</h3>
-    <dl class="details">
-      <%= partial("shared/pricing_summary", pricing: terms["pricing"] || {}, items: terms["items"], audience: :customer, total: terms["total_cents"].to_i) %>
-    </dl>
-    <h3>Política de cancelamento</h3>
-    <ul>
-      <% Array(terms["cancellation_terms"]).each do |text| %><li><%= text %></li><% end %>
-    </ul>
-    <% if terms["conditions"] %><h3>Condições específicas</h3><p class="pre"><%= terms["conditions"] %></p><% end %>
-  </section>
-  <section class="panel" aria-labelledby="documentos-titulo">
-    <h2 id="documentos-titulo">Documentos e aceite</h2>
-    <table class="table">
-      <thead><tr><th scope="col">Documento</th><th scope="col">Motivo</th><th scope="col">Gerado em</th><th scope="col">Aceite</th></tr></thead>
-      <tbody>
-        <% @data[:documents].each do |doc| %>
-          <tr>
-            <td><a href="/anexos/<%= doc["attachment_id"] %>">Baixar PDF da versão <%= doc["version"] %></a><br><code class="small" title="SHA-256">SHA-256 <%= doc["sha256"] %></code></td>
-            <td><%= Locentra::Domain::Contracts::DOCUMENT_REASONS.fetch(doc["reason"]) %></td>
-            <td><%= datetime(doc["generated_at"]) %></td>
-            <td>
-              <% if doc["accepted_at"] %>
-                <%= badge("Aceite eletrônico simples", "success") %><br>
-                <%= doc["accepted_by_name"] %> · <%= Locentra::Domain::Customers::Document.format(doc["accepted_by_document"]) %><br>
-                <span class="muted"><%= datetime(doc["accepted_at"]) %> · <%= Locentra::Domain::Contracts::ACCEPTANCE_CHANNELS.fetch(doc["accepted_via"]) %></span>
-              <% else %>
-                <span class="muted">Sem aceite registrado</span>
+    </section>
+    <section class="panel" aria-labelledby="termos-titulo">
+      <h2 id="termos-titulo">Termos contratados</h2>
+      <h3>Itens</h3>
+      <ul class="row-list">
+        <% terms["items"].each do |item| %>
+          <li><strong><%= item["quantity"] %> × <%= item["name"] %></strong> — <%= money(item["total_cents"]) %><span class="cell-sub"><%= item["description"] %><% if item["negotiated_discount_cents"].to_i.positive? %> · condição negociada <%= negotiated_discount(item) %><% end %></span></li>
+        <% end %>
+      </ul>
+      <h3>Valores na emissão</h3>
+      <dl class="details">
+        <%= partial("shared/pricing_summary", pricing: terms["pricing"] || {}, items: terms["items"], audience: :customer, total: terms["total_cents"].to_i) %>
+      </dl>
+      <h3>Política de cancelamento</h3>
+      <ul class="row-list">
+        <% Array(terms["cancellation_terms"]).each do |text| %><li><%= text %></li><% end %>
+      </ul>
+      <% if terms["conditions"] %><h3>Condições específicas</h3><p class="pre"><%= terms["conditions"] %></p><% end %>
+    </section>
+    <% unless @data[:amendments].empty? %>
+      <section class="panel" aria-labelledby="aditivos-titulo">
+        <div class="panel-header">
+          <h2 id="aditivos-titulo">Aditivos <span class="count"><%= @data[:amendments].size %></span></h2>
+        </div>
+        <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th scope="col">Nº</th><th scope="col">Tipo</th><th scope="col">Descrição</th><th scope="col">Documento</th><th scope="col" class="num">Diferença</th></tr></thead>
+            <tbody>
+              <% @data[:amendments].each do |a| %>
+                <tr><td><%= a["number"] %></td><td><%= Locentra::Domain::Contracts::AMENDMENT_KINDS.fetch(a["kind"]) %></td><td><%= a["description"] %></td>
+                  <td>versão <%= a["document_version"] %></td><td class="num"><%= money(a["amount_delta_cents"]) %></td></tr>
               <% end %>
-            </td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
-    <% if c.open? && current_doc && current_doc["accepted_at"].nil? %>
-      <form method="post" action="/portal/contratos/<%= c.id %>/aceite" class="stack">
-        <%= csrf_field %>
-        <input type="hidden" name="versao" value="<%= c.current_document_version %>">
-        <h3>Aceitar a versão <%= c.current_document_version %></h3>
-        <p>Leia o PDF da versão <%= c.current_document_version %> antes de registrar o aceite eletrônico simples.</p>
-        <label for="aceite-nome">Nome completo de quem aceita</label>
-        <input id="aceite-nome" name="nome" required maxlength="160" value="<%= session_user_name %>"<%= invalid(@errors, "nome") %>>
-        <%= field_errors(@errors, "nome") %>
-        <label for="aceite-documento">CPF ou CNPJ de quem aceita</label>
-        <input id="aceite-documento" name="documento" required inputmode="numeric"<%= invalid(@errors, "documento") %>>
-        <%= field_errors(@errors, "documento") %>
-        <label class="checkbox"><input type="checkbox" name="declaracao" value="1" required<%= invalid(@errors, "declaracao") %>> <%= Locentra::Domain::Contracts::ACCEPTANCE_STATEMENT %></label>
-        <%= field_errors(@errors, "declaracao") %>
-        <p class="muted">Serão registrados o IP e o navegador desta requisição e o instante do aceite.</p>
-        <button type="submit" class="primary">Registrar aceite eletrônico simples</button>
-      </form>
+            </tbody>
+          </table>
+        </div>
+      </section>
     <% end %>
-  </section>
+  </div>
+  <aside class="detail-aside">
+    <section class="panel" aria-labelledby="resumo-titulo">
+      <h2 id="resumo-titulo">Resumo</h2>
+      <dl class="details">
+        <dt>Locatário</dt><dd><%= terms.dig("customer", "name") %></dd>
+        <dt>Emitido em</dt><dd><%= datetime(c.issued_at) %></dd>
+        <dt>Retirada</dt><dd><%= datetime(r.period.starts_at) %></dd>
+        <dt>Devolução vigente</dt><dd><%= datetime(r.period.ends_at) %></dd>
+        <dt>Caução prevista</dt><dd><%= money(terms["deposit_cents"].to_i) %></dd>
+        <% if c.cancelled_at %><dt>Cancelado em</dt><dd><%= datetime(c.cancelled_at) %></dd><% end %>
+        <% if c.closed_at %><dt>Encerrado em</dt><dd><%= datetime(c.closed_at) %></dd><% end %>
+      </dl>
+      <p class="amount"><span class="amount-label">Total contratado vigente</span><strong><%= money(@data[:current_total]) %></strong></p>
+    </section>
+  </aside>
 </div>
-<% unless @data[:amendments].empty? %>
-  <section class="panel" aria-labelledby="aditivos-titulo">
-    <h2 id="aditivos-titulo">Aditivos</h2>
-    <table class="table">
-      <thead><tr><th scope="col">Nº</th><th scope="col">Tipo</th><th scope="col">Descrição</th><th scope="col">Documento</th><th scope="col" class="num">Diferença</th></tr></thead>
-      <tbody>
-        <% @data[:amendments].each do |a| %>
-          <tr><td><%= a["number"] %></td><td><%= Locentra::Domain::Contracts::AMENDMENT_KINDS.fetch(a["kind"]) %></td><td><%= a["description"] %></td>
-            <td>versão <%= a["document_version"] %></td><td class="num"><%= money(a["amount_delta_cents"]) %></td></tr>
-        <% end %>
-      </tbody>
-    </table>
-  </section>
-<% end %>

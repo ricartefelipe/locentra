@@ -2,45 +2,51 @@
 <header class="page-header">
   <h1>Cupons</h1>
   <% if can?("coupons.write") %><a class="button primary" href="/cupons/novo">Novo cupom</a><% end %>
+  <p class="page-meta"><span><%= count_text(@page.total, "cupom", "cupons") %></span><span>Horários no fuso <%= time_zone.identifier %>.</span></p>
 </header>
-<form method="get" action="/cupons" class="filters" role="search">
-  <label for="busca">Buscar por código ou descrição</label>
-  <input id="busca" name="busca" maxlength="40" value="<%= @filters["busca"] %>">
-  <label for="situacao">Situação</label>
-  <select id="situacao" name="situacao">
-    <option value="">Todas</option>
-    <% statuses.each do |key, text| %><option value="<%= key %>"<%= selected(@filters["situacao"], key) %>><%= text %></option><% end %>
-  </select>
-  <label for="ordem">Ordenar</label>
-  <select id="ordem" name="ordem">
-    <option value="code"<%= selected(@filters["ordem"], "code") %>>Código</option>
-    <option value="-created_at"<%= selected(@filters["ordem"], "-created_at") %>>Mais recentes</option>
-    <option value="valid_until"<%= selected(@filters["ordem"], "valid_until") %>>Fim da vigência</option>
-  </select>
-  <button type="submit">Filtrar</button>
-</form>
-<% if @page.items.empty? %>
-  <p class="empty">Nenhum cupom encontrado.</p>
-<% else %>
-  <table class="table">
-    <caption class="sr-only">Lista de cupons</caption>
-    <thead><tr><th scope="col">Código</th><th scope="col">Descrição</th><th scope="col">Desconto</th><th scope="col">Vigência</th>
-      <th scope="col">Usos</th><th scope="col" class="num">Subtotal mínimo</th><th scope="col">Situação</th></tr></thead>
-    <tbody>
-      <% @page.items.each do |row| %>
-        <% coupon = row[:coupon] %>
-        <tr>
-          <td><a href="/cupons/<%= coupon.id %>"><%= coupon.code %></a></td>
-          <td><%= coupon.description || "—" %></td>
-          <td><%= coupon_discount(coupon.kind, coupon.value) %></td>
-          <td><%= validity(coupon.valid_from, coupon.valid_until) %></td>
-          <td><%= coupon.usage_text %></td>
-          <td class="num"><%= coupon.min_subtotal_cents.to_i.positive? ? money(coupon.min_subtotal_cents) : "—" %></td>
-          <td><%= status_badge(row[:status], statuses.fetch(row[:status])) %></td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
+<section class="panel" aria-label="Lista de cupons">
+  <form method="get" action="/cupons" class="filters" role="search">
+    <label for="busca">Buscar por código ou descrição</label>
+    <input id="busca" name="busca" maxlength="40" value="<%= @filters["busca"] %>">
+    <label for="situacao">Situação</label>
+    <select id="situacao" name="situacao">
+      <option value="">Todas</option>
+      <% statuses.each do |key, text| %><option value="<%= key %>"<%= selected(@filters["situacao"], key) %>><%= text %></option><% end %>
+    </select>
+    <label for="ordem">Ordenar</label>
+    <select id="ordem" name="ordem">
+      <option value="code"<%= selected(@filters["ordem"], "code") %>>Código</option>
+      <option value="-created_at"<%= selected(@filters["ordem"], "-created_at") %>>Mais recentes</option>
+      <option value="valid_until"<%= selected(@filters["ordem"], "valid_until") %>>Fim da vigência</option>
+    </select>
+    <button type="submit">Filtrar</button>
+  </form>
+  <% if @page.items.empty? %>
+    <p class="empty">Nenhum cupom encontrado.</p>
+  <% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <caption class="sr-only">Lista de cupons</caption>
+        <thead><tr><th scope="col">Código</th><th scope="col">Desconto</th><th scope="col">Vigência</th>
+          <th scope="col">Usos</th><th scope="col" class="num">Subtotal mínimo</th><th scope="col">Situação</th></tr></thead>
+        <tbody>
+          <% @page.items.each do |row| %>
+            <% coupon = row[:coupon] %>
+            <tr>
+              <td><a href="/cupons/<%= coupon.id %>"><%= coupon.code %></a><% if coupon.description %><span class="cell-sub"><%= coupon.description %></span><% end %></td>
+              <td><%= coupon_discount(coupon.kind, coupon.value) %></td>
+              <td><%= validity(coupon.valid_from, coupon.valid_until) %></td>
+              <td><%= coupon.usage_text %></td>
+              <td class="num"><%= coupon.min_subtotal_cents.to_i.positive? ? money(coupon.min_subtotal_cents) : "—" %></td>
+              <td><%= status_badge(row[:status], statuses.fetch(row[:status])) %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>
+<% unless @page.items.empty? %>
   <%= partial("shared/pagination", page: @page, base_path: "/cupons", query: @filters) %>
 <% end %>
-<p class="muted">Horários no fuso <%= time_zone.identifier %>. Os usos contam reservas solicitadas, em bloqueio temporário válido, confirmadas, em andamento e concluídas; cancelamento e expiração liberam o uso.</p>
+<p class="muted small">Os usos contam reservas solicitadas, em bloqueio temporário válido, confirmadas, em andamento e concluídas; cancelamento e expiração liberam o uso.</p>

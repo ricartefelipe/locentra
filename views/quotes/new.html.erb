@@ -1,17 +1,33 @@
-<header class="page-header"><h1>Novo orçamento</h1></header>
-<section class="panel">
-  <%= partial("shared/errors") %>
-  <form method="post" action="/orcamentos" class="form-grid" data-line-items>
-    <%= csrf_field %>
-    <div><label for="cliente_id">Cliente</label>
-      <select id="cliente_id" name="cliente_id" required<%= invalid(@errors, "cliente") %>>
-        <option value="">Selecione</option>
-        <% @customers.each do |c| %><option value="<%= c.id %>"<%= selected(@values["cliente_id"], c.id) %>><%= c.name %> (<%= c.formatted_document %>)</option><% end %>
-      </select>
-      <%= field_errors(@errors, "cliente") %>
-      <% if @customers.empty? %><p class="muted"><a href="/clientes/novo">Cadastre um cliente</a> antes de orçar.</p><% end %>
-    </div>
-    <%= partial("quotes/fields") %>
-    <div class="full actions"><button type="submit" class="primary">Salvar rascunho</button> <a href="/orcamentos">Cancelar</a></div>
-  </form>
-</section>
+<header class="page-header">
+  <h1>Novo orçamento</h1>
+  <p class="muted">O orçamento é salvo como rascunho na versão 1; ele só chega ao cliente depois do envio.</p>
+</header>
+<%= partial("shared/errors") %>
+<form method="post" action="/orcamentos" class="detail-layout" data-line-items>
+  <%= csrf_field %>
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="dados-titulo">
+      <h2 id="dados-titulo">Cliente e período</h2>
+      <div class="form-grid">
+        <div class="full"><label for="cliente_id">Cliente</label>
+          <select id="cliente_id" name="cliente_id" required<%= invalid(@errors, "cliente") %>>
+            <option value="">Selecione</option>
+            <% @customers.each do |c| %><option value="<%= c.id %>"<%= selected(@values["cliente_id"], c.id) %>><%= c.name %> (<%= c.formatted_document %>)</option><% end %>
+          </select>
+          <%= field_errors(@errors, "cliente") %>
+          <% if @customers.empty? %><p class="muted"><a href="/clientes/novo">Cadastre um cliente</a> antes de orçar.</p><% end %>
+        </div>
+        <%= partial("quotes/fields", part: "dados") %>
+      </div>
+    </section>
+    <%= partial("quotes/fields", part: "itens") %>
+    <%= partial("quotes/fields", part: "termos") %>
+  </div>
+  <aside class="detail-aside">
+    <%= partial("quotes/fields", part: "comercial") %>
+    <section class="panel" aria-label="Salvar">
+      <p class="muted small">Os preços são calculados com a tabela vigente e ficam congelados nesta versão.</p>
+      <div class="actions"><button type="submit" class="primary">Salvar rascunho</button> <a class="button ghost" href="/orcamentos">Cancelar</a></div>
+    </section>
+  </aside>
+</form>

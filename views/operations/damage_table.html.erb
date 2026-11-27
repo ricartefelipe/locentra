@@ -2,20 +2,21 @@
 <% if @rows.empty? %>
   <p class="empty"><%= @empty %></p>
 <% else %>
-  <table class="table">
-    <thead><tr><th scope="col">Registro</th><th scope="col">Tipo</th><th scope="col">Item</th><th scope="col">Reserva</th><th scope="col" class="num">Estimado</th><th scope="col" class="num">Cobrado</th><th scope="col">Situação</th></tr></thead>
-    <tbody>
-      <% @rows.each do |d| %>
-        <tr>
-          <td><a href="/operacao/avarias/<%= d["id"] %>"><%= d["code"] %></a></td>
-          <td><%= m::DAMAGE_KINDS.fetch(d["kind"]) %> · <%= m::SEVERITIES.fetch(d["severity"]) %></td>
-          <td><%= d["product_name"] %> <span class="muted"><%= d["tag"] || "#{d["quantity"]} un." %></span></td>
-          <td><a href="/reservas/<%= d["reservation_id"] %>"><%= d["reservation_code"] %></a></td>
-          <td class="num"><%= money(d["estimated_cost_cents"]) %></td>
-          <td class="num"><%= d["charged_cents"] ? money(d["charged_cents"]) : "—" %></td>
-          <td><%= status_badge(d["status"], m::DAMAGE_STATUSES.fetch(d["status"])) %></td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
+  <div class="table-scroll">
+    <table class="table">
+      <thead><tr><th scope="col">Registro</th><th scope="col">Item</th><th scope="col">Reserva</th><th scope="col" class="num">Estimado</th><th scope="col" class="num">Cobrado</th><th scope="col">Situação</th></tr></thead>
+      <tbody>
+        <% @rows.each do |d| %>
+          <tr>
+            <td><a href="/operacao/avarias/<%= d["id"] %>"><%= d["code"] %></a><span class="cell-sub"><%= m::DAMAGE_KINDS.fetch(d["kind"]) %> · <%= m::SEVERITIES.fetch(d["severity"]) %></span></td>
+            <td><%= d["product_name"] %><span class="cell-sub"><%= d["tag"] || "#{d["quantity"]} un." %></span></td>
+            <td><a href="/reservas/<%= d["reservation_id"] %>"><%= d["reservation_code"] %></a></td>
+            <td class="num"><%= money(d["estimated_cost_cents"]) %></td>
+            <td class="num"><%= d["charged_cents"] ? money(d["charged_cents"]) : "—" %></td>
+            <td><%= status_badge(d["status"], m::DAMAGE_STATUSES.fetch(d["status"])) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
 <% end %>

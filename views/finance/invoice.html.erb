@@ -2,30 +2,53 @@
 <% invoice = @invoice %>
 <header class="page-header">
   <h1>Fatura <%= invoice["number"] %></h1>
-  <p class="muted">Demonstrativo comercial emitido em <%= datetime(invoice["issued_at"]) %>. Documento sem valor fiscal: a emissão de nota fiscal de serviço (NFS-e) não é feita pelo Locentra.</p>
+  <p class="page-meta"><span>Demonstrativo comercial</span><span>Emitida em <%= datetime(invoice["issued_at"]) %></span><span>Reserva <a href="/reservas/<%= invoice["reservation_id"] %>"><%= invoice["reservation_code"] %></a></span></p>
 </header>
-<section class="panel" aria-labelledby="titulo-partes">
-  <h2 id="titulo-partes">Partes</h2>
-  <dl class="details">
-    <dt>Locadora</dt><dd><%= invoice["organization_name"] %></dd>
-    <dt>Cliente</dt><dd><%= invoice["customer_name"] %> (<%= Locentra::Domain::Customers::Document.format(invoice["customer_document"]) %>)</dd>
-    <dt>Reserva</dt><dd><a href="/reservas/<%= invoice["reservation_id"] %>"><%= invoice["reservation_code"] %></a></dd>
-  </dl>
-</section>
-<section class="panel" aria-labelledby="titulo-itens-fatura">
-  <h2 id="titulo-itens-fatura">Cobranças</h2>
-  <table class="table">
-    <caption class="sr-only">Cobranças da fatura</caption>
-    <thead><tr><th scope="col">Descrição</th><th scope="col">Tipo</th><th scope="col">Vencimento</th><th scope="col" class="num">Valor</th><th scope="col" class="num">Recebido</th><th scope="col" class="num">Saldo</th></tr></thead>
-    <tbody>
-      <% invoice["lines"].each do |line| %>
-        <tr><td><%= line["description"] %></td><td><%= fin::RECEIVABLE_KINDS.fetch(line["kind"], line["kind"]) %></td><td><%= date(Date.iso8601(line["due_on"])) %></td>
-          <td class="num"><%= money(line["amount_cents"]) %></td><td class="num"><%= money(line["settled_cents"]) %></td><td class="num"><%= money(line["outstanding_cents"]) %></td></tr>
-      <% end %>
-    </tbody>
-    <tfoot>
-      <tr><th scope="row" colspan="3">Totais</th><td class="num"><strong><%= money(invoice["total_cents"]) %></strong></td><td class="num"><%= money(invoice["settled_cents"]) %></td><td class="num"><strong><%= money(invoice["outstanding_cents"]) %></strong></td></tr>
-    </tfoot>
-  </table>
-  <% if invoice["notes"] %><p class="pre"><%= invoice["notes"] %></p><% end %>
-</section>
+<div class="notice" role="note">Documento sem valor fiscal: a emissão de nota fiscal de serviço (NFS-e) não é feita pelo Locentra.</div>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="titulo-itens-fatura">
+      <header class="panel-header">
+        <h2 id="titulo-itens-fatura">Cobranças<span class="count"><%= invoice["lines"].size %></span></h2>
+      </header>
+      <div class="table-scroll">
+        <table class="table">
+          <caption class="sr-only">Cobranças da fatura</caption>
+          <thead><tr><th scope="col">Descrição</th><th scope="col">Vencimento</th><th scope="col" class="num">Valor</th><th scope="col" class="num">Recebido</th><th scope="col" class="num">Saldo</th></tr></thead>
+          <tbody>
+            <% invoice["lines"].each do |line| %>
+              <tr><td><%= line["description"] %><span class="cell-sub"><%= fin::RECEIVABLE_KINDS.fetch(line["kind"], line["kind"]) %></span></td><td><%= date(Date.iso8601(line["due_on"])) %></td>
+                <td class="num"><%= money(line["amount_cents"]) %></td><td class="num"><%= money(line["settled_cents"]) %></td><td class="num"><%= money(line["outstanding_cents"]) %></td></tr>
+            <% end %>
+          </tbody>
+          <tfoot>
+            <tr><th scope="row" colspan="2">Totais</th><td class="num"><strong><%= money(invoice["total_cents"]) %></strong></td><td class="num"><%= money(invoice["settled_cents"]) %></td><td class="num"><strong><%= money(invoice["outstanding_cents"]) %></strong></td></tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+    <% if invoice["notes"] %>
+      <section class="panel" aria-labelledby="titulo-observacoes-fatura">
+        <h2 id="titulo-observacoes-fatura">Observações</h2>
+        <p class="pre"><%= invoice["notes"] %></p>
+      </section>
+    <% end %>
+  </div>
+  <aside class="detail-aside" aria-label="Resumo da fatura">
+    <section class="panel" aria-labelledby="titulo-partes">
+      <h2 id="titulo-partes">Partes</h2>
+      <p class="eyebrow">Locadora</p>
+      <p><strong><%= invoice["organization_name"] %></strong></p>
+      <p class="eyebrow">Cliente</p>
+      <p><strong><%= invoice["customer_name"] %></strong><span class="cell-sub"><%= Locentra::Domain::Customers::Document.format(invoice["customer_document"]) %></span></p>
+    </section>
+    <section class="panel" aria-labelledby="titulo-valores-fatura">
+      <h2 id="titulo-valores-fatura">Valores</h2>
+      <dl class="details">
+        <dt>Total</dt><dd><%= money(invoice["total_cents"]) %></dd>
+        <dt>Recebido</dt><dd><%= money(invoice["settled_cents"]) %></dd>
+      </dl>
+      <p class="amount"><span class="amount-label">Saldo</span><strong><%= money(invoice["outstanding_cents"]) %></strong></p>
+    </section>
+  </aside>
+</div>

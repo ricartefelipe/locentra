@@ -1,5 +1,6 @@
 <section class="panel narrow" aria-labelledby="titulo-entrar">
   <h1 id="titulo-entrar">Entrar</h1>
+  <p class="muted">Acesse a gestão da sua locadora ou o portal do cliente.</p>
   <% if @error %>
     <div class="form-errors" role="alert" tabindex="-1" data-autofocus><p><%= @error %></p></div>
   <% end %>
@@ -11,5 +12,7 @@
     <input id="senha" name="senha" type="password" autocomplete="current-password" required>
     <button type="submit" class="primary">Entrar</button>
   </form>
-  <p class="links"><a href="/recuperar-senha">Esqueci minha senha</a> · <a href="/cadastro">Criar conta para minha empresa</a></p>
+  <p class="links"><a href="/recuperar-senha">Esqueci minha senha</a></p>
+  <hr>
+  <p class="links">Ainda não usa o Locentra? <a href="/cadastro">Criar conta para minha empresa</a></p>
 </section>

@@ -17,7 +17,8 @@
     <div><label for="tolerancia">Tolerância (minutos)</label><input id="tolerancia" name="tolerancia" type="number" min="0" max="240" value="<%= @values["tolerancia"] || t["grace_minutes"] %>"></div>
     <div><label for="caucao">Caução por unidade (R$)</label><input id="caucao" name="caucao" inputmode="decimal" value="<%= @values["caucao"] || @deposit %>"<%= invalid(@errors, "caucao") %>><%= field_errors(@errors, "caucao") %></div>
   </div>
-  <p class="muted">Faixas por quantidade (desconto aplicado à linha):</p>
+  <h3>Faixas por quantidade</h3>
+  <p class="muted small">Desconto aplicado à linha da reserva a partir da quantidade informada. Deixe em branco as faixas que não usar.</p>
   <% tiers = Array(t["quantity_tiers"]) %>
   <% 3.times do |i| %>
     <div class="line">

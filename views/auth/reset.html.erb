@@ -1,5 +1,6 @@
 <section class="panel narrow" aria-labelledby="titulo-nova-senha">
   <h1 id="titulo-nova-senha">Definir nova senha</h1>
+  <p class="muted">Escolha uma senha longa, que você não use em outros serviços.</p>
   <%= partial("shared/errors") %>
   <form method="post" action="/redefinir-senha" class="stack">
     <input type="hidden" name="token" value="<%= @token %>">
@@ -8,4 +9,5 @@
     <%= field_errors(@errors, "senha") %>
     <button type="submit" class="primary">Salvar senha</button>
   </form>
+  <p class="links"><a href="/entrar">Voltar para entrar</a></p>
 </section>

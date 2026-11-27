@@ -2,73 +2,88 @@
 <% l = @data[:labels] %>
 <% editable = can?("maintenance.write") %>
 <header class="page-header">
-  <h1>Ordem de manutenção <%= o.code %> <%= status_badge(o.status, o.status_label) %></h1>
-  <p class="muted"><%= l["product_name"] %>
-    <% if o.asset? %>· ativo <a href="/ativos/<%= o.asset_id %>"><%= l["tag"] %></a><% else %>· <%= o.quantity %> un. do estoque<% end %>
-    · filial <%= l["branch_name"] %></p>
+  <div>
+    <span class="eyebrow">Manutenção</span>
+    <h1>Ordem de manutenção <%= o.code %> <%= status_badge(o.status, o.status_label) %></h1>
+    <p class="page-meta"><span><%= l["product_name"] %></span>
+      <% if o.asset? %><span>Ativo <a class="mono" href="/ativos/<%= o.asset_id %>"><%= l["tag"] %></a></span><% else %><span><%= o.quantity %> un. do estoque</span><% end %>
+      <span>Filial <%= l["branch_name"] %></span></p>
+  </div>
 </header>
-<%= partial("shared/errors") %>
-<div class="grid-2">
-  <section class="panel" aria-labelledby="h-ordem">
-    <h2 id="h-ordem">Serviço</h2>
-    <dl class="details">
-      <dt>Descrição</dt><dd class="pre"><%= o.description %></dd>
-      <dt>Aberta em</dt><dd><%= datetime(o.opened_at) %></dd>
-      <dt>Iniciada em</dt><dd><%= datetime(o.started_at) %></dd>
-      <% if o.status == "completed" %>
-        <dt>Concluída em</dt><dd><%= datetime(o.completed_at) %></dd>
-        <dt>Custo</dt><dd><strong><%= money(o.cost) %></strong></dd>
-        <dt>Inspeção posterior</dt><dd><%= o.requires_inspection ? "Exigida" : "Não exigida" %></dd>
-        <% if o.resolution_notes %><dt>Observações</dt><dd class="pre"><%= o.resolution_notes %></dd><% end %>
-      <% end %>
-      <% if o.status == "cancelled" %>
-        <dt>Cancelada em</dt><dd><%= datetime(o.cancelled_at) %></dd>
-        <dt>Motivo</dt><dd><%= o.cancellation_reason %></dd>
-      <% end %>
-    </dl>
-    <% if l["inspection_id"] %><p><a href="/operacao/inspecoes">Inspeção pendente após esta ordem</a></p><% end %>
-  </section>
-  <section class="panel" aria-labelledby="h-acoes">
-    <h2 id="h-acoes">Andamento</h2>
-    <% if !o.active? %>
-      <p class="muted">Ordem encerrada.</p>
-    <% elsif !editable %>
-      <p class="muted">Somente a equipe de manutenção altera a ordem.</p>
-    <% else %>
-      <% if o.status == "open" %>
-        <form method="post" action="/manutencao/<%= o.id %>/iniciar"><%= csrf_field %><button type="submit" class="primary">Iniciar manutenção</button></form>
-      <% else %>
-        <form method="post" action="/manutencao/<%= o.id %>/concluir" class="stack">
-          <%= csrf_field %>
-          <label for="custo">Custo do serviço (R$)</label>
-          <input id="custo" name="custo" inputmode="decimal" required<%= invalid(@errors, "custo") %>><%= field_errors(@errors, "custo") %>
-          <label class="checkbox"><input type="checkbox" name="inspecao" value="1"> Exigir inspeção antes de liberar</label>
-          <label for="observacoes">Observações</label><textarea id="observacoes" name="observacoes" rows="2" maxlength="2000"></textarea>
-          <button type="submit" class="primary">Concluir manutenção</button>
-        </form>
-      <% end %>
-      <details>
-        <summary>Cancelar ordem</summary>
-        <form method="post" action="/manutencao/<%= o.id %>/cancelar" class="stack" data-confirm="Cancelar esta ordem de manutenção?">
-          <%= csrf_field %>
-          <label for="motivo">Motivo</label><input id="motivo" name="motivo" required maxlength="500">
-          <p class="muted">O item volta à situação anterior: inspeção, quando veio de inspeção reprovada, ou disponível.</p>
-          <button type="submit" class="danger">Cancelar ordem</button>
-        </form>
-      </details>
-    <% end %>
-  </section>
-</div>
-<% if o.asset? %>
-  <section class="panel" aria-labelledby="h-historico">
-    <h2 id="h-historico">Histórico do ativo nesta ordem</h2>
-    <% if @data[:events].empty? %><p class="empty">Sem eventos.</p><% else %>
-      <ol class="timeline">
-        <% @data[:events].each do |e| %>
-          <li><time><%= datetime(e["occurred_at"]) %></time> <strong><%= label(:asset_event, e["kind"]) %></strong> <%= e["from_status"] ? asset_status(e["from_status"]) : "—" %> → <%= e["to_status"] ? asset_status(e["to_status"]) : "—" %> <span class="muted"><%= e["notes"] %></span></li>
-        <% end %>
-      </ol>
-    <% end %>
-  </section>
+<% if o.status != "cancelled" %>
+  <ol class="steps" aria-label="Etapas da ordem">
+    <% if o.status == "open" %><li class="current">Aberta</li><li>Em execução</li><li>Concluída</li>
+    <% elsif o.status == "in_progress" %><li class="done">Aberta</li><li class="current">Em execução</li><li>Concluída</li>
+    <% else %><li class="done">Aberta</li><li class="done">Em execução</li><li class="done">Concluída</li><% end %>
+  </ol>
 <% end %>
-<%= partial("shared/attachments", attachments: @data[:attachments], owner_type: "maintenance_order", owner_id: o.id, can_upload: editable) %>
+<%= partial("shared/errors") %>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="h-ordem">
+      <h2 id="h-ordem">Serviço</h2>
+      <dl class="details">
+        <dt>Descrição</dt><dd class="pre"><%= o.description %></dd>
+        <dt>Aberta em</dt><dd><%= datetime(o.opened_at) %></dd>
+        <dt>Iniciada em</dt><dd><%= datetime(o.started_at) %></dd>
+        <% if o.status == "completed" %>
+          <dt>Concluída em</dt><dd><%= datetime(o.completed_at) %></dd>
+          <dt>Custo</dt><dd><strong><%= money(o.cost) %></strong></dd>
+          <dt>Inspeção posterior</dt><dd><%= o.requires_inspection ? "Exigida" : "Não exigida" %></dd>
+          <% if o.resolution_notes %><dt>Observações</dt><dd class="pre"><%= o.resolution_notes %></dd><% end %>
+        <% end %>
+        <% if o.status == "cancelled" %>
+          <dt>Cancelada em</dt><dd><%= datetime(o.cancelled_at) %></dd>
+          <dt>Motivo</dt><dd><%= o.cancellation_reason %></dd>
+        <% end %>
+      </dl>
+      <% if l["inspection_id"] %><div class="notice"><a href="/operacao/inspecoes">Inspeção pendente após esta ordem</a></div><% end %>
+    </section>
+    <% if o.asset? %>
+      <section class="panel" aria-labelledby="h-historico">
+        <h2 id="h-historico">Histórico do ativo nesta ordem</h2>
+        <% if @data[:events].empty? %><p class="empty">Sem eventos.</p><% else %>
+          <ol class="timeline">
+            <% @data[:events].each do |e| %>
+              <li><time><%= datetime(e["occurred_at"]) %></time> <strong><%= label(:asset_event, e["kind"]) %></strong> <%= e["from_status"] ? asset_status(e["from_status"]) : "—" %> → <%= e["to_status"] ? asset_status(e["to_status"]) : "—" %> <span class="muted"><%= e["notes"] %></span></li>
+            <% end %>
+          </ol>
+        <% end %>
+      </section>
+    <% end %>
+    <%= partial("shared/attachments", attachments: @data[:attachments], owner_type: "maintenance_order", owner_id: o.id, can_upload: editable) %>
+  </div>
+  <aside class="detail-aside">
+    <section class="panel" aria-labelledby="h-acoes">
+      <h2 id="h-acoes">Andamento</h2>
+      <% if !o.active? %>
+        <% if o.status == "completed" %><p class="amount"><span class="amount-label">Custo</span><strong><%= money(o.cost) %></strong></p><% end %>
+        <p class="muted">Ordem encerrada.</p>
+      <% elsif !editable %>
+        <p class="muted">Somente a equipe de manutenção altera a ordem.</p>
+      <% else %>
+        <% if o.status == "open" %>
+          <form method="post" action="/manutencao/<%= o.id %>/iniciar"><%= csrf_field %><button type="submit" class="primary">Iniciar manutenção</button></form>
+        <% else %>
+          <form method="post" action="/manutencao/<%= o.id %>/concluir" class="stack">
+            <%= csrf_field %>
+            <label for="custo">Custo do serviço (R$)</label>
+            <input id="custo" name="custo" inputmode="decimal" required<%= invalid(@errors, "custo") %>><%= field_errors(@errors, "custo") %>
+            <label class="checkbox"><input type="checkbox" name="inspecao" value="1"> Exigir inspeção antes de liberar</label>
+            <label for="observacoes">Observações</label><textarea id="observacoes" name="observacoes" rows="2" maxlength="2000"></textarea>
+            <button type="submit" class="primary">Concluir manutenção</button>
+          </form>
+        <% end %>
+        <details>
+          <summary>Cancelar ordem</summary>
+          <form method="post" action="/manutencao/<%= o.id %>/cancelar" class="stack" data-confirm="Cancelar esta ordem de manutenção?">
+            <%= csrf_field %>
+            <label for="motivo">Motivo</label><input id="motivo" name="motivo" required maxlength="500">
+            <p class="muted small">O item volta à situação anterior: inspeção, quando veio de inspeção reprovada, ou disponível.</p>
+            <button type="submit" class="danger">Cancelar ordem</button>
+          </form>
+        </details>
+      <% end %>
+    </section>
+  </aside>
+</div>

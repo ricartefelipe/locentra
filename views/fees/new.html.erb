@@ -1,13 +1,32 @@
-<header class="page-header"><h1>Nova tarifa</h1></header>
-<section class="panel">
-  <%= partial("shared/errors") %>
-  <form method="post" action="/tarifas" class="form-grid">
-    <%= csrf_field %>
-    <div class="full"><label for="codigo">Código</label>
-      <input id="codigo" name="codigo" required maxlength="30" autocapitalize="characters" autocomplete="off" value="<%= @values["codigo"] %>"<%= invalid(@errors, "codigo", describedby: "ajuda-codigo") %>>
-      <p class="muted" id="ajuda-codigo">De 2 a 30 caracteres: letras sem acento, números, hífen ou sublinhado. Letras minúsculas são convertidas. O código não muda depois do cadastro.</p>
-      <%= field_errors(@errors, "codigo") %></div>
-    <%= partial("fees/fields", prefix: "") %>
-    <div class="full actions"><button type="submit" class="primary">Cadastrar tarifa</button> <a href="/tarifas">Cancelar</a></div>
-  </form>
-</section>
+<header class="page-header">
+  <div>
+    <a class="eyebrow" href="/tarifas">Tarifas adicionais</a>
+    <h1>Nova tarifa</h1>
+  </div>
+</header>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel">
+      <%= partial("shared/errors") %>
+      <form method="post" action="/tarifas" class="form-grid">
+        <%= csrf_field %>
+        <div class="full"><label for="codigo">Código</label>
+          <input id="codigo" name="codigo" required maxlength="30" autocapitalize="characters" autocomplete="off" value="<%= @values["codigo"] %>"<%= invalid(@errors, "codigo", describedby: "ajuda-codigo") %>>
+          <p class="muted small" id="ajuda-codigo">De 2 a 30 caracteres: letras sem acento, números, hífen ou sublinhado. Letras minúsculas são convertidas. O código não muda depois do cadastro.</p>
+          <%= field_errors(@errors, "codigo") %></div>
+        <%= partial("fees/fields", prefix: "") %>
+        <div class="full actions"><button type="submit" class="primary">Cadastrar tarifa</button> <a class="button ghost" href="/tarifas">Cancelar</a></div>
+      </form>
+    </section>
+  </div>
+  <aside class="detail-aside" aria-label="Como as tarifas funcionam">
+    <section class="panel">
+      <h2>Como as tarifas funcionam</h2>
+      <ul class="row-list">
+        <li>Tarifas ativas aparecem nos formulários de reserva e orçamento pelo valor padrão.</li>
+        <li>Valor diferente do padrão exige a permissão de ajustar tarifas.</li>
+        <li>Alterar o valor padrão depois não muda o que já foi registrado.</li>
+      </ul>
+    </section>
+  </aside>
+</div>

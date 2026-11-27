@@ -1,3 +1,4 @@
+<%# Local opcional: compact (painel da reserva), que omite as colunas de reserva e cliente. %>
 <% if @rows.empty? %>
   <p class="empty">Nenhuma cobrança encontrada.</p>
 <% else %>
@@ -5,16 +6,15 @@
     <table class="table">
       <caption class="sr-only">Cobranças com valores recebidos e saldos</caption>
       <thead>
-        <tr><th scope="col">Cobrança</th><th scope="col">Reserva</th><th scope="col">Cliente</th><th scope="col">Vencimento</th><th scope="col" class="num">Valor</th><th scope="col" class="num">Recebido</th><th scope="col" class="num">Saldo</th><th scope="col">Situação</th></tr>
+        <tr><th scope="col">Cobrança</th><% unless @compact %><th scope="col">Reserva</th><% end %><th scope="col">Vencimento</th><th scope="col" class="num">Valor</th><th scope="col" class="num">Recebido</th><th scope="col" class="num">Saldo</th><th scope="col">Situação</th></tr>
       </thead>
       <tbody>
         <% @rows.each do |row| %>
           <% receivable = row[:receivable] %>
           <% balance = row[:balance] %>
           <tr>
-            <td><a href="/financeiro/cobrancas/<%= receivable.id %>"><%= receivable.description %></a><br><span class="muted"><%= receivable.kind_label %></span></td>
-            <td><a href="/reservas/<%= receivable.reservation_id %>"><%= row[:reservation_code] %></a></td>
-            <td><%= row[:customer_name] %></td>
+            <td><a href="/financeiro/cobrancas/<%= receivable.id %>"><%= receivable.description %></a><span class="cell-sub"><%= receivable.kind_label %></span></td>
+            <% unless @compact %><td><a href="/reservas/<%= receivable.reservation_id %>"><%= row[:reservation_code] %></a><span class="cell-sub"><%= row[:customer_name] %></span></td><% end %>
             <td><%= date(receivable.due_on) %></td>
             <td class="num"><%= money(receivable.amount) %></td>
             <td class="num"><%= money(balance.settled) %></td>

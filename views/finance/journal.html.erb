@@ -1,23 +1,26 @@
 <% fin = Locentra::Domain::Finance %>
 <section class="panel" aria-labelledby="titulo-lancamentos">
-  <h2 id="titulo-lancamentos">Lançamentos contábeis</h2>
+  <header class="panel-header">
+    <h2 id="titulo-lancamentos">Lançamentos contábeis<span class="count"><%= @entries.size %></span></h2>
+  </header>
   <% if @entries.empty? %>
     <p class="empty">Nenhum lançamento.</p>
   <% else %>
-    <table class="table">
-      <caption class="sr-only">Lançamentos de partidas dobradas</caption>
-      <thead><tr><th scope="col">Data</th><th scope="col">Histórico</th><th scope="col">Conta</th><th scope="col" class="num">Débito</th><th scope="col" class="num">Crédito</th></tr></thead>
-      <tbody>
-        <% @entries.each do |entry| %>
-          <tr>
-            <td><%= datetime(entry["occurred_at"]) %></td>
-            <td><%= entry["memo"] %></td>
-            <td><%= fin::ACCOUNTS.fetch(entry["account"]) %></td>
-            <td class="num"><%= entry["debit_cents"].positive? ? money(entry["debit_cents"]) : "" %></td>
-            <td class="num"><%= entry["credit_cents"].positive? ? money(entry["credit_cents"]) : "" %></td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="table">
+        <caption class="sr-only">Lançamentos de partidas dobradas</caption>
+        <thead><tr><th scope="col">Histórico</th><th scope="col">Conta</th><th scope="col" class="num">Débito</th><th scope="col" class="num">Crédito</th></tr></thead>
+        <tbody>
+          <% @entries.each do |entry| %>
+            <tr>
+              <td><%= entry["memo"] %><span class="cell-sub"><%= datetime(entry["occurred_at"]) %></span></td>
+              <td><%= fin::ACCOUNTS.fetch(entry["account"]) %></td>
+              <td class="num"><%= entry["debit_cents"].positive? ? money(entry["debit_cents"]) : "" %></td>
+              <td class="num"><%= entry["credit_cents"].positive? ? money(entry["credit_cents"]) : "" %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
   <% end %>
 </section>

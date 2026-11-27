@@ -1,40 +1,47 @@
 <header class="page-header">
   <h1>Tarifas adicionais</h1>
   <% if can?("fees.write") %><a class="button primary" href="/tarifas/nova">Nova tarifa</a><% end %>
+  <p class="page-meta"><span><%= count_text(@page.total, "tarifa", "tarifas") %></span></p>
 </header>
-<p class="muted">As tarifas ativas aparecem nos formulários de reserva e orçamento. Valor diferente do padrão e tarifa avulsa exigem a permissão de ajustar tarifas (gerente, administrador ou proprietário); a redução respeita o limite de desconto do papel.</p>
-<form method="get" action="/tarifas" class="filters" role="search">
-  <label for="busca">Buscar por código ou nome</label>
-  <input id="busca" name="busca" maxlength="40" value="<%= @filters["busca"] %>">
-  <label for="situacao">Situação</label>
-  <select id="situacao" name="situacao">
-    <option value="">Todas</option>
-    <% Locentra::Domain::Pricing::FEE_STATUSES.each do |key, text| %><option value="<%= key %>"<%= selected(@filters["situacao"], key) %>><%= text %></option><% end %>
-  </select>
-  <label for="ordem">Ordenar</label>
-  <select id="ordem" name="ordem">
-    <option value="name"<%= selected(@filters["ordem"], "name") %>>Nome</option>
-    <option value="code"<%= selected(@filters["ordem"], "code") %>>Código</option>
-    <option value="-created_at"<%= selected(@filters["ordem"], "-created_at") %>>Mais recentes</option>
-  </select>
-  <button type="submit">Filtrar</button>
-</form>
-<% if @page.items.empty? %>
-  <p class="empty">Nenhuma tarifa encontrada.</p>
-<% else %>
-  <table class="table">
-    <caption class="sr-only">Catálogo de tarifas adicionais</caption>
-    <thead><tr><th scope="col">Código</th><th scope="col">Nome</th><th scope="col" class="num">Valor padrão</th><th scope="col">Situação</th></tr></thead>
-    <tbody>
-      <% @page.items.each do |fee| %>
-        <tr>
-          <td><a href="/tarifas/<%= fee.id %>"><%= fee.code %></a></td>
-          <td><%= fee.name %></td>
-          <td class="num"><%= money(fee.default_amount) %></td>
-          <td><%= status_badge(fee.status, label(:fee_status, fee.status)) %></td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
+<section class="panel" aria-label="Catálogo de tarifas adicionais">
+  <form method="get" action="/tarifas" class="filters" role="search">
+    <label for="busca">Buscar por código ou nome</label>
+    <input id="busca" name="busca" maxlength="40" value="<%= @filters["busca"] %>">
+    <label for="situacao">Situação</label>
+    <select id="situacao" name="situacao">
+      <option value="">Todas</option>
+      <% Locentra::Domain::Pricing::FEE_STATUSES.each do |key, text| %><option value="<%= key %>"<%= selected(@filters["situacao"], key) %>><%= text %></option><% end %>
+    </select>
+    <label for="ordem">Ordenar</label>
+    <select id="ordem" name="ordem">
+      <option value="name"<%= selected(@filters["ordem"], "name") %>>Nome</option>
+      <option value="code"<%= selected(@filters["ordem"], "code") %>>Código</option>
+      <option value="-created_at"<%= selected(@filters["ordem"], "-created_at") %>>Mais recentes</option>
+    </select>
+    <button type="submit">Filtrar</button>
+  </form>
+  <% if @page.items.empty? %>
+    <p class="empty">Nenhuma tarifa encontrada.</p>
+  <% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <caption class="sr-only">Catálogo de tarifas adicionais</caption>
+        <thead><tr><th scope="col">Código</th><th scope="col">Nome</th><th scope="col" class="num">Valor padrão</th><th scope="col">Situação</th></tr></thead>
+        <tbody>
+          <% @page.items.each do |fee| %>
+            <tr>
+              <td><a href="/tarifas/<%= fee.id %>"><%= fee.code %></a></td>
+              <td><%= fee.name %></td>
+              <td class="num"><%= money(fee.default_amount) %></td>
+              <td><%= status_badge(fee.status, label(:fee_status, fee.status)) %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>
+<% unless @page.items.empty? %>
   <%= partial("shared/pagination", page: @page, base_path: "/tarifas", query: @filters) %>
 <% end %>
+<p class="muted small">As tarifas ativas aparecem nos formulários de reserva e orçamento. Valor diferente do padrão e tarifa avulsa exigem a permissão de ajustar tarifas (gerente, administrador ou proprietário); a redução respeita o limite de desconto do papel.</p>

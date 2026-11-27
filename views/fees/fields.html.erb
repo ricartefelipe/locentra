@@ -2,12 +2,12 @@
 <% pre = @prefix.to_s %>
 <div><label for="<%= pre %>nome">Nome</label>
   <input id="<%= pre %>nome" name="nome" required maxlength="120" value="<%= @values["nome"] %>"<%= invalid(@errors, "nome", describedby: "#{pre}ajuda-nome") %>>
-  <p class="muted" id="<%= pre %>ajuda-nome">Texto que aparece para o cliente em reservas, orçamentos e contratos.</p>
+  <p class="muted small" id="<%= pre %>ajuda-nome">Texto que aparece para o cliente em reservas, orçamentos e contratos.</p>
   <%= field_errors(@errors, "nome") %></div>
 <div><label for="<%= pre %>valor_padrao">Valor padrão (R$)</label>
   <input id="<%= pre %>valor_padrao" name="valor_padrao" required inputmode="decimal" value="<%= @values["valor_padrao"] %>"<%= invalid(@errors, "valor_padrao") %>>
   <%= field_errors(@errors, "valor_padrao") %></div>
 <div class="full"><label for="<%= pre %>descricao">Descrição</label>
   <textarea id="<%= pre %>descricao" name="descricao" rows="2" maxlength="500"<%= invalid(@errors, "descricao", describedby: "#{pre}ajuda-descricao") %>><%= @values["descricao"] %></textarea>
-  <p class="muted" id="<%= pre %>ajuda-descricao">Uso interno: quando aplicar a tarifa.</p>
+  <p class="muted small" id="<%= pre %>ajuda-descricao">Uso interno: quando aplicar a tarifa.</p>
   <%= field_errors(@errors, "descricao") %></div>

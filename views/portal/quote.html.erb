@@ -2,8 +2,11 @@
 <% v = @version %>
 <% decidable = q.status == "sent" && @data[:current] && !@data[:current].expired?(@now) %>
 <header class="page-header">
-  <h1>Orçamento <%= q.code %> <%= q.status == "draft" ? badge("Em revisão pela locadora", "neutral") : status_badge(q.status, q.status_label) %></h1>
-  <p class="muted"><a href="/portal/orcamentos">Voltar para orçamentos</a></p>
+  <div>
+    <a class="eyebrow" href="/portal/orcamentos">Orçamentos</a>
+    <h1>Orçamento <%= q.code %> <%= q.status == "draft" ? badge("Em revisão pela locadora", "neutral") : status_badge(q.status, q.status_label) %></h1>
+    <p class="page-meta"><span>Versão <%= v.number %></span><span>Retirada <%= datetime(v.period.starts_at) %></span><span>Válido até <%= datetime(v.valid_until) %></span></p>
+  </div>
 </header>
 <%= partial("shared/errors") %>
 <% if q.status == "draft" %>
@@ -18,64 +21,73 @@
     <div class="notice" role="note">Este orçamento <strong>não garante disponibilidade</strong>: ela é verificada pela locadora ao converter o orçamento aprovado em reserva.</div>
   <% end %>
 <% end %>
-<div class="grid-2">
-  <section class="panel" aria-labelledby="versao-titulo">
-    <h2 id="versao-titulo">Versão <%= v.number %></h2>
-    <dl class="details">
-      <dt>Retirada</dt><dd><%= datetime(v.period.starts_at) %></dd>
-      <dt>Devolução</dt><dd><%= datetime(v.period.ends_at) %></dd>
-      <dt>Validade</dt><dd><%= datetime(v.valid_until) %><% if v.expired?(@now) %> <%= badge("vencida", "danger") %><% end %></dd>
-      <dt>Enviada em</dt><dd><%= datetime(v.sent_at) %></dd>
-      <dt>Condições</dt><dd class="pre"><%= v.terms || "—" %></dd>
-    </dl>
-    <table class="table">
-      <caption class="sr-only">Itens da versão <%= v.number %></caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th></tr></thead>
-      <tbody>
-        <% v.items.each do |item| %>
-          <tr><td><%= item["name"] %></td><td><%= item["quantity"] %></td><td><%= item["description"] %></td>
-            <td><%= negotiated_discount(item) %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="versao-titulo">
+      <h2 id="versao-titulo">Versão <%= v.number %></h2>
+      <dl class="details">
+        <dt>Retirada</dt><dd><%= datetime(v.period.starts_at) %></dd>
+        <dt>Devolução</dt><dd><%= datetime(v.period.ends_at) %></dd>
+        <dt>Validade</dt><dd><%= datetime(v.valid_until) %><% if v.expired?(@now) %> <%= badge("vencida", "danger") %><% end %></dd>
+        <dt>Enviada em</dt><dd><%= datetime(v.sent_at) %></dd>
+        <dt>Condições</dt><dd class="pre"><%= v.terms || "—" %></dd>
+      </dl>
+      <h3>Itens</h3>
+      <div class="table-scroll">
+        <table class="table">
+          <caption class="sr-only">Itens da versão <%= v.number %></caption>
+          <thead><tr><th scope="col">Item</th><th scope="col" class="num">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th></tr></thead>
+          <tbody>
+            <% v.items.each do |item| %>
+              <tr><td><strong><%= item["name"] %></strong></td><td class="num"><%= item["quantity"] %></td><td class="muted"><%= item["description"] %></td>
+                <td><%= negotiated_discount(item) %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+      <h3>Valores</h3>
+      <dl class="details">
+        <%= partial("shared/pricing_summary", pricing: v.pricing, items: v.items, audience: :customer, total: v.total) %>
+        <dt>Caução prevista</dt><dd><%= money(v.deposit) %></dd>
+      </dl>
+      <%= partial("shared/cancellation_policy", policy: v.cancellation_policy, title: "Política de cancelamento desta versão") %>
+    </section>
+  </div>
+  <aside class="detail-aside">
+    <section class="panel" aria-labelledby="decisao-titulo">
+      <h2 id="decisao-titulo">Sua decisão</h2>
+      <dl class="details">
+        <dt>Situação</dt><dd><%= q.status == "draft" ? "Em revisão pela locadora" : q.status_label %></dd>
+        <% if q.approved_at %>
+          <dt>Aprovado em</dt><dd><%= datetime(q.approved_at) %> por <%= q.approved_by_name %> (versão <%= q.approved_version %>)</dd>
         <% end %>
-      </tbody>
-    </table>
-    <dl class="details">
-      <%= partial("shared/pricing_summary", pricing: v.pricing, items: v.items, audience: :customer, total: v.total) %>
-      <dt>Caução prevista</dt><dd><%= money(v.deposit) %></dd>
-    </dl>
-    <%= partial("shared/cancellation_policy", policy: v.cancellation_policy, title: "Política de cancelamento desta versão") %>
-  </section>
-  <section class="panel" aria-labelledby="decisao-titulo">
-    <h2 id="decisao-titulo">Sua decisão</h2>
-    <dl class="details">
-      <dt>Situação</dt><dd><%= q.status == "draft" ? "Em revisão pela locadora" : q.status_label %></dd>
-      <% if q.approved_at %>
-        <dt>Aprovado em</dt><dd><%= datetime(q.approved_at) %> por <%= q.approved_by_name %> (versão <%= q.approved_version %>)</dd>
-      <% end %>
-      <% if q.rejected_at %><dt>Rejeitado em</dt><dd><%= datetime(q.rejected_at) %></dd><% end %>
-      <% if @data[:reservation] %><dt>Reserva</dt><dd><a href="/portal/reservas/<%= @data[:reservation].id %>"><%= @data[:reservation].code %></a> (<%= @data[:reservation].status_label %>)</dd><% end %>
-    </dl>
-    <% if decidable %>
-      <form method="post" action="/portal/orcamentos/<%= q.id %>/aprovar" class="stack">
-        <%= csrf_field %>
-        <input type="hidden" name="versao" value="<%= q.current_version %>">
-        <p>A aprovação vale para a <strong>versão <%= q.current_version %></strong> (total <%= money(@data[:current].total) %>) e fica registrada com seu nome, o endereço IP e o instante.</p>
-        <label for="aprovacao-nome">Seu nome completo</label>
-        <input id="aprovacao-nome" name="nome" required maxlength="160" value="<%= session_user_name %>"<%= invalid(@errors, "aprovado_por") %>>
-        <%= field_errors(@errors, "aprovado_por") %>
-        <button type="submit" class="primary">Aprovar versão <%= q.current_version %></button>
-      </form>
-      <details<%= open_if(@errors, "motivo") %>>
-        <summary>Rejeitar a versão <%= q.current_version %></summary>
-        <form method="post" action="/portal/orcamentos/<%= q.id %>/rejeitar" class="stack">
+        <% if q.rejected_at %><dt>Rejeitado em</dt><dd><%= datetime(q.rejected_at) %></dd><% end %>
+        <% if @data[:reservation] %><dt>Reserva</dt><dd><a href="/portal/reservas/<%= @data[:reservation].id %>"><%= @data[:reservation].code %></a> <%= status_badge(@data[:reservation].status, @data[:reservation].status_label) %></dd><% end %>
+      </dl>
+      <% if decidable %>
+        <form method="post" action="/portal/orcamentos/<%= q.id %>/aprovar" class="stack">
           <%= csrf_field %>
           <input type="hidden" name="versao" value="<%= q.current_version %>">
-          <p>A rejeição vale para a <strong>versão <%= q.current_version %></strong>.</p>
-          <label for="rejeicao-motivo">Motivo</label>
-          <input id="rejeicao-motivo" name="motivo" required maxlength="500"<%= invalid(@errors, "motivo") %>>
-          <%= field_errors(@errors, "motivo") %>
-          <button type="submit" class="danger">Rejeitar orçamento</button>
+          <p class="amount"><span class="amount-label">Versão <%= q.current_version %></span><strong><%= money(@data[:current].total) %></strong></p>
+          <p class="muted small">A aprovação vale para a <strong>versão <%= q.current_version %></strong> (total <%= money(@data[:current].total) %>) e fica registrada com seu nome, o endereço IP e o instante.</p>
+          <label for="aprovacao-nome">Seu nome completo</label>
+          <input id="aprovacao-nome" name="nome" required maxlength="160" value="<%= session_user_name %>"<%= invalid(@errors, "aprovado_por") %>>
+          <%= field_errors(@errors, "aprovado_por") %>
+          <button type="submit" class="primary">Aprovar versão <%= q.current_version %></button>
         </form>
-      </details>
-    <% end %>
-  </section>
+        <details<%= open_if(@errors, "motivo") %>>
+          <summary>Rejeitar a versão <%= q.current_version %></summary>
+          <form method="post" action="/portal/orcamentos/<%= q.id %>/rejeitar" class="stack">
+            <%= csrf_field %>
+            <input type="hidden" name="versao" value="<%= q.current_version %>">
+            <p>A rejeição vale para a <strong>versão <%= q.current_version %></strong>.</p>
+            <label for="rejeicao-motivo">Motivo</label>
+            <input id="rejeicao-motivo" name="motivo" required maxlength="500"<%= invalid(@errors, "motivo") %>>
+            <%= field_errors(@errors, "motivo") %>
+            <button type="submit" class="danger">Rejeitar orçamento</button>
+          </form>
+        </details>
+      <% end %>
+    </section>
+  </aside>
 </div>

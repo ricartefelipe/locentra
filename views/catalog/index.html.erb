@@ -1,31 +1,39 @@
 <header class="page-header">
   <h1>Produtos e kits</h1>
   <% if can?("catalog.write") %><a class="button primary" href="/produtos/novo">Novo produto</a><% end %>
+  <p class="page-meta"><span><%= count_text(@page.total, "produto", "produtos") %></span></p>
 </header>
-<form method="get" action="/produtos" class="filters" role="search">
-  <label for="busca">Nome ou SKU</label><input id="busca" name="busca" value="<%= @search %>">
-  <label for="tipo">Rastreamento</label>
-  <select id="tipo" name="tipo"><option value="">Todos</option>
-    <% Locentra::Domain::Catalog::TRACKING.each do |key, label| %><option value="<%= key %>"<%= selected(@tracking, key) %>><%= label %></option><% end %>
-  </select>
-  <button type="submit">Filtrar</button>
-</form>
-<% if @page.items.empty? %>
-  <p class="empty">Nenhum produto cadastrado.</p>
-<% else %>
-  <table class="table">
-    <thead><tr><th scope="col">SKU</th><th scope="col">Nome</th><th scope="col">Rastreamento</th><th scope="col">Preparação</th><th scope="col" class="num">Caução</th></tr></thead>
-    <tbody>
-      <% @page.items.each do |p| %>
-        <tr>
-          <td><%= p.sku %></td>
-          <td><a href="/produtos/<%= p.id %>"><%= p.name %></a></td>
-          <td><%= p.tracking_label %></td>
-          <td><%= p.buffer_before_minutes %> / <%= p.buffer_after_minutes %> min</td>
-          <td class="num"><%= money(p.deposit) %></td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
+<section class="panel" aria-label="Catálogo de produtos">
+  <form method="get" action="/produtos" class="filters" role="search">
+    <label for="busca">Nome ou SKU</label><input id="busca" name="busca" value="<%= @search %>">
+    <label for="tipo">Rastreamento</label>
+    <select id="tipo" name="tipo"><option value="">Todos</option>
+      <% Locentra::Domain::Catalog::TRACKING.each do |key, label| %><option value="<%= key %>"<%= selected(@tracking, key) %>><%= label %></option><% end %>
+    </select>
+    <button type="submit">Filtrar</button>
+  </form>
+  <% if @page.items.empty? %>
+    <p class="empty">Nenhum produto cadastrado.</p>
+  <% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <caption class="sr-only">Catálogo de produtos e kits</caption>
+        <thead><tr><th scope="col">Produto</th><th scope="col">SKU</th><th scope="col">Rastreamento</th><th scope="col">Preparação <span class="muted">(antes / depois)</span></th><th scope="col" class="num">Caução</th></tr></thead>
+        <tbody>
+          <% @page.items.each do |p| %>
+            <tr>
+              <td><a href="/produtos/<%= p.id %>"><%= p.name %></a><% if p.category %><span class="cell-sub"><%= p.category %></span><% end %></td>
+              <td><span class="mono"><%= p.sku %></span></td>
+              <td><%= badge(p.tracking_label, p.kit? ? "violet" : (p.serialized? ? "info" : "neutral")) %></td>
+              <td><%= p.buffer_before_minutes %> / <%= p.buffer_after_minutes %> min</td>
+              <td class="num"><%= money(p.deposit) %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>
+<% unless @page.items.empty? %>
   <%= partial("shared/pagination", page: @page, base_path: "/produtos", query: { "busca" => @search, "tipo" => @tracking }) %>
 <% end %>
