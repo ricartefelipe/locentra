@@ -28,12 +28,14 @@
   </section>
   <% if manage -%>
     <section class="panel" aria-labelledby="organizacao-assinatura">
-      <% if sub -%>
-        <% sub_tone = { "trialing" => "info", "active" => "success", "past_due" => "warning", "suspended" => "danger" }.fetch(sub["status"], "muted") -%>
-        <div class="panel-header">
-          <h2 id="organizacao-assinatura">Assinatura Locentra</h2>
+      <div class="panel-header">
+        <h2 id="organizacao-assinatura">Assinatura Locentra</h2>
+        <% if sub -%>
+          <% sub_tone = { "trialing" => "info", "active" => "success", "past_due" => "warning", "suspended" => "danger" }.fetch(sub["status"], "muted") -%>
           <%= badge(label(:subscription_status, sub["status"]), sub_tone) %>
-        </div>
+        <% end -%>
+      </div>
+      <% if sub -%>
         <dl class="details">
           <dt>Plano</dt><dd><strong><%= sub["plan_name"] %></strong> <span class="muted">· <%= money(sub["monthly_price_cents"]) %>/mês</span></dd>
           <% if sub["trial_ends_at"] -%><dt>Avaliação até</dt><dd><%= date(sub["trial_ends_at"]) %></dd><% end -%>
@@ -45,7 +47,6 @@
         </dl>
         <p class="muted small">A assinatura da organização na plataforma é independente dos contratos de locação com clientes.</p>
       <% else -%>
-        <h2 id="organizacao-assinatura">Assinatura Locentra</h2>
         <p class="empty">Sem assinatura registrada.</p>
       <% end -%>
     </section>

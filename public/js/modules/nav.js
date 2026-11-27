@@ -4,17 +4,18 @@
 export function initNav(root) {
   const toggle = root.querySelector("[data-nav-toggle]");
   if (!toggle) return;
-  const body = root.body;
+  const state = root.body.dataset;
+  const isOpen = () => "navOpen" in state;
   const setOpen = (open) => {
-    if (open) body.setAttribute("data-nav-open", "");
-    else body.removeAttribute("data-nav-open");
+    if (open) state.navOpen = "";
+    else delete state.navOpen;
     toggle.setAttribute("aria-expanded", String(open));
     toggle.setAttribute("aria-label", open ? "Fechar menu" : "Abrir menu");
   };
-  toggle.addEventListener("click", () => setOpen(!body.hasAttribute("data-nav-open")));
+  toggle.addEventListener("click", () => setOpen(!isOpen()));
   root.querySelectorAll("[data-nav-close]").forEach((el) => el.addEventListener("click", () => setOpen(false)));
   root.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && body.hasAttribute("data-nav-open")) {
+    if (event.key === "Escape" && isOpen()) {
       setOpen(false);
       toggle.focus();
     }

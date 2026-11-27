@@ -37,7 +37,7 @@
           <dt>Motivo</dt><dd><%= o.cancellation_reason %></dd>
         <% end %>
       </dl>
-      <% if l["inspection_id"] %><div class="notice" role="status"><a href="/operacao/inspecoes">Inspeção pendente após esta ordem</a></div><% end %>
+      <% if l["inspection_id"] %><div class="notice"><a href="/operacao/inspecoes">Inspeção pendente após esta ordem</a></div><% end %>
     </section>
     <% if o.asset? %>
       <section class="panel" aria-labelledby="h-historico">

@@ -104,14 +104,12 @@
       </dl>
       <p class="amount"><span class="amount-label">Saldo em aberto</span><strong><%= money(balance.outstanding) %></strong></p>
     </section>
-    <% if @data[:cancellation] %>
+    <% if @data[:cancellation] || can?("finance.write") %>
       <section class="panel" aria-labelledby="titulo-cancelamento">
         <h2 id="titulo-cancelamento">Cancelamento</h2>
+      <% if @data[:cancellation] %>
         <p class="muted">Cancelada em <%= datetime(@data[:cancellation]["created_at"]) %><%= @data[:cancellation]["created_by_name"] ? " por #{@data[:cancellation]["created_by_name"]}" : "" %>: <%= @data[:cancellation]["reason"] %></p>
-      </section>
-    <% elsif can?("finance.write") %>
-      <section class="panel" aria-labelledby="titulo-cancelamento">
-        <h2 id="titulo-cancelamento">Cancelamento</h2>
+      <% else %>
         <details>
           <summary>Cancelar cobrança (operação compensatória)</summary>
           <form method="post" action="/financeiro/cobrancas/<%= receivable.id %>/cancelar" class="stack" data-confirm="Cancelar esta cobrança? O valor original é mantido e um lançamento compensatório anula o saldo.">
@@ -122,6 +120,7 @@
             <button type="submit" class="danger">Cancelar cobrança</button>
           </form>
         </details>
+      <% end %>
       </section>
     <% end %>
   </aside>

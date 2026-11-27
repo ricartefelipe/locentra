@@ -62,7 +62,7 @@
       </section>
       <section class="panel" aria-labelledby="secao-politica">
         <h2 id="secao-politica">Política de cancelamento</h2>
-        <div role="group" data-line-group="faixas" aria-labelledby="secao-politica" aria-describedby="ajuda-faixas<%= general_errors.empty? ? "" : " erro-faixas_cancelamento" %>">
+        <fieldset class="fieldset-plain" data-line-group="faixas" aria-labelledby="secao-politica" aria-describedby="ajuda-faixas<%= general_errors.empty? ? "" : " erro-faixas_cancelamento" %>">
           <p class="muted small" id="ajuda-faixas">Cada faixa vale da antecedência informada até a faixa seguinte. Inclua uma faixa de 0 h, para cancelamentos com menos antecedência ou após o início. Multa entre 0% e 100%, com até duas casas decimais, e no máximo 6 faixas. A multa não pode diminuir à medida que o início se aproxima.</p>
           <% unless general_errors.empty? %><p class="field-error" id="erro-faixas_cancelamento" role="alert"><%= general_errors.join("; ") %></p><% end %>
           <div data-lines>
@@ -82,7 +82,7 @@
             <% end -%>
           </div>
           <button type="button" class="small" data-add-line>Adicionar faixa</button>
-        </div>
+        </fieldset>
         <p class="notice">A política vale para reservas e versões de orçamento registradas a partir do salvamento. Reservas, orçamentos e contratos já registrados mantêm a política do registro.</p>
       </section>
     </div>
