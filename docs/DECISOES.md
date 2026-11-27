@@ -559,3 +559,25 @@ As decisões detalhadas de cada módulo estão registradas na seção "Decisões
 - **Consequências:** o cadastro novo precisa confirmar o e-mail para convidar a equipe e se comunicar com
   clientes; o `seed` e os convites continuam produzindo contas confirmadas. Instalações sem envio de e-mail
   configurado precisam confirmar manualmente os novos cadastros (`docs/RUNBOOKS.md`, seção 17).
+
+## ADR-032 — Sistema visual da interface: tokens, fonte e ícones locais, casca agrupada
+
+- **Contexto:** a interface era funcional, mas genérica: fonte do sistema, cores fixas espalhadas, navegação
+  plana de 17 itens, status em texto solto e telas de detalhe numa coluna única longa. A CSP não permite
+  estilos, scripts ou fontes de outras origens (`style-src 'self'`, `font-src 'self'`, `img-src 'self' data:`), e
+  os testes conferem trechos literais do HTML.
+- **Decisão:** um único `public/css/app.css` em camadas (tokens primitivos e semânticos, base, casca,
+  componentes e telas), com tema escuro por `prefers-color-scheme` e tons de status com contraste AA medido.
+  Fonte Inter Variable auto-hospedada em `/fonts` (SIL OFL 1.1, licença ao lado do arquivo). Ícones Lucide (ISC)
+  em `/img/icons`, aplicados por máscara CSS (`mask: url(...)`) a partir do `href` do link ou de classes, sem
+  `<svg>` ou `<img>` na marcação: os links da navegação continuam exatamente `<a href="...">Rótulo</a>`. A
+  navegação lateral é agrupada por área (`NAVIGATION_GROUPS`), mantendo o filtro por permissão de cada item; o
+  topo da barra lateral troca a organização e o rodapé mostra usuário, papel e saída. Abaixo de 1024 px, a
+  navegação vira painel deslizante por um módulo JS pequeno (`nav.js`), sem dependência para a leitura.
+- **Alternativas descartadas:** framework CSS ou biblioteca de componentes (exigiria build de assets e
+  arriscaria a CSP); ícones em sprite SVG na marcação (mudaria os fragmentos de HTML conferidos pelos testes e
+  traria `<svg>` às telas de clientes, onde o teste proíbe imagens no `main`); fonte de CDN (bloqueada pela CSP).
+- **Consequências:** novas telas usam o catálogo de componentes do CSS (cabeçalho de página, painel com
+  cabeçalho e contagem, detalhe com coluna lateral, agenda, abas, selos) em vez de estilos próprios. A cor de
+  acento é um único token (`--accent`); o portal do cliente usa um acento próprio. `/fonts` passou a ser servido
+  pelo `Rack::Static` com a mesma política de cache dos demais estáticos.

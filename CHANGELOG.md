@@ -3,6 +3,18 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versões seguem
 [SemVer](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Alterado
+
+- **Nova interface (ADR-032):** sistema visual com tokens de cor, tema escuro automático, fonte Inter
+  auto-hospedada e ícones; navegação lateral agrupada por área, com troca de organização no topo e usuário,
+  papel e saída no rodapé, e menu deslizante em telas estreitas; tela de acesso em duas colunas. Painel inicial
+  como agenda operacional do dia; detalhes de reserva, orçamento, contrato, cobrança, caução, cliente e ordem de
+  manutenção com resumo e ações numa coluna lateral; selos de situação com tons por etapa do ciclo; calendário
+  de disponibilidade com legenda; operação com abas entre as subáreas; portal do cliente com acento próprio.
+- Rótulos em português para as ações de auditoria que apareciam em inglês no histórico e na auditoria.
+
 ## [1.4.0] — 2026-11-23
 
 ### Adicionado
