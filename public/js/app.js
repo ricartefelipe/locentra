@@ -5,8 +5,10 @@ import { initConfirm } from "./modules/confirm.js";
 import { initLineItems } from "./modules/line-items.js";
 import { initFocus } from "./modules/focus.js";
 import { initCopy } from "./modules/copy.js";
+import { initNav } from "./modules/nav.js";
 
 document.addEventListener("DOMContentLoaded", () => {
+  initNav(document);
   initFlash(document);
   initConfirm(document);
   initLineItems(document);

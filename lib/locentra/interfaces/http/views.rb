@@ -150,14 +150,14 @@ module Locentra
         end
 
         STATUS_TONES = {
-          "confirmed" => "success", "in_progress" => "info", "held" => "warning", "requested" => "neutral", "completed" => "muted",
-          "cancelled" => "danger", "expired" => "muted", "available" => "success", "checked_out" => "info", "in_inspection" => "warning",
-          "in_maintenance" => "warning", "in_transit" => "info", "lost" => "danger", "retired" => "muted", "active" => "success",
+          "confirmed" => "violet", "in_progress" => "info", "held" => "warning", "requested" => "neutral", "completed" => "success",
+          "cancelled" => "muted", "expired" => "muted", "available" => "success", "checked_out" => "info", "in_inspection" => "warning",
+          "in_maintenance" => "orange", "in_transit" => "info", "lost" => "danger", "retired" => "muted", "active" => "success",
           "blocked" => "danger", "inactive" => "muted", "revoked" => "muted", "picking" => "warning", "delivered" => "success",
           "partial" => "info", "not_delivered" => "muted", "pending" => "warning", "checked" => "info", "approved" => "success",
           "rejected" => "danger", "open" => "warning", "dismissed" => "muted", "received" => "success", "resolved" => "muted",
-          "overdue" => "danger", "affected_by_overdue" => "warning", "asset_unavailable" => "danger", "draft" => "neutral",
-          "sent" => "info", "converted" => "muted", "issued" => "warning", "closed" => "muted", "scheduled" => "info",
+          "overdue" => "orange", "affected_by_overdue" => "orange", "asset_unavailable" => "danger", "draft" => "neutral",
+          "sent" => "info", "converted" => "violet", "issued" => "warning", "closed" => "muted", "scheduled" => "info",
           "exhausted" => "warning", "ended" => "muted", "released_cancelled" => "muted", "released_expired" => "muted"
         }.freeze
 
@@ -317,6 +317,38 @@ module Locentra
 
         def navigation
           NAVIGATION.select { |_, _, permission| can?(permission) }.map { |label, path, _| [label, path] }
+        end
+
+        # Grupos da navegação lateral, na ordem de exibição; cada caminho pertence a um único grupo.
+        NAVIGATION_GROUPS = [
+          ["Visão geral", %w[/ /disponibilidade]],
+          ["Comercial", %w[/reservas /orcamentos /contratos /clientes /cupons /tarifas]],
+          ["Operação", %w[/operacao /manutencao]],
+          ["Estoque", %w[/produtos /ativos]],
+          ["Financeiro", %w[/financeiro]],
+          ["Administração", %w[/usuarios /integracoes /organizacao /auditoria]]
+        ].freeze
+
+        # Navegação permitida agrupada: [[rótulo do grupo, [[rótulo, caminho], ...]], ...], sem grupos vazios.
+        def navigation_groups
+          items = navigation.to_h { |label, path| [path, label] }
+          NAVIGATION_GROUPS.filter_map do |group, paths|
+            links = paths.filter_map { |path| [items[path], path] if items.key?(path) }
+            [group, links] unless links.empty?
+          end
+        end
+
+        # Papel de quem está conectado na organização ativa, para o cabeçalho.
+        def session_role_label
+          role = request.actor&.role
+          role ? Domain::Identity.role_label(role) : nil
+        end
+
+        # Iniciais do nome de quem está conectado (até duas letras), para o avatar do cabeçalho.
+        def session_initials
+          words = session_user_name.to_s.split
+          letters = words.length > 1 ? [words.first, words.last] : words
+          letters.map { |word| word[0] }.join.upcase
         end
 
         def nav_class(prefix)
