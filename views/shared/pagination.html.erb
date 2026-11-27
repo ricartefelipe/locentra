@@ -1,13 +1,18 @@
 <%# Locais opcionais: offset_param (padrão "inicio") e label (padrão "Paginação"), para mais de uma lista paginada na mesma página. %>
+<%# Faixa exibida primeiro; Anterior e Próxima ficam sempre na mesma posição (desabilitadas nas pontas). %>
 <% offset_param = @offset_param || "inicio" %>
 <% if @page.total > @page.limit %>
   <nav class="pagination" aria-label="<%= @label || "Paginação" %>">
-    <% if @page.previous_offset %>
-      <a href="<%= url(@base_path, @query.merge(offset_param => @page.previous_offset)) %>">Anterior</a>
-    <% end %>
     <span><%= @page.offset + 1 %>–<%= [@page.offset + @page.limit, @page.total].min %> de <%= @page.total %></span>
+    <% if @page.previous_offset %>
+      <a href="<%= url(@base_path, @query.merge(offset_param => @page.previous_offset)) %>" rel="prev" class="button small">Anterior</a>
+    <% else %>
+      <span class="button small" aria-disabled="true" aria-hidden="true">Anterior</span>
+    <% end %>
     <% if @page.next_offset %>
-      <a href="<%= url(@base_path, @query.merge(offset_param => @page.next_offset)) %>">Próxima</a>
+      <a href="<%= url(@base_path, @query.merge(offset_param => @page.next_offset)) %>" rel="next" class="button small">Próxima</a>
+    <% else %>
+      <span class="button small" aria-disabled="true" aria-hidden="true">Próxima</span>
     <% end %>
   </nav>
 <% end %>

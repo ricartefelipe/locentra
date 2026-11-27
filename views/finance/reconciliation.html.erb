@@ -3,7 +3,8 @@
 <% statuses = { "running" => "Em execução", "completed" => "Concluída", "failed" => "Falhou" } %>
 <header class="page-header">
   <h1>Conciliação de <%= datetime(report["started_at"]) %> <%= finance_badge(report["status"], statuses.fetch(report["status"])) %></h1>
-  <p class="muted">Provedor <%= fin::PROVIDERS.fetch(report["provider"], report["provider"]) %>; pagamentos e cobranças desde <%= datetime(report["window_start"]) %>. <a href="/financeiro">Voltar ao financeiro</a></p>
+  <div class="actions"><a class="button" href="/financeiro">Voltar ao financeiro</a></div>
+  <p class="page-meta"><span>Provedor <%= fin::PROVIDERS.fetch(report["provider"], report["provider"]) %></span><span>Pagamentos e cobranças desde <%= datetime(report["window_start"]) %></span></p>
 </header>
 <% if report["status"] == "failed" %>
   <div class="notice notice-danger" role="alert">A consulta ao provedor falhou: <%= report["error"] %>. Nenhuma alteração foi feita; a próxima execução tenta novamente.</div>
@@ -15,15 +16,20 @@
   <div class="notice notice-danger" role="alert"><%= report["summary"]["legacy_failures"] %> pagamento(s) de contas de provedor desativadas não puderam ser consultados (credencial recusada ou provedor indisponível). Verifique-os no provedor.</div>
 <% end %>
 <% if report["status"] == "completed" %>
+  <% discrepancies = report["summary"]["discrepancies"].to_i %>
   <section class="cards" aria-label="Resumo da conciliação">
     <div class="card"><span class="card-value"><%= report["summary"]["checked"] %></span><span class="card-label">Pagamentos verificados</span></div>
+    <div class="card <%= discrepancies.positive? ? "card-tone-warning" : "card-tone-success" %>"><span class="card-value"><%= discrepancies %></span><span class="card-label">Divergências</span><span class="card-foot"><%= discrepancies.positive? ? "Detalhadas abaixo, por tipo" : "Locentra e provedor conferem" %></span></div>
     <% report["summary"]["by_kind"].each do |kind, total| %>
-      <div class="card"><span class="card-value"><%= total %></span><span class="card-label"><%= fin::Reconciliation::KINDS.fetch(kind) %></span></div>
+      <% next unless total.to_i.positive? %>
+      <div class="card card-tone-warning"><span class="card-value"><%= total %></span><span class="card-label"><%= fin::Reconciliation::KINDS.fetch(kind) %></span></div>
     <% end %>
   </section>
 <% end %>
 <section class="panel" aria-labelledby="titulo-divergencias">
-  <h2 id="titulo-divergencias">Divergências</h2>
+  <header class="panel-header">
+    <h2 id="titulo-divergencias">Divergências<span class="count<%= @data[:items].empty? ? "" : " count-warning" %>"><%= @data[:items].size %></span></h2>
+  </header>
   <% if @data[:items].empty? %>
     <p class="empty">Nenhuma divergência encontrada.</p>
   <% else %>
@@ -34,11 +40,11 @@
         <tbody>
           <% @data[:items].each do |item| %>
             <tr>
-              <td><%= fin::Reconciliation::KINDS.fetch(item["kind"]) %></td>
-              <td><% if item["payment_id"] %><a href="/financeiro/pagamentos/<%= item["payment_id"] %>">ver pagamento</a><% else %><code class="small"><%= item["external_reference"] || "—" %></code><% end %></td>
+              <td><strong><%= fin::Reconciliation::KINDS.fetch(item["kind"]) %></strong></td>
+              <td><% if item["payment_id"] %><a href="/financeiro/pagamentos/<%= item["payment_id"] %>">Ver pagamento</a><% else %><code class="small"><%= item["external_reference"] || "—" %></code><% end %></td>
               <td><code class="small"><%= item["provider_payment_id"] || "—" %></code></td>
-              <td><%= item["local_status"] ? fin::PAYMENT_STATUSES.fetch(item["local_status"], item["local_status"]) : "—" %></td>
-              <td><%= item["remote_status"] ? fin::REMOTE_STATUSES.fetch(item["remote_status"], item["remote_status"]) : "—" %></td>
+              <td><%= item["local_status"] ? finance_badge(item["local_status"], fin::PAYMENT_STATUSES.fetch(item["local_status"], item["local_status"])) : "—" %></td>
+              <td><%= item["remote_status"] ? finance_badge(item["remote_status"], fin::REMOTE_STATUSES.fetch(item["remote_status"], item["remote_status"])) : "—" %></td>
               <td class="num"><%= item["local_amount_cents"] ? money(item["local_amount_cents"]) : "—" %></td>
               <td class="num"><%= item["remote_amount_cents"] ? money(item["remote_amount_cents"]) : "—" %></td>
               <td><%= fin::Reconciliation::ACTIONS.fetch(item["action"]) %></td>

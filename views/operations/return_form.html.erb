@@ -2,71 +2,88 @@
 <% outcomes = Locentra::Domain::Fulfillment::OUTCOMES %>
 <% pending = @data[:lines].select { |l| l["delivered_quantity"] - l["returned_quantity"] - l["missing_quantity"] > 0 } %>
 <header class="page-header">
-  <h1>Devolução da reserva <a href="/reservas/<%= r.id %>"><%= r.code %></a> <%= status_badge(r.status, r.status_label) %></h1>
-  <p class="muted">Cliente: <%= @data[:customer].name %> · Devolução prevista <%= datetime(r.period.ends_at) %></p>
+  <div>
+    <span class="eyebrow">Devolução</span>
+    <h1>Devolução da reserva <a href="/reservas/<%= r.id %>"><%= r.code %></a> <%= status_badge(r.status, r.status_label) %></h1>
+    <p class="page-meta"><span>Cliente: <%= @data[:customer].name %></span><span>Devolução prevista <%= datetime(r.period.ends_at) %></span></p>
+  </div>
 </header>
 <%= partial("shared/errors") %>
-<% if @data[:pickup].nil? %>
-  <p class="empty">A reserva ainda não teve retirada registrada.</p>
-<% elsif pending.empty? %>
-  <p class="empty">Nenhum item pendente de devolução.</p>
-<% else %>
-  <section class="panel" aria-labelledby="h-itens">
-    <h2 id="h-itens">Itens com o cliente</h2>
-    <p class="muted">Selecione o resultado de cada item devolvido agora; itens sem resultado continuam com o cliente (devolução parcial).
-      Avarias seguem para inspeção e geram registro para cobrança; faltas usam o custo de reposição do produto.</p>
-    <form method="post" action="/operacao/reservas/<%= r.id %>/devolucao" class="stack">
-      <%= csrf_field %>
-      <table class="table">
-        <thead><tr><th scope="col">Item</th><th scope="col">Pendente</th><th scope="col">Resultado</th><th scope="col">Quantidade</th><th scope="col">Inspeção</th><th scope="col">Observações</th></tr></thead>
-        <tbody>
-          <% pending.each do |l| %>
-            <% left = l["delivered_quantity"] - l["returned_quantity"] - l["missing_quantity"] %>
-            <tr>
-              <th scope="row"><%= l["product_name"] %> <span class="muted"><%= l["tag"] || l["sku"] %></span></th>
-              <td><%= l["asset_id"] ? "1 ativo" : "#{left} de #{l["delivered_quantity"]} un." %></td>
-              <td>
-                <label for="res-<%= l["id"] %>" class="sr-only">Resultado de <%= l["product_name"] %> <%= l["tag"] %></label>
-                <select id="res-<%= l["id"] %>" name="resultado[<%= l["id"] %>]">
-                  <option value="">Continua com o cliente</option>
-                  <% outcomes.each do |key, label| %><option value="<%= key %>"<%= selected(keyed_value(@values, "resultado", l["id"]), key) %>><%= label %></option><% end %>
-                </select>
-              </td>
-              <td>
-                <% if l["asset_id"] %>
-                  1<input type="hidden" name="quantidade[<%= l["id"] %>]" value="1">
-                <% else %>
-                  <label for="qtd-<%= l["id"] %>" class="sr-only">Quantidade de <%= l["product_name"] %></label>
-                  <input id="qtd-<%= l["id"] %>" name="quantidade[<%= l["id"] %>]" type="number" min="1" max="<%= left %>" value="<%= keyed_value(@values, "quantidade", l["id"]) || left %>">
+<div class="detail-layout">
+  <div class="detail-main">
+    <% if @data[:pickup].nil? %>
+      <p class="empty">A reserva ainda não teve retirada registrada.</p>
+    <% elsif pending.empty? %>
+      <p class="empty">Nenhum item pendente de devolução.</p>
+    <% else %>
+      <section class="panel" aria-labelledby="h-itens">
+        <div class="panel-header">
+          <h2 id="h-itens">Itens com o cliente <span class="count"><%= pending.size %></span></h2>
+        </div>
+        <p class="muted">Selecione o resultado de cada item devolvido agora; itens sem resultado continuam com o cliente (devolução parcial).
+          Avarias seguem para inspeção e geram registro para cobrança; faltas usam o custo de reposição do produto.</p>
+        <form method="post" action="/operacao/reservas/<%= r.id %>/devolucao" class="stack">
+          <%= csrf_field %>
+          <div class="table-scroll">
+            <table class="table">
+              <thead><tr><th scope="col">Item</th><th scope="col">Resultado</th><th scope="col">Quantidade</th><th scope="col">Observações e inspeção</th></tr></thead>
+              <tbody>
+                <% pending.each do |l| %>
+                  <% left = l["delivered_quantity"] - l["returned_quantity"] - l["missing_quantity"] %>
+                  <tr>
+                    <td><strong><%= l["product_name"] %></strong><span class="cell-sub"><span class="mono"><%= l["tag"] || l["sku"] %></span> · pendente: <%= l["asset_id"] ? "1 ativo" : "#{left} de #{l["delivered_quantity"]} un." %></span></td>
+                    <td>
+                      <label for="res-<%= l["id"] %>" class="sr-only">Resultado de <%= l["product_name"] %> <%= l["tag"] %></label>
+                      <select id="res-<%= l["id"] %>" name="resultado[<%= l["id"] %>]">
+                        <option value="">Fica com o cliente</option>
+                        <% outcomes.each do |key, label| %><option value="<%= key %>"<%= selected(keyed_value(@values, "resultado", l["id"]), key) %>><%= label %></option><% end %>
+                      </select>
+                    </td>
+                    <td>
+                      <% if l["asset_id"] %>
+                        1<input type="hidden" name="quantidade[<%= l["id"] %>]" value="1">
+                      <% else %>
+                        <label for="qtd-<%= l["id"] %>" class="sr-only">Quantidade de <%= l["product_name"] %></label>
+                        <input id="qtd-<%= l["id"] %>" name="quantidade[<%= l["id"] %>]" type="number" min="1" max="<%= left %>" value="<%= keyed_value(@values, "quantidade", l["id"]) || left %>">
+                      <% end %>
+                    </td>
+                    <td>
+                      <label for="obs-<%= l["id"] %>" class="sr-only">Observações sobre <%= l["product_name"] %> <%= l["tag"] %></label>
+                      <input id="obs-<%= l["id"] %>" name="observacoes[<%= l["id"] %>]" maxlength="1000" placeholder="Observações" value="<%= keyed_value(@values, "observacoes", l["id"]) %>">
+                      <label class="checkbox"><input type="checkbox" name="inspecao[<%= l["id"] %>]" value="1"<%= checked(keyed_value(@values, "inspecao", l["id"]) == "1") %>> Exige inspeção</label>
+                    </td>
+                  </tr>
                 <% end %>
-              </td>
-              <td><label class="checkbox"><input type="checkbox" name="inspecao[<%= l["id"] %>]" value="1"<%= checked(keyed_value(@values, "inspecao", l["id"]) == "1") %>> Exige inspeção</label></td>
-              <td>
-                <label for="obs-<%= l["id"] %>" class="sr-only">Observações sobre <%= l["product_name"] %> <%= l["tag"] %></label>
-                <input id="obs-<%= l["id"] %>" name="observacoes[<%= l["id"] %>]" maxlength="1000" value="<%= keyed_value(@values, "observacoes", l["id"]) %>">
-              </td>
-            </tr>
-          <% end %>
-        </tbody>
-      </table>
-      <label for="notas">Observações gerais</label>
-      <textarea id="notas" name="notas" rows="2" maxlength="1000"><%= @values["notas"] if @values.is_a?(Hash) %></textarea>
-      <p class="muted">Devoluções após o fim previsto geram multa por atraso calculada com a tabela de preços contratada.</p>
-      <button type="submit" class="primary">Registrar devolução</button>
-    </form>
-  </section>
-<% end %>
-<section class="panel" aria-labelledby="h-anteriores">
-  <h2 id="h-anteriores">Devoluções registradas</h2>
-  <% if @data[:returns].empty? %>
-    <p class="empty">Nenhuma devolução registrada.</p>
-  <% else %>
-    <ul class="row-list">
-      <% @data[:returns].each do |ret| %>
-        <li><a href="/operacao/devolucoes/<%= ret["id"] %>"><%= datetime(ret["returned_at"]) %></a> · <%= ret["lines"] %> item(ns)
-          <% if ret["late_fee_cents"].positive? %> · multa <%= money(ret["late_fee_cents"]) %><% end %>
-          <% if ret["completes_reservation"] %> <%= badge("concluiu a reserva", "success") %><% end %></li>
+              </tbody>
+            </table>
+          </div>
+          <label for="notas">Observações gerais</label>
+          <textarea id="notas" name="notas" rows="2" maxlength="1000"><%= @values["notas"] if @values.is_a?(Hash) %></textarea>
+          <p class="muted small">Devoluções após o fim previsto geram multa por atraso calculada com a tabela de preços contratada.</p>
+          <button type="submit" class="primary">Registrar devolução</button>
+        </form>
+      </section>
+    <% end %>
+  </div>
+  <aside class="detail-aside">
+    <section class="panel" aria-labelledby="h-resumo">
+      <h2 id="h-resumo">Resumo</h2>
+      <dl class="details">
+        <dt>Reserva</dt><dd><a href="/reservas/<%= r.id %>"><%= r.code %></a></dd>
+        <dt>Cliente</dt><dd><%= @data[:customer].name %></dd>
+        <dt>Devolução prevista</dt><dd><%= datetime(r.period.ends_at) %></dd>
+        <dt>Itens pendentes</dt><dd><%= pending.size %></dd>
+      </dl>
+    </section>
+    <section class="panel" aria-labelledby="h-anteriores">
+      <div class="panel-header">
+        <h2 id="h-anteriores">Devoluções registradas <span class="count"><%= @data[:returns].size %></span></h2>
+      </div>
+      <% if @data[:returns].empty? %>
+        <p class="empty">Nenhuma devolução registrada.</p>
+      <% else %>
+        <%= partial("operations/returns_list", returns: @data[:returns]) %>
       <% end %>
-    </ul>
-  <% end %>
-</section>
+    </section>
+  </aside>
+</div>

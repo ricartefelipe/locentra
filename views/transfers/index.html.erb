@@ -4,9 +4,49 @@
   <h1>Transferências entre filiais</h1>
   <p>O item em trânsito não fica disponível em nenhuma filial; o ativo só muda de filial no recebimento.</p>
 </header>
+<%= partial("operations/tabs", current: "/transferencias") %>
 <%= partial("shared/errors") %>
+<section class="panel" aria-labelledby="h-andamento">
+  <div class="panel-header">
+    <h2 id="h-andamento">Em andamento <span class="count<%= " count-warning" unless @active.empty? %>"><%= @active.size %></span></h2>
+  </div>
+  <% if @active.empty? %>
+    <p class="empty">Nenhuma transferência em andamento.</p>
+  <% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th scope="col">Código</th><th scope="col">Item</th><th scope="col">Origem → destino</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead>
+        <tbody>
+          <% @active.each do |t| %>
+            <tr>
+              <td><strong><%= t["code"] %></strong><span class="cell-sub"><%= datetime(t["requested_at"]) %></span></td>
+              <td><%= t["product_name"] %><span class="cell-sub"><%= t["tag"] || "#{t["quantity"]} un." %></span><% if t["notes"] %><span class="cell-sub"><%= t["notes"] %></span><% end %></td>
+              <td><%= t["from_name"] %> → <%= t["to_name"] %></td>
+              <td><%= status_badge(t["status"], statuses.fetch(t["status"])) %><% if t["dispatched_at"] %><span class="cell-sub">saída <%= datetime(t["dispatched_at"]) %></span><% end %></td>
+              <td>
+                <% if editable && t["status"] == "requested" %>
+                  <form method="post" action="/transferencias/<%= t["id"] %>/saida" class="inline"><%= csrf_field %><button type="submit" class="small">Registrar saída</button></form>
+                  <details>
+                    <summary>Cancelar</summary>
+                    <form method="post" action="/transferencias/<%= t["id"] %>/cancelar" class="stack">
+                      <%= csrf_field %>
+                      <label for="motivo-<%= t["id"] %>">Motivo</label><input id="motivo-<%= t["id"] %>" name="motivo" required maxlength="500">
+                      <button type="submit" class="danger small">Cancelar transferência</button>
+                    </form>
+                  </details>
+                <% elsif editable && t["status"] == "in_transit" %>
+                  <form method="post" action="/transferencias/<%= t["id"] %>/recebimento" class="inline"><%= csrf_field %><button type="submit" class="small primary">Registrar recebimento</button></form>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>
 <% if editable && @branches.size < 2 %>
-  <p class="empty">Cadastre outra filial em <a href="/organizacao">Organização</a> para transferir itens.</p>
+  <p class="empty"><span>Cadastre outra filial em <a href="/organizacao">Organização</a> para transferir itens.</span></p>
 <% elsif editable %>
   <div class="grid-2">
     <section class="panel" aria-labelledby="h-ativo">
@@ -18,7 +58,7 @@
         <label for="destino-ativo">Filial de destino</label>
         <select id="destino-ativo" name="destino_id"><%= branch_options(@branches, @values["destino_id"], active_only: true) %></select>
         <label for="obs-ativo">Observações</label><input id="obs-ativo" name="observacoes" maxlength="500">
-        <p class="muted">A saída exige que o ativo não tenha reservas ou bloqueios futuros na origem.</p>
+        <p class="muted small">A saída exige que o ativo não tenha reservas ou bloqueios futuros na origem.</p>
         <button type="submit" class="primary">Solicitar transferência</button>
       </form>
     </section>
@@ -36,59 +76,35 @@
           <label for="destino-estoque">Filial de destino</label>
           <select id="destino-estoque" name="destino_id"><%= branch_options(@branches, @values["destino_id"], active_only: true) %></select>
           <label for="quantidade">Quantidade</label><input id="quantidade" name="quantidade" type="number" min="1" required value="<%= @values["quantidade"] %>">
-          <p class="muted">A quantidade sai da origem na saída, respeitando as reservas futuras, e entra no destino no recebimento.</p>
+          <p class="muted small">A quantidade sai da origem na saída, respeitando as reservas futuras, e entra no destino no recebimento.</p>
           <button type="submit">Solicitar transferência</button>
         </form>
       <% end %>
     </section>
   </div>
 <% end %>
-<section class="panel" aria-labelledby="h-andamento">
-  <h2 id="h-andamento">Em andamento</h2>
-  <% if @active.empty? %>
-    <p class="empty">Nenhuma transferência em andamento.</p>
-  <% else %>
-    <table class="table">
-      <thead><tr><th scope="col">Código</th><th scope="col">Item</th><th scope="col">Origem → destino</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead>
-      <tbody>
-        <% @active.each do |t| %>
-          <tr>
-            <td><%= t["code"] %><br><span class="muted"><%= datetime(t["requested_at"]) %></span></td>
-            <td><%= t["product_name"] %> <span class="muted"><%= t["tag"] || "#{t["quantity"]} un." %></span><% if t["notes"] %><br><span class="muted"><%= t["notes"] %></span><% end %></td>
-            <td><%= t["from_name"] %> → <%= t["to_name"] %></td>
-            <td><%= status_badge(t["status"], statuses.fetch(t["status"])) %><% if t["dispatched_at"] %><br><span class="muted">saída <%= datetime(t["dispatched_at"]) %></span><% end %></td>
-            <td>
-              <% if editable && t["status"] == "requested" %>
-                <form method="post" action="/transferencias/<%= t["id"] %>/saida" class="inline"><%= csrf_field %><button type="submit">Registrar saída</button></form>
-                <details>
-                  <summary>Cancelar</summary>
-                  <form method="post" action="/transferencias/<%= t["id"] %>/cancelar" class="stack">
-                    <%= csrf_field %>
-                    <label for="motivo-<%= t["id"] %>">Motivo</label><input id="motivo-<%= t["id"] %>" name="motivo" required maxlength="500">
-                    <button type="submit" class="danger">Cancelar transferência</button>
-                  </form>
-                </details>
-              <% elsif editable && t["status"] == "in_transit" %>
-                <form method="post" action="/transferencias/<%= t["id"] %>/recebimento" class="inline"><%= csrf_field %><button type="submit" class="primary">Registrar recebimento</button></form>
-              <% end %>
-            </td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
-  <% end %>
-</section>
 <section class="panel" aria-labelledby="h-encerradas">
-  <h2 id="h-encerradas">Encerradas</h2>
+  <div class="panel-header">
+    <h2 id="h-encerradas">Encerradas <span class="count"><%= @closed.size %></span></h2>
+  </div>
   <% if @closed.empty? %>
     <p class="empty">Nenhuma transferência encerrada.</p>
   <% else %>
-    <ul class="row-list">
-      <% @closed.each do |t| %>
-        <li><strong><%= t["code"] %></strong> <%= t["product_name"] %> <%= t["tag"] || "#{t["quantity"]} un." %> · <%= t["from_code"] %> → <%= t["to_code"] %>
-          <%= status_badge(t["status"], statuses.fetch(t["status"])) %> <%= datetime(t["received_at"] || t["cancelled_at"]) %>
-          <% if t["cancellation_reason"] %><span class="muted"><%= t["cancellation_reason"] %></span><% end %></li>
-      <% end %>
-    </ul>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th scope="col">Código</th><th scope="col">Item</th><th scope="col">Origem → destino</th><th scope="col">Situação</th><th scope="col">Encerrada em</th></tr></thead>
+        <tbody>
+          <% @closed.each do |t| %>
+            <tr>
+              <td><strong><%= t["code"] %></strong></td>
+              <td><%= t["product_name"] %><span class="cell-sub"><%= t["tag"] || "#{t["quantity"]} un." %></span></td>
+              <td><%= t["from_code"] %> → <%= t["to_code"] %></td>
+              <td><%= status_badge(t["status"], statuses.fetch(t["status"])) %><% if t["cancellation_reason"] %><span class="cell-sub"><%= t["cancellation_reason"] %></span><% end %></td>
+              <td><%= datetime(t["received_at"] || t["cancelled_at"]) %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
   <% end %>
 </section>

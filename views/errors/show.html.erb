@@ -1,6 +1,8 @@
-<section class="panel narrow">
-  <h1>Erro <%= @status %></h1>
-  <p><%= @message %></p>
+<% heading = { 403 => "Acesso não permitido", 404 => "Página não encontrada", 409 => "Conflito com outra operação", 422 => "Dados inválidos", 429 => "Muitas tentativas" }[@status.to_i] -%>
+<section class="panel narrow" aria-labelledby="erro-titulo">
+  <span class="eyebrow">Erro <%= @status %></span>
+  <h1 id="erro-titulo"><%= heading || "Não foi possível concluir" %></h1>
+  <% unless @message.to_s.strip.downcase.delete(".") == heading.to_s.downcase %><p class="page-meta"><span><%= @message %></span></p><% end %>
   <% if @details && @details["fields"] %>
     <ul>
       <% @details["fields"].each do |field, messages| %>
@@ -8,6 +10,6 @@
       <% end %>
     </ul>
   <% end %>
-  <p class="muted">Referência: <code><%= request.request_id %></code></p>
-  <p><a href="/">Voltar ao início</a></p>
+  <div class="action-row"><a class="button primary" href="/">Voltar ao início</a></div>
+  <p class="muted small links">Referência: <code><%= request.request_id %></code></p>
 </section>

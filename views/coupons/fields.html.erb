@@ -6,17 +6,17 @@
   <%= field_errors(@errors, "descricao") %></div>
 <div><label for="<%= pre %>valido_de">Início da vigência</label>
   <input id="<%= pre %>valido_de" name="valido_de" type="datetime-local" value="<%= @values["valido_de"] %>"<%= invalid(@errors, "valido_de", describedby: "#{pre}ajuda-valido_de") %>>
-  <p class="muted" id="<%= pre %>ajuda-valido_de">Vazio: vale imediatamente. Horário local (<%= time_zone.identifier %>).</p>
+  <p class="muted small" id="<%= pre %>ajuda-valido_de">Vazio: vale imediatamente. Horário local (<%= time_zone.identifier %>).</p>
   <%= field_errors(@errors, "valido_de") %></div>
 <div><label for="<%= pre %>valido_ate">Fim da vigência</label>
   <input id="<%= pre %>valido_ate" name="valido_ate" type="datetime-local" value="<%= @values["valido_ate"] %>"<%= invalid(@errors, "valido_ate", describedby: "#{pre}ajuda-valido_ate") %>>
-  <p class="muted" id="<%= pre %>ajuda-valido_ate">Vazio: sem prazo. O cupom deixa de valer neste instante; para valer o dia 30/11 inteiro, informe 01/12 00:00.</p>
+  <p class="muted small" id="<%= pre %>ajuda-valido_ate">Vazio: sem prazo. O cupom deixa de valer neste instante; para valer o dia 30/11 inteiro, informe 01/12 00:00.</p>
   <%= field_errors(@errors, "valido_ate") %></div>
 <div><label for="<%= pre %>maximo_usos">Máximo de usos</label>
   <input id="<%= pre %>maximo_usos" name="maximo_usos" inputmode="numeric" value="<%= @values["maximo_usos"] %>"<%= invalid(@errors, "maximo_usos", describedby: "#{pre}ajuda-maximo_usos") %>>
-  <p class="muted" id="<%= pre %>ajuda-maximo_usos">Vazio: sem limite.</p>
+  <p class="muted small" id="<%= pre %>ajuda-maximo_usos">Vazio: sem limite.</p>
   <%= field_errors(@errors, "maximo_usos") %></div>
 <div><label for="<%= pre %>subtotal_minimo">Subtotal mínimo (R$)</label>
   <input id="<%= pre %>subtotal_minimo" name="subtotal_minimo" inputmode="decimal" value="<%= @values["subtotal_minimo"] %>"<%= invalid(@errors, "subtotal_minimo", describedby: "#{pre}ajuda-subtotal_minimo") %>>
-  <p class="muted" id="<%= pre %>ajuda-subtotal_minimo">Vazio: sem mínimo. Vale sobre o subtotal dos itens, depois das faixas de quantidade e da condição negociada.</p>
+  <p class="muted small" id="<%= pre %>ajuda-subtotal_minimo">Vazio: sem mínimo. Vale sobre o subtotal dos itens, depois das faixas de quantidade e da condição negociada.</p>
   <%= field_errors(@errors, "subtotal_minimo") %></div>

@@ -1,40 +1,54 @@
 <% r = @reservation %>
 <header class="page-header">
-  <h1>Reserva <%= r.code %> <%= status_badge(r.status, r.status_label) %></h1>
-  <p class="muted"><a href="/portal/reservas">Voltar para minhas reservas</a></p>
+  <div>
+    <a class="eyebrow" href="/portal/reservas">Minhas reservas</a>
+    <h1>Reserva <%= r.code %> <%= status_badge(r.status, r.status_label) %></h1>
+    <p class="page-meta"><span>Retirada <%= datetime(r.period.starts_at) %></span><span>Devolução <%= datetime(r.period.ends_at) %></span></p>
+  </div>
 </header>
 <% if r.requested? %>
   <div class="notice" role="status"><%= Locentra::Domain::Portal::REQUEST_NOTICE %></div>
 <% elsif r.held? %>
   <div class="notice" role="status">Reserva em bloqueio temporário até <%= datetime(r.hold_expires_at) %>, aguardando a confirmação da locadora.</div>
 <% end %>
-<div class="grid-2">
-  <section class="panel" aria-labelledby="periodo-titulo">
-    <h2 id="periodo-titulo">Período</h2>
-    <dl class="details">
-      <dt>Retirada</dt><dd><%= datetime(r.period.starts_at) %></dd>
-      <dt>Devolução</dt><dd><%= datetime(r.period.ends_at) %></dd>
-      <dt>Origem</dt><dd><%= r.source == "portal" ? "Solicitação pelo portal" : "Registrada pela locadora" %></dd>
-      <dt>Observações</dt><dd class="pre"><%= r.notes || "—" %></dd>
-    </dl>
-  </section>
-  <section class="panel" aria-labelledby="itens-titulo">
-    <h2 id="itens-titulo">Itens e valores</h2>
-    <table class="table">
-      <caption class="sr-only">Itens da reserva <%= r.code %></caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th></tr></thead>
-      <tbody>
-        <% @items.each do |item| %>
-          <tr><td><%= item["name"] %></td><td><%= item["quantity"] %></td><td><%= item["pricing"]["description"] %></td>
-            <td><%= negotiated_discount(item) %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
-        <% end %>
-      </tbody>
-    </table>
-    <dl class="details">
-      <%= partial("shared/pricing_summary", pricing: @pricing, items: @items, audience: :customer, total: r.total) %>
-      <dt>Caução prevista</dt><dd><%= money(r.deposit) %></dd>
-    </dl>
-    <p class="muted">Valores calculados pela tabela de preços e pelas condições vigentes no registro da reserva.</p>
-    <%= partial("shared/cancellation_policy", policy: @cancellation_policy, title: "Política de cancelamento desta reserva") %>
-  </section>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="itens-titulo">
+      <div class="panel-header">
+        <h2 id="itens-titulo">Itens <span class="count"><%= @items.size %></span></h2>
+      </div>
+      <div class="table-scroll">
+        <table class="table">
+          <caption class="sr-only">Itens da reserva <%= r.code %></caption>
+          <thead><tr><th scope="col">Item</th><th scope="col" class="num">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th></tr></thead>
+          <tbody>
+            <% @items.each do |item| %>
+              <tr><td><strong><%= item["name"] %></strong></td><td class="num"><%= item["quantity"] %></td><td class="muted"><%= item["pricing"]["description"] %></td>
+                <td><%= negotiated_discount(item) %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="periodo-titulo">
+      <h2 id="periodo-titulo">Período e solicitação</h2>
+      <dl class="details">
+        <dt>Retirada</dt><dd><%= datetime(r.period.starts_at) %></dd>
+        <dt>Devolução</dt><dd><%= datetime(r.period.ends_at) %></dd>
+        <dt>Origem</dt><dd><%= r.source == "portal" ? "Solicitação pelo portal" : "Registrada pela locadora" %></dd>
+        <dt>Observações</dt><dd class="pre"><%= r.notes || "—" %></dd>
+      </dl>
+      <%= partial("shared/cancellation_policy", policy: @cancellation_policy, title: "Política de cancelamento desta reserva") %>
+    </section>
+  </div>
+  <aside class="detail-aside">
+    <section class="panel" aria-labelledby="valores-titulo">
+      <h2 id="valores-titulo">Valores</h2>
+      <dl class="details">
+        <%= partial("shared/pricing_summary", pricing: @pricing, items: @items, audience: :customer, total: r.total) %>
+        <dt>Caução prevista</dt><dd><%= money(r.deposit) %></dd>
+      </dl>
+      <p class="muted small">Valores calculados pela tabela de preços e pelas condições vigentes no registro da reserva.</p>
+    </section>
+  </aside>
 </div>

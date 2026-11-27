@@ -4,94 +4,125 @@
 <% account = @data[:account] %>
 <header class="page-header">
   <h1><%= receivable.description %> <%= finance_badge(balance.status, balance.status_label) %></h1>
-  <p class="muted"><%= receivable.kind_label %> · reserva <a href="/reservas/<%= receivable.reservation_id %>"><%= @data[:reservation]&.code %></a> · vencimento <%= date(receivable.due_on) %></p>
+  <p class="page-meta"><span><%= receivable.kind_label %></span><span>Reserva <a href="/reservas/<%= receivable.reservation_id %>"><%= @data[:reservation]&.code %></a></span><span>Vencimento <%= date(receivable.due_on) %></span></p>
 </header>
 <%= partial("shared/errors") %>
 <% if balance.credit.positive? %>
   <div class="notice notice-danger" role="status">O cliente tem crédito de <strong><%= money(balance.credit) %></strong> nesta cobrança. Registre o reembolso no pagamento correspondente.</div>
 <% end %>
-<div class="grid-2">
-  <section class="panel" aria-labelledby="titulo-saldo">
-    <h2 id="titulo-saldo">Saldo</h2>
-    <dl class="details">
-      <dt>Valor da cobrança</dt><dd><%= money(receivable.amount) %></dd>
-      <dt>Cancelado (compensação)</dt><dd><%= money(balance.cancelled) %></dd>
-      <dt>Pagamentos confirmados</dt><dd><%= money(balance.paid) %></dd>
-      <dt>Reembolsos</dt><dd><%= money(balance.refunded) %></dd>
-      <dt>Caução aplicada</dt><dd><%= money(balance.applied) %></dd>
-      <dt>Saldo em aberto</dt><dd><strong><%= money(balance.outstanding) %></strong></dd>
-    </dl>
-    <% if @data[:cancellation] %>
-      <p class="muted">Cancelada em <%= datetime(@data[:cancellation]["created_at"]) %><%= @data[:cancellation]["created_by_name"] ? " por #{@data[:cancellation]["created_by_name"]}" : "" %>: <%= @data[:cancellation]["reason"] %></p>
-    <% elsif can?("finance.write") %>
-      <details>
-        <summary>Cancelar cobrança (operação compensatória)</summary>
-        <form method="post" action="/financeiro/cobrancas/<%= receivable.id %>/cancelar" class="stack" data-confirm="Cancelar esta cobrança? O valor original é mantido e um lançamento compensatório anula o saldo.">
-          <%= csrf_field %>
-          <label for="motivo-cancelamento">Motivo</label>
-          <input id="motivo-cancelamento" name="motivo" required minlength="3" maxlength="500"<%= invalid(@errors, "motivo") %>>
-          <%= field_errors(@errors, "motivo") %>
-          <button type="submit" class="danger">Cancelar cobrança</button>
-        </form>
-      </details>
-    <% end %>
-  </section>
-  <section class="panel" aria-labelledby="titulo-receber">
-    <h2 id="titulo-receber">Receber</h2>
-    <% if !can?("finance.write") %>
-      <p class="empty">Sem permissão para registrar pagamentos.</p>
-    <% elsif balance.cancelled? || !balance.open_amount.positive? %>
-      <p class="empty">Não há saldo em aberto para receber.</p>
-    <% else %>
-      <form method="post" action="/financeiro/cobrancas/<%= receivable.id %>/pagamentos" class="stack">
-        <%= csrf_field %><%= time_zone_field %>
-        <%= submission_field %>
-        <h3>Registrar pagamento recebido</h3>
-        <label for="metodo-manual">Método</label>
-        <select id="metodo-manual" name="metodo">
-          <% fin::PAYMENT_METHODS.each do |key, label| %><option value="<%= key %>"><%= label %></option><% end %>
-        </select>
-        <label for="valor-manual">Valor (R$)</label>
-        <input id="valor-manual" name="valor" inputmode="decimal" required value="<%= balance.open_amount.to_decimal_string %>"<%= invalid(@errors, "valor") %>>
-        <%= field_errors(@errors, "valor") %>
-        <label for="pago-em">Recebido em (opcional)</label>
-        <input id="pago-em" name="pago_em" type="datetime-local"<%= invalid(@errors, "pago_em") %>>
-        <%= field_errors(@errors, "pago_em") %>
-        <label for="observacoes-manual">Observações</label>
-        <input id="observacoes-manual" name="observacoes" maxlength="500">
-        <button type="submit" class="primary">Registrar pagamento</button>
-      </form>
-      <% if account %>
-        <form method="post" action="/financeiro/cobrancas/<%= receivable.id %>/solicitar" class="stack">
-          <%= csrf_field %>
-          <%= submission_field %>
-          <h3>Cobrar pelo provedor (<%= fin::PROVIDERS.fetch(account["provider"]) %>)</h3>
-          <label for="metodo-provedor">Método</label>
-          <select id="metodo-provedor" name="metodo">
-            <% fin::PROVIDER_METHODS.each do |key| %><option value="<%= key %>"><%= fin::PAYMENT_METHODS.fetch(key) %></option><% end %>
-          </select>
-          <label for="valor-provedor">Valor (R$)</label>
-          <input id="valor-provedor" name="valor" inputmode="decimal" required value="<%= balance.open_amount.to_decimal_string %>">
-          <label for="vencimento">Vencimento</label>
-          <input id="vencimento" name="vencimento" type="date" value="<%= (@today + 3).iso8601 %>"<%= invalid(@errors, "vencimento") %>>
-          <%= field_errors(@errors, "vencimento") %>
-          <% if account["provider"] == "simulator" %>
-            <label for="cenario">Cenário do simulador</label>
-            <select id="cenario" name="cenario">
-              <% fin::SIMULATOR_SCENARIOS.each do |key, label| %><option value="<%= key %>"><%= label %></option><% end %>
-            </select>
-          <% end %>
-          <p class="muted">Cartão é pago na página do provedor: o Locentra não recebe nem armazena dados do cartão.</p>
-          <button type="submit">Enviar cobrança</button>
-        </form>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="titulo-receber">
+      <header class="panel-header">
+        <h2 id="titulo-receber">Receber</h2>
+      </header>
+      <% if !can?("finance.write") %>
+        <p class="empty">Sem permissão para registrar pagamentos.</p>
+      <% elsif balance.cancelled? || !balance.open_amount.positive? %>
+        <p class="empty">Não há saldo em aberto para receber.</p>
       <% else %>
-        <p class="muted">Configure um provedor de pagamentos para cobrar por Pix, boleto ou cartão.</p>
+        <form method="post" action="/financeiro/cobrancas/<%= receivable.id %>/pagamentos" class="form-grid">
+          <%= csrf_field %><%= time_zone_field %>
+          <%= submission_field %>
+          <h3 class="full">Registrar pagamento recebido</h3>
+          <div>
+            <label for="metodo-manual">Método</label>
+            <select id="metodo-manual" name="metodo">
+              <% fin::PAYMENT_METHODS.each do |key, label| %><option value="<%= key %>"><%= label %></option><% end %>
+            </select>
+          </div>
+          <div>
+            <label for="valor-manual">Valor (R$)</label>
+            <input id="valor-manual" name="valor" inputmode="decimal" required value="<%= balance.open_amount.to_decimal_string %>"<%= invalid(@errors, "valor") %>>
+            <%= field_errors(@errors, "valor") %>
+          </div>
+          <div>
+            <label for="pago-em">Recebido em (opcional)</label>
+            <input id="pago-em" name="pago_em" type="datetime-local"<%= invalid(@errors, "pago_em") %>>
+            <%= field_errors(@errors, "pago_em") %>
+          </div>
+          <div>
+            <label for="observacoes-manual">Observações</label>
+            <input id="observacoes-manual" name="observacoes" maxlength="500">
+          </div>
+          <div class="full action-row"><button type="submit" class="primary">Registrar pagamento</button></div>
+        </form>
+        <hr>
+        <% if account %>
+          <form method="post" action="/financeiro/cobrancas/<%= receivable.id %>/solicitar" class="form-grid">
+            <%= csrf_field %>
+            <%= submission_field %>
+            <h3 class="full">Cobrar pelo provedor <%= badge(fin::PROVIDERS.fetch(account["provider"]), "info") %></h3>
+            <div>
+              <label for="metodo-provedor">Método</label>
+              <select id="metodo-provedor" name="metodo">
+                <% fin::PROVIDER_METHODS.each do |key| %><option value="<%= key %>"><%= fin::PAYMENT_METHODS.fetch(key) %></option><% end %>
+              </select>
+            </div>
+            <div>
+              <label for="valor-provedor">Valor (R$)</label>
+              <input id="valor-provedor" name="valor" inputmode="decimal" required value="<%= balance.open_amount.to_decimal_string %>">
+            </div>
+            <div>
+              <label for="vencimento">Vencimento</label>
+              <input id="vencimento" name="vencimento" type="date" value="<%= (@today + 3).iso8601 %>"<%= invalid(@errors, "vencimento") %>>
+              <%= field_errors(@errors, "vencimento") %>
+            </div>
+            <% if account["provider"] == "simulator" %>
+              <div>
+                <label for="cenario">Cenário do simulador</label>
+                <select id="cenario" name="cenario">
+                  <% fin::SIMULATOR_SCENARIOS.each do |key, label| %><option value="<%= key %>"><%= label %></option><% end %>
+                </select>
+              </div>
+            <% end %>
+            <p class="full muted small">Cartão é pago na página do provedor: o Locentra não recebe nem armazena dados do cartão.</p>
+            <div class="full action-row"><button type="submit">Enviar cobrança</button></div>
+          </form>
+        <% else %>
+          <p class="muted">Configure um provedor de pagamentos para cobrar por Pix, boleto ou cartão.</p>
+        <% end %>
       <% end %>
+    </section>
+    <section class="panel" aria-labelledby="titulo-pagamentos-cobranca">
+      <header class="panel-header">
+        <h2 id="titulo-pagamentos-cobranca">Pagamentos desta cobrança<span class="count"><%= @data[:payments].size %></span></h2>
+      </header>
+      <%= partial("finance/payments_table", rows: @data[:payments], compact: true) %>
+    </section>
+    <%= partial("finance/journal", entries: @data[:entries]) %>
+  </div>
+  <aside class="detail-aside" aria-label="Resumo da cobrança">
+    <section class="panel" aria-labelledby="titulo-saldo">
+      <h2 id="titulo-saldo">Saldo</h2>
+      <dl class="details">
+        <dt>Valor da cobrança</dt><dd><%= money(receivable.amount) %></dd>
+        <dt>Cancelado (compensação)</dt><dd><%= money(balance.cancelled) %></dd>
+        <dt>Pagamentos confirmados</dt><dd><%= money(balance.paid) %></dd>
+        <dt>Reembolsos</dt><dd><%= money(balance.refunded) %></dd>
+        <dt>Caução aplicada</dt><dd><%= money(balance.applied) %></dd>
+      </dl>
+      <p class="amount"><span class="amount-label">Saldo em aberto</span><strong><%= money(balance.outstanding) %></strong></p>
+    </section>
+    <% if @data[:cancellation] %>
+      <section class="panel" aria-labelledby="titulo-cancelamento">
+        <h2 id="titulo-cancelamento">Cancelamento</h2>
+        <p class="muted">Cancelada em <%= datetime(@data[:cancellation]["created_at"]) %><%= @data[:cancellation]["created_by_name"] ? " por #{@data[:cancellation]["created_by_name"]}" : "" %>: <%= @data[:cancellation]["reason"] %></p>
+      </section>
+    <% elsif can?("finance.write") %>
+      <section class="panel" aria-labelledby="titulo-cancelamento">
+        <h2 id="titulo-cancelamento">Cancelamento</h2>
+        <details>
+          <summary>Cancelar cobrança (operação compensatória)</summary>
+          <form method="post" action="/financeiro/cobrancas/<%= receivable.id %>/cancelar" class="stack" data-confirm="Cancelar esta cobrança? O valor original é mantido e um lançamento compensatório anula o saldo.">
+            <%= csrf_field %>
+            <label for="motivo-cancelamento">Motivo</label>
+            <input id="motivo-cancelamento" name="motivo" required minlength="3" maxlength="500"<%= invalid(@errors, "motivo") %>>
+            <%= field_errors(@errors, "motivo") %>
+            <button type="submit" class="danger">Cancelar cobrança</button>
+          </form>
+        </details>
+      </section>
     <% end %>
-  </section>
+  </aside>
 </div>
-<section class="panel" aria-labelledby="titulo-pagamentos-cobranca">
-  <h2 id="titulo-pagamentos-cobranca">Pagamentos desta cobrança</h2>
-  <%= partial("finance/payments_table", rows: @data[:payments]) %>
-</section>
-<%= partial("finance/journal", entries: @data[:entries]) %>

@@ -1,4 +1,16 @@
-<header class="page-header"><h1>Usuários e permissões</h1></header>
+<% members = @data[:members] -%>
+<% invitations = @data[:invitations] -%>
+<% active_members = members.count { |m| m["status"] == "active" } -%>
+<% can_invite = can?("members.manage") && !@roles.empty? -%>
+<header class="page-header">
+  <div>
+    <h1>Usuários e permissões</h1>
+    <p class="page-meta"><span><%= count_text(active_members, "membro ativo", "membros ativos") %></span><span><%= count_text(invitations.size, "convite pendente", "convites pendentes") %></span></p>
+  </div>
+  <% if can_invite %>
+    <div class="actions"><a class="button primary" href="#convidar">Convidar membro</a></div>
+  <% end %>
+</header>
 <%= partial("shared/errors") %>
 <% if @token %>
   <div class="notice" role="status">
@@ -6,89 +18,125 @@
     <p><code class="token" data-copy><%= @token %></code></p>
   </div>
 <% end %>
-<section class="panel">
-  <h2>Membros</h2>
-  <table class="table">
-    <thead><tr><th scope="col">Nome</th><th scope="col">E-mail</th><th scope="col">Papel</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead>
-    <tbody>
-      <% @data[:members].each do |m| %>
-        <tr>
-          <td><%= m["name"] %></td><td><%= m["email"] %></td>
-          <td><%= Locentra::Domain::Identity.role_label(m["role"]) %></td>
-          <td><%= status_badge(m["status"], m["status"] == "active" ? "Ativo" : "Revogado") %></td>
-          <td>
-            <% if can?("members.manage") && m["status"] == "active" && m["role"] != "owner" && m["user_id"] != request.actor.user_id %>
-              <form method="post" action="/usuarios/<%= m["id"] %>/papel" class="inline">
-                <%= csrf_field %>
-                <label class="sr-only" for="papel-<%= m["id"] %>">Papel de <%= m["name"] %></label>
-                <select id="papel-<%= m["id"] %>" name="papel"><% @roles.each do |role| %><option value="<%= role %>"<%= selected(m["role"], role) %>><%= Locentra::Domain::Identity.role_label(role) %></option><% end %></select>
-                <button type="submit">Alterar</button>
-              </form>
-              <form method="post" action="/usuarios/<%= m["id"] %>/revogar" class="inline" data-confirm="Revogar o acesso de <%= m["name"] %>? As sessões abertas nesta organização serão encerradas.">
-                <%= csrf_field %><button type="submit" class="danger">Revogar acesso</button>
-              </form>
-            <% end %>
-          </td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
-  <% unless @data[:invitations].empty? %>
-    <h3>Convites pendentes</h3>
-    <ul class="row-list"><% @data[:invitations].each do |i| %><li><%= i["email"] %> · <%= Locentra::Domain::Identity.role_label(i["role"]) %> · expira em <%= datetime(i["expires_at"]) %></li><% end %></ul>
-  <% end %>
-  <% if can?("members.manage") && !@roles.empty? %>
-    <form method="post" action="/usuarios/convites" class="filters">
-      <%= csrf_field %>
-      <label for="email">Convidar e-mail</label><input id="email" name="email" type="email" required>
-      <label for="papel">Papel</label>
-      <select id="papel" name="papel"><% @roles.each do |role| %><option value="<%= role %>"><%= Locentra::Domain::Identity.role_label(role) %></option><% end %></select>
-      <button type="submit" class="primary">Enviar convite</button>
-    </form>
-  <% end %>
-</section>
-<section class="panel">
-  <h2>Matriz de permissões</h2>
-  <div class="table-scroll" tabindex="0" role="region" aria-label="Matriz de permissões">
-    <table class="table matrix">
-      <thead><tr><th scope="col">Permissão</th><% Locentra::Domain::Identity::ROLES.each_value do |label| %><th scope="col"><%= label %></th><% end %></tr></thead>
+<section class="panel" aria-labelledby="membros-titulo">
+  <div class="panel-header">
+    <h2 id="membros-titulo">Membros <span class="count"><%= members.size %></span></h2>
+  </div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead><tr><th scope="col">Nome</th><th scope="col">Papel</th><th scope="col">Situação</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
       <tbody>
-        <% Locentra::Domain::Identity::PERMISSIONS.each do |permission, roles| %>
-          <tr><th scope="row"><code><%= permission %></code></th>
-            <% Locentra::Domain::Identity::ROLES.each_key do |role| %><td><%= roles.include?(role) ? "✓" : "" %><span class="sr-only"><%= roles.include?(role) ? "permitido" : "não permitido" %></span></td><% end %></tr>
+        <% members.each do |m| %>
+          <tr>
+            <td><strong><%= m["name"] %></strong><span class="cell-sub"><%= m["email"] %></span></td>
+            <td><%= Locentra::Domain::Identity.role_label(m["role"]) %></td>
+            <td><%= status_badge(m["status"], m["status"] == "active" ? "Ativo" : "Revogado") %></td>
+            <td>
+              <% if can?("members.manage") && m["status"] == "active" && m["role"] != "owner" && m["user_id"] != request.actor.user_id %>
+                <div class="actions">
+                  <form method="post" action="/usuarios/<%= m["id"] %>/papel" class="inline">
+                    <%= csrf_field %>
+                    <label class="sr-only" for="papel-<%= m["id"] %>">Papel de <%= m["name"] %></label>
+                    <select id="papel-<%= m["id"] %>" name="papel"><% @roles.each do |role| %><option value="<%= role %>"<%= selected(m["role"], role) %>><%= Locentra::Domain::Identity.role_label(role) %></option><% end %></select>
+                    <button type="submit" class="small">Alterar</button>
+                  </form>
+                  <form method="post" action="/usuarios/<%= m["id"] %>/revogar" class="inline" data-confirm="Revogar o acesso de <%= m["name"] %>? As sessões abertas nesta organização serão encerradas.">
+                    <%= csrf_field %><button type="submit" class="small danger">Revogar acesso</button>
+                  </form>
+                </div>
+              <% end %>
+            </td>
+          </tr>
         <% end %>
       </tbody>
     </table>
   </div>
 </section>
+<% if !invitations.empty? || can_invite %>
+  <section class="panel" aria-labelledby="convites-titulo">
+    <div class="panel-header">
+      <h2 id="convites-titulo">Convites pendentes <span class="count"><%= invitations.size %></span></h2>
+    </div>
+    <% if invitations.empty? %>
+      <p class="empty">Nenhum convite pendente.</p>
+    <% else %>
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th scope="col">E-mail</th><th scope="col">Papel</th><th scope="col">Expira em</th></tr></thead>
+          <tbody>
+            <% invitations.each do |i| %>
+              <tr><td><%= i["email"] %></td><td><%= Locentra::Domain::Identity.role_label(i["role"]) %></td><td><%= datetime(i["expires_at"]) %></td></tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+    <% if can_invite %>
+      <h3 id="convidar">Convidar para a equipe</h3>
+      <form method="post" action="/usuarios/convites" class="filters" aria-labelledby="convidar">
+        <%= csrf_field %>
+        <label for="email">Convidar e-mail</label><input id="email" name="email" type="email" required placeholder="nome@empresa.com.br">
+        <label for="papel">Papel</label>
+        <select id="papel" name="papel"><% @roles.each do |role| %><option value="<%= role %>"><%= Locentra::Domain::Identity.role_label(role) %></option><% end %></select>
+        <button type="submit" class="primary">Enviar convite</button>
+      </form>
+    <% end %>
+  </section>
+<% end %>
 <% if can?("integrations.manage") %>
-  <section class="panel">
-    <h2>Credenciais de integração (API e CLI)</h2>
+  <section class="panel" aria-labelledby="credenciais-titulo">
+    <div class="panel-header">
+      <h2 id="credenciais-titulo">Credenciais de integração (API e CLI) <span class="count"><%= @credentials.size %></span></h2>
+    </div>
     <% if @credentials.empty? %><p class="empty">Nenhuma credencial.</p><% else %>
-      <table class="table">
-        <thead><tr><th scope="col">Nome</th><th scope="col">Tipo</th><th scope="col">Token</th><th scope="col">Escopos</th><th scope="col">Validade</th><th scope="col">Último uso</th><th scope="col"></th></tr></thead>
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th scope="col">Nome</th><th scope="col">Token</th><th scope="col">Escopos</th><th scope="col">Validade</th><th scope="col">Último uso</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
+          <tbody>
+            <% @credentials.each do |c| %>
+              <tr><td><strong><%= c["name"] %></strong><span class="cell-sub"><%= c["kind"] == "cli" ? "CLI operacional" : "API" %></span></td><td><code><%= c["token_hint"] %></code></td>
+                <td><% Array(c["scopes"]).each do |scope| %><code><%= scope %></code> <% end %></td>
+                <td><%= c["revoked_at"] ? badge("Revogada", "muted") : datetime(c["expires_at"]) %></td><td><%= c["last_used_at"] ? datetime(c["last_used_at"]) : "—" %></td>
+                <td class="num"><% unless c["revoked_at"] %><form method="post" action="/credenciais/<%= c["id"] %>/revogar" class="inline"><%= csrf_field %><button type="submit" class="small danger">Revogar</button></form><% end %></td></tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+    <details>
+      <summary>Nova credencial</summary>
+      <form method="post" action="/credenciais" class="form-grid">
+        <%= csrf_field %>
+        <div><label for="c-nome">Nome</label><input id="c-nome" name="nome" required></div>
+        <div><label for="c-tipo">Tipo</label><select id="c-tipo" name="tipo"><option value="api">API</option><option value="cli">CLI operacional</option></select></div>
+        <div><label for="c-validade">Validade (dias)</label><input id="c-validade" name="validade" type="number" min="1" max="365" value="90"></div>
+        <fieldset class="full"><legend>Escopos</legend>
+          <div class="checkbox-grid">
+            <% Locentra::Domain::Identity.permissions_for(request.actor.role).each do |permission| %>
+              <label class="checkbox"><input type="checkbox" name="escopos[]" value="<%= permission %>"> <code><%= permission %></code></label>
+            <% end %>
+          </div>
+        </fieldset>
+        <div class="full actions"><button type="submit" class="primary">Criar credencial</button></div>
+      </form>
+    </details>
+  </section>
+<% end %>
+<section class="panel" aria-labelledby="matriz-titulo">
+  <h2 id="matriz-titulo">Matriz de permissões</h2>
+  <p class="muted small">O que cada papel pode fazer nesta organização. Credenciais de integração recebem apenas os escopos escolhidos na criação.</p>
+  <details>
+    <summary>Ver a matriz completa</summary>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Matriz de permissões">
+      <table class="table matrix">
+        <thead><tr><th scope="col">Permissão</th><% Locentra::Domain::Identity::ROLES.each_value do |label| %><th scope="col"><%= label %></th><% end %></tr></thead>
         <tbody>
-          <% @credentials.each do |c| %>
-            <tr><td><%= c["name"] %></td><td><%= c["kind"] %></td><td><code><%= c["token_hint"] %></code></td><td><%= Array(c["scopes"]).join(", ") %></td>
-              <td><%= c["revoked_at"] ? "revogada" : datetime(c["expires_at"]) %></td><td><%= datetime(c["last_used_at"]) %></td>
-              <td><% unless c["revoked_at"] %><form method="post" action="/credenciais/<%= c["id"] %>/revogar" class="inline"><%= csrf_field %><button type="submit" class="danger">Revogar</button></form><% end %></td></tr>
+          <% Locentra::Domain::Identity::PERMISSIONS.each do |permission, roles| %>
+            <tr><th scope="row"><code><%= permission %></code></th>
+              <% Locentra::Domain::Identity::ROLES.each_key do |role| %><td><%= roles.include?(role) ? "✓" : "" %><span class="sr-only"><%= roles.include?(role) ? "permitido" : "não permitido" %></span></td><% end %></tr>
           <% end %>
         </tbody>
       </table>
-    <% end %>
-    <form method="post" action="/credenciais" class="stack">
-      <%= csrf_field %>
-      <label for="c-nome">Nome</label><input id="c-nome" name="nome" required>
-      <label for="c-tipo">Tipo</label><select id="c-tipo" name="tipo"><option value="api">API</option><option value="cli">CLI operacional</option></select>
-      <label for="c-validade">Validade (dias)</label><input id="c-validade" name="validade" type="number" min="1" max="365" value="90">
-      <fieldset><legend>Escopos</legend>
-        <div class="checkbox-grid">
-          <% Locentra::Domain::Identity.permissions_for(request.actor.role).each do |permission| %>
-            <label class="checkbox"><input type="checkbox" name="escopos[]" value="<%= permission %>"> <code><%= permission %></code></label>
-          <% end %>
-        </div>
-      </fieldset>
-      <button type="submit">Criar credencial</button>
-    </form>
-  </section>
-<% end %>
+    </div>
+  </details>
+</section>

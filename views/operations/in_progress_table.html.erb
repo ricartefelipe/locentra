@@ -1,17 +1,19 @@
 <% if @rows.empty? %>
   <p class="empty"><%= @empty %></p>
 <% else %>
-  <table class="table">
-    <thead><tr><th scope="col">Reserva</th><th scope="col">Cliente</th><th scope="col">Devolução prevista</th><th scope="col">Ação</th></tr></thead>
-    <tbody>
-      <% @rows.each do |row| %>
-        <tr>
-          <td><a href="/reservas/<%= row["id"] %>"><%= row["code"] %></a></td>
-          <td><%= row["customer_name"] %></td>
-          <td><%= datetime(row["ends_at"]) %><% if row["overdue_since"] %> <%= badge("em atraso", "danger") %><% end %></td>
-          <td><% if can?("fulfillment.write") %><a href="/operacao/reservas/<%= row["id"] %>/devolucao">Registrar devolução</a><% end %></td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
+  <ul class="agenda">
+    <% @rows.each do |row| %>
+      <li>
+        <div class="agenda-row">
+          <span class="agenda-when"><strong><time><%= datetime(row["ends_at"], "%H:%M") %></time></strong><span><%= datetime(row["ends_at"], "%d/%m") %></span></span>
+          <span class="agenda-main">
+            <a href="/reservas/<%= row["id"] %>"><strong><%= row["code"] %></strong></a>
+            <span class="muted"><%= row["customer_name"] %></span>
+            <% if row["overdue_since"] %><span><%= badge("Em atraso", "danger") %></span><% end %>
+          </span>
+          <span class="agenda-side"><% if can?("fulfillment.write") %><a class="button small" href="/operacao/reservas/<%= row["id"] %>/devolucao">Registrar devolução</a><% end %></span>
+        </div>
+      </li>
+    <% end %>
+  </ul>
 <% end %>

@@ -1,5 +1,10 @@
+<header class="page-header">
+  <div>
+    <span class="eyebrow">Confirmação de e-mail</span>
+    <h1 id="titulo-corrigir-email">Corrigir e-mail</h1>
+  </div>
+</header>
 <section class="panel narrow" aria-labelledby="titulo-corrigir-email">
-  <h1 id="titulo-corrigir-email">Corrigir e-mail</h1>
   <p>O link de confirmação foi enviado para <strong><%= request.session["email"] %></strong>. Se o endereço está errado,
     informe o correto e a senha atual: enviaremos um novo link e os anteriores deixam de valer.</p>
   <%= partial("shared/errors") %>
@@ -11,6 +16,9 @@
     <label for="senha">Senha atual</label>
     <input id="senha" name="senha" type="password" autocomplete="current-password" required<%= invalid(@errors, "senha") %>>
     <%= field_errors(@errors, "senha") %>
-    <button type="submit" class="primary">Corrigir e enviar confirmação</button>
+    <div class="actions">
+      <button type="submit" class="primary">Corrigir e enviar confirmação</button>
+      <a class="button ghost" href="/">Cancelar</a>
+    </div>
   </form>
 </section>

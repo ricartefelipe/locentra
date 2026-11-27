@@ -1,140 +1,166 @@
 <% q = @data[:quote] %>
 <% v = @selected %>
 <% current = @data[:current] %>
+<% writer = can?("quotes.write") %>
+<% can_convert = q.status == "approved" && can?("reservations.write") %>
 <header class="page-header">
   <h1>Orçamento <%= q.code %> <%= status_badge(q.status, q.status_label) %></h1>
-  <p class="muted">Cliente: <a href="/clientes/<%= q.customer_id %>"><%= @data[:customer].name %></a> · versão atual <%= q.current_version %></p>
+  <% if writer && (q.status == "draft" || q.revisable? || can_convert) %>
+    <div class="actions">
+      <% if q.revisable? %><a class="button" href="/orcamentos/<%= q.id %>/nova-versao">Nova versão</a><% end %>
+      <% if q.status == "draft" %>
+        <form method="post" action="/orcamentos/<%= q.id %>/enviar"><%= csrf_field %><button type="submit" class="primary">Enviar versão <%= q.current_version %> ao cliente</button></form>
+      <% end %>
+      <% if can_convert %>
+        <form method="post" action="/orcamentos/<%= q.id %>/converter"><%= csrf_field %><button type="submit" class="primary">Converter em reserva</button></form>
+      <% end %>
+    </div>
+  <% end %>
+  <p class="page-meta"><span>Cliente <a href="/clientes/<%= q.customer_id %>"><%= @data[:customer].name %></a></span><span>Versão atual <%= q.current_version %></span><% if %w[draft sent].include?(q.status) %><span>Válido até <%= datetime(current.valid_until) %></span><% end %><% if @data[:reservation] %><span>Reserva <a href="/reservas/<%= @data[:reservation].id %>"><%= @data[:reservation].code %></a></span><% end %></p>
 </header>
 <%= partial("shared/errors") %>
 <%= partial("shared/shortages") %>
-<% if q.hold_on_send? %>
-  <div class="notice" role="status">
-    Política de bloqueio: <strong>bloqueio temporário ao enviar</strong> (<%= q.hold_minutes %> minutos).
-    <% if @data[:hold] %>
-      <% hold = @data[:hold] %>
-      Reserva vinculada <a href="/reservas/<%= hold.id %>"><%= hold.code %></a> (<%= hold.status_label %><% if hold.held? %>, válida até <%= datetime(hold.hold_expires_at) %><% end %>).
-      <% if hold.held? && !hold.hold_valid?(@now) %> O bloqueio venceu e a disponibilidade não está mais garantida.<% end %>
-    <% else %>
-      O bloqueio é criado no envio e garante a disponibilidade somente enquanto estiver vigente.
-    <% end %>
-  </div>
-<% elsif %w[draft sent approved].include?(q.status) %>
-  <div class="notice" role="status">Política de bloqueio: <strong>sem bloqueio</strong>. Este orçamento <strong>não garante disponibilidade</strong>; ela é verificada somente na conversão em reserva.</div>
-<% end %>
 <% if q.status == "sent" && current.expired?(@now) %>
   <div class="notice notice-danger" role="status">A validade da versão <%= current.number %> terminou em <%= datetime(current.valid_until) %>. Crie uma nova versão para renovar a proposta.</div>
 <% end %>
-<div class="grid-2">
-  <section class="panel" aria-labelledby="versao-titulo">
-    <h2 id="versao-titulo">Versão <%= v.number %><%= v.number == q.current_version ? " (atual)" : "" %></h2>
-    <% if v.number != q.current_version %><p class="notice" role="status">Você está vendo uma versão anterior. <a href="/orcamentos/<%= q.id %>">Ver a versão atual</a>.</p><% end %>
-    <dl class="details">
-      <dt>Retirada</dt><dd><%= datetime(v.period.starts_at) %></dd>
-      <dt>Devolução</dt><dd><%= datetime(v.period.ends_at) %></dd>
-      <dt>Validade</dt><dd><%= datetime(v.valid_until) %><% if v.expired?(@now) %> <%= badge("vencida", "danger") %><% end %></dd>
-      <dt>Criada em</dt><dd><%= datetime(v.created_at) %></dd>
-      <dt>Enviada ao cliente</dt><dd><%= v.sent? ? datetime(v.sent_at) : "não enviada (interna)" %></dd>
-      <dt>Condições</dt><dd class="pre"><%= v.terms || "—" %></dd>
-    </dl>
-    <table class="table">
-      <caption class="sr-only">Itens da versão <%= v.number %></caption>
-      <thead><tr><th scope="col">Item</th><th scope="col">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th></tr></thead>
-      <tbody>
-        <% v.items.each do |item| %>
-          <tr><td><%= item["name"] %> <span class="muted"><%= item["sku"] %></span></td><td><%= item["quantity"] %></td><td><%= item["description"] %></td>
-            <td><%= negotiated_discount(item) %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
-        <% end %>
-      </tbody>
-    </table>
-    <dl class="details">
-      <%= partial("shared/pricing_summary", pricing: v.pricing, items: v.items, audience: :staff, total: v.total) %>
-      <dt>Caução prevista</dt><dd><%= money(v.deposit) %></dd>
-    </dl>
-    <p class="muted">Preços calculados em <%= v.pricing["priced_at"] ? datetime(Time.iso8601(v.pricing["priced_at"])) : "—" %> e congelados nesta versão; a conversão em reserva usa estes valores.</p>
-    <%= partial("shared/cancellation_policy", policy: v.cancellation_policy, title: "Política de cancelamento desta versão") %>
-  </section>
-  <section class="panel" aria-labelledby="acoes-titulo">
-    <h2 id="acoes-titulo">Situação e ações</h2>
-    <dl class="details">
-      <dt>Situação</dt><dd><%= q.status_label %></dd>
-      <% if q.sent_at %><dt>Enviado em</dt><dd><%= datetime(q.sent_at) %></dd><% end %>
-      <% if q.approved_at %>
-        <dt>Versão aprovada</dt><dd><%= q.approved_version %></dd>
-        <dt>Aprovado por</dt><dd><%= q.approved_by_name %> (<%= q.approver_label %>)</dd>
-        <dt>Instante e IP</dt><dd><%= datetime(q.approved_at) %> · <%= q.approved_ip || "IP não informado" %></dd>
-      <% end %>
-      <% if q.rejected_at %><dt>Rejeitado em</dt><dd><%= datetime(q.rejected_at) %> · <%= q.rejection_reason %></dd><% end %>
-      <% if q.expired_at %><dt>Expirado em</dt><dd><%= datetime(q.expired_at) %></dd><% end %>
-      <% if @data[:reservation] %><dt>Reserva</dt><dd><a href="/reservas/<%= @data[:reservation].id %>"><%= @data[:reservation].code %></a> (<%= @data[:reservation].status_label %>)</dd><% end %>
-    </dl>
-    <% if can?("quotes.write") %>
-      <div class="action-row">
-        <% if q.status == "draft" %>
-          <form method="post" action="/orcamentos/<%= q.id %>/enviar"><%= csrf_field %><button type="submit" class="primary">Enviar versão <%= q.current_version %> ao cliente</button></form>
-        <% end %>
-        <% if q.revisable? %><a class="button" href="/orcamentos/<%= q.id %>/nova-versao">Nova versão</a><% end %>
-        <% if q.status == "approved" && can?("reservations.write") %>
-          <form method="post" action="/orcamentos/<%= q.id %>/converter"><%= csrf_field %><button type="submit" class="primary">Converter em reserva</button></form>
-        <% end %>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="versao-titulo">
+      <h2 id="versao-titulo">Versão <%= v.number %><% if v.number == q.current_version %> <%= badge("atual", "info") %><% end %><% if v.number == q.approved_version %> <%= badge("aprovada", "success") %><% end %></h2>
+      <% if v.number != q.current_version %><p class="notice" role="status">Você está vendo uma versão anterior. <a href="/orcamentos/<%= q.id %>">Ver a versão atual</a>.</p><% end %>
+      <dl class="details">
+        <dt>Criada em</dt><dd><%= datetime(v.created_at) %></dd>
+        <dt>Enviada ao cliente</dt><dd><%= v.sent? ? datetime(v.sent_at) : "não enviada (interna)" %></dd>
+      </dl>
+      <table class="table">
+        <caption class="sr-only">Itens da versão <%= v.number %></caption>
+        <thead><tr><th scope="col">Item</th><th scope="col" class="num">Qtd.</th><th scope="col">Cobrança</th><th scope="col">Condição</th><th scope="col" class="num">Total</th></tr></thead>
+        <tbody>
+          <% v.items.each do |item| %>
+            <tr><td><%= item["name"] %><span class="cell-sub mono"><%= item["sku"] %></span></td><td class="num"><%= item["quantity"] %></td><td><%= item["description"] %></td>
+              <td><%= negotiated_discount(item) %></td><td class="num"><%= money(item["total_cents"]) %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+      <h3>Valores</h3>
+      <dl class="details">
+        <%= partial("shared/pricing_summary", pricing: v.pricing, items: v.items, audience: :staff, total: v.total) %>
+      </dl>
+      <p class="muted small">Preços calculados em <%= v.pricing["priced_at"] ? datetime(Time.iso8601(v.pricing["priced_at"])) : "—" %> e congelados nesta versão; a conversão em reserva usa estes valores.</p>
+      <h3>Condições e termos</h3>
+      <p class="pre"><%= v.terms || "—" %></p>
+      <%= partial("shared/cancellation_policy", policy: v.cancellation_policy, title: "Política de cancelamento desta versão") %>
+    </section>
+    <section class="panel" aria-labelledby="versoes-titulo">
+      <h2 id="versoes-titulo">Versões <span class="count"><%= @data[:versions].size %></span></h2>
+      <p class="muted small">Versões são imutáveis: alterações criam uma nova versão. Versões não enviadas são internas e não ficam visíveis para o cliente.</p>
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th scope="col">Versão</th><th scope="col">Período</th><th scope="col">Criada em</th><th scope="col">Validade</th><th scope="col" class="num">Total</th></tr></thead>
+          <tbody>
+            <% @data[:versions].each do |version| %>
+              <tr>
+                <td><a href="/orcamentos/<%= q.id %>?versao=<%= version.number %>"<%= version.number == v.number ? raw(' aria-current="true"') : raw("") %>>Versão <%= version.number %></a>
+                  <% if version.number == q.current_version %><%= badge("atual", "info") %><% end %><% if version.number == q.approved_version %><%= badge("aprovada", "success") %><% end %></td>
+                <td><%= datetime(version.period.starts_at) %><span class="cell-sub">até <%= datetime(version.period.ends_at) %></span></td>
+                <td><%= datetime(version.created_at) %><span class="cell-sub"><%= version.sent? ? "enviada em #{datetime(version.sent_at)}" : "interna, sem envio" %></span></td>
+                <td><%= datetime(version.valid_until) %></td>
+                <td class="num"><%= money(version.total) %></td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
       </div>
-      <% if q.status == "approved" && !q.hold_on_send? %><p class="muted">A conversão verifica a disponibilidade agora: o orçamento enviado sem bloqueio não a garantia.</p><% end %>
-      <% if q.status == "sent" %>
-        <details<%= open_if(@errors, "aprovado_por", "versao") %>>
-          <summary>Registrar aprovação do cliente</summary>
-          <form method="post" action="/orcamentos/<%= q.id %>/aprovar" class="stack">
-            <%= csrf_field %>
-            <input type="hidden" name="versao" value="<%= q.current_version %>">
-            <p>A aprovação vale para a <strong>versão <%= q.current_version %></strong> (total <%= money(current.total) %>), dentro da validade.</p>
-            <label for="aprovado_por">Nome de quem aprovou pelo cliente</label>
-            <input id="aprovado_por" name="aprovado_por" required maxlength="160"<%= invalid(@errors, "aprovado_por") %>>
-            <%= field_errors(@errors, "aprovado_por") %>
-            <p class="muted">Serão registrados o seu usuário, o IP desta requisição e o instante da aprovação.</p>
-            <button type="submit" class="primary">Registrar aprovação</button>
-          </form>
-        </details>
-        <details<%= open_if(@errors, "motivo") %>>
-          <summary>Registrar rejeição</summary>
-          <form method="post" action="/orcamentos/<%= q.id %>/rejeitar" class="stack">
-            <%= csrf_field %>
-            <input type="hidden" name="versao" value="<%= q.current_version %>">
-            <label for="motivo-rejeicao">Motivo</label>
-            <input id="motivo-rejeicao" name="motivo" required maxlength="500"<%= invalid(@errors, "motivo") %>>
-            <%= field_errors(@errors, "motivo") %>
-            <button type="submit" class="danger">Registrar rejeição</button>
-          </form>
-        </details>
+    </section>
+    <%= partial("shared/attachments", attachments: @attachments, owner_type: "quote", owner_id: q.id, can_upload: writer) %>
+    <section class="panel" aria-labelledby="historico-titulo">
+      <h2 id="historico-titulo">Histórico</h2>
+      <% if @history.empty? %><p class="empty">Sem eventos.</p><% else %>
+        <ol class="timeline">
+          <% @history.each do |event| %>
+            <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= label(:audit_action, event["action"]) %></strong> <span class="muted"><%= event["actor_name"] || label(:actor_type, event["actor_type"]) %></span></li>
+          <% end %>
+        </ol>
       <% end %>
+    </section>
+  </div>
+  <aside class="detail-aside">
+    <section class="panel" aria-labelledby="resumo-titulo">
+      <h2 id="resumo-titulo">Resumo da versão <%= v.number %></h2>
+      <dl class="details">
+        <dt>Cliente</dt><dd><a href="/clientes/<%= q.customer_id %>"><%= @data[:customer].name %></a></dd>
+        <dt>Retirada</dt><dd><%= datetime(v.period.starts_at) %></dd>
+        <dt>Devolução</dt><dd><%= datetime(v.period.ends_at) %></dd>
+        <dt>Validade</dt><dd><%= datetime(v.valid_until) %><% if v.expired?(@now) %> <%= badge("vencida", "danger") %><% end %></dd>
+        <dt>Caução prevista</dt><dd><%= money(v.deposit) %></dd>
+      </dl>
+      <p class="amount"><span class="amount-label">Total</span><strong><%= money(v.total) %></strong></p>
+    </section>
+    <section class="panel" aria-labelledby="acoes-titulo">
+      <h2 id="acoes-titulo">Situação e ações</h2>
+      <dl class="details">
+        <dt>Situação</dt><dd><%= status_badge(q.status, q.status_label) %></dd>
+        <% if q.sent_at %><dt>Enviado em</dt><dd><%= datetime(q.sent_at) %></dd><% end %>
+        <% if q.approved_at %>
+          <dt>Versão aprovada</dt><dd><%= q.approved_version %></dd>
+          <dt>Aprovado por</dt><dd><%= q.approved_by_name %><span class="cell-sub"><%= q.approver_label %></span></dd>
+          <dt>Aprovado em</dt><dd><%= datetime(q.approved_at) %><span class="cell-sub">IP <%= q.approved_ip || "não informado" %></span></dd>
+        <% end %>
+        <% if q.rejected_at %><dt>Rejeitado em</dt><dd><%= datetime(q.rejected_at) %></dd><dt>Motivo</dt><dd><%= q.rejection_reason %></dd><% end %>
+        <% if q.expired_at %><dt>Expirado em</dt><dd><%= datetime(q.expired_at) %></dd><% end %>
+        <% if @data[:reservation] %><dt>Reserva</dt><dd><a href="/reservas/<%= @data[:reservation].id %>"><%= @data[:reservation].code %></a> <%= status_badge(@data[:reservation].status, @data[:reservation].status_label) %></dd><% end %>
+      </dl>
+      <% if writer %>
+        <% if q.status == "approved" && !q.hold_on_send? %><p class="muted small">A conversão verifica a disponibilidade agora: o orçamento enviado sem bloqueio não a garantia.</p><% end %>
+        <% if q.status == "sent" %>
+          <details<%= open_if(@errors, "aprovado_por", "versao") %>>
+            <summary>Registrar aprovação do cliente</summary>
+            <form method="post" action="/orcamentos/<%= q.id %>/aprovar" class="stack">
+              <%= csrf_field %>
+              <input type="hidden" name="versao" value="<%= q.current_version %>">
+              <p>A aprovação vale para a <strong>versão <%= q.current_version %></strong> (total <%= money(current.total) %>), dentro da validade.</p>
+              <label for="aprovado_por">Nome de quem aprovou pelo cliente</label>
+              <input id="aprovado_por" name="aprovado_por" required maxlength="160"<%= invalid(@errors, "aprovado_por") %>>
+              <%= field_errors(@errors, "aprovado_por") %>
+              <p class="muted small">Serão registrados o seu usuário, o IP desta requisição e o instante da aprovação.</p>
+              <button type="submit" class="primary">Registrar aprovação</button>
+            </form>
+          </details>
+          <details<%= open_if(@errors, "motivo") %>>
+            <summary>Registrar rejeição</summary>
+            <form method="post" action="/orcamentos/<%= q.id %>/rejeitar" class="stack">
+              <%= csrf_field %>
+              <input type="hidden" name="versao" value="<%= q.current_version %>">
+              <label for="motivo-rejeicao">Motivo</label>
+              <input id="motivo-rejeicao" name="motivo" required maxlength="500"<%= invalid(@errors, "motivo") %>>
+              <%= field_errors(@errors, "motivo") %>
+              <button type="submit" class="danger">Registrar rejeição</button>
+            </form>
+          </details>
+        <% end %>
+      <% end %>
+    </section>
+    <% if q.hold_on_send? %>
+      <section class="panel" aria-labelledby="bloqueio-titulo">
+        <h2 id="bloqueio-titulo">Disponibilidade</h2>
+        <p>Política de bloqueio: <strong>bloqueio temporário ao enviar</strong> (<%= q.hold_minutes %> minutos).</p>
+        <% if @data[:hold] %>
+          <% hold = @data[:hold] %>
+          <dl class="details">
+            <dt>Reserva vinculada</dt><dd><a href="/reservas/<%= hold.id %>"><%= hold.code %></a></dd>
+            <dt>Situação</dt><dd><%= status_badge(hold.status, hold.status_label) %></dd>
+            <% if hold.held? %><dt>Válida até</dt><dd><%= datetime(hold.hold_expires_at) %></dd><% end %>
+          </dl>
+          <% if hold.held? && !hold.hold_valid?(@now) %><p class="notice notice-danger" role="status">O bloqueio venceu e a disponibilidade não está mais garantida.</p><% end %>
+        <% else %>
+          <p class="muted small">O bloqueio é criado no envio e garante a disponibilidade somente enquanto estiver vigente.</p>
+        <% end %>
+      </section>
+    <% elsif %w[draft sent approved].include?(q.status) %>
+      <section class="panel" aria-labelledby="bloqueio-titulo">
+        <h2 id="bloqueio-titulo">Disponibilidade</h2>
+        <p>Política de bloqueio: <strong>sem bloqueio</strong>. Este orçamento <strong>não garante disponibilidade</strong>; ela é verificada somente na conversão em reserva.</p>
+      </section>
     <% end %>
-  </section>
+  </aside>
 </div>
-<section class="panel" aria-labelledby="versoes-titulo">
-  <h2 id="versoes-titulo">Versões</h2>
-  <table class="table">
-    <thead><tr><th scope="col">Versão</th><th scope="col">Criada em</th><th scope="col">Enviada em</th><th scope="col">Período</th><th scope="col">Validade</th><th scope="col" class="num">Total</th></tr></thead>
-    <tbody>
-      <% @data[:versions].each do |version| %>
-        <tr>
-          <td><a href="/orcamentos/<%= q.id %>?versao=<%= version.number %>"<%= version.number == v.number ? raw(' aria-current="true"') : raw("") %>>Versão <%= version.number %></a>
-            <% if version.number == q.current_version %><%= badge("atual", "info") %><% end %><% if version.number == q.approved_version %><%= badge("aprovada", "success") %><% end %></td>
-          <td><%= datetime(version.created_at) %></td>
-          <td><%= version.sent? ? datetime(version.sent_at) : "—" %></td>
-          <td><%= datetime(version.period.starts_at) %> a <%= datetime(version.period.ends_at) %></td>
-          <td><%= datetime(version.valid_until) %></td>
-          <td class="num"><%= money(version.total) %></td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
-  <p class="muted">Versões são imutáveis: alterações criam uma nova versão. Versões não enviadas são internas e não ficam visíveis para o cliente.</p>
-</section>
-<%= partial("shared/attachments", attachments: @attachments, owner_type: "quote", owner_id: q.id, can_upload: can?("quotes.write")) %>
-<section class="panel" aria-labelledby="historico-titulo">
-  <h2 id="historico-titulo">Histórico</h2>
-  <% if @history.empty? %><p class="empty">Sem eventos.</p><% else %>
-    <ol class="timeline">
-      <% @history.each do |event| %>
-        <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= label(:audit_action, event["action"]) %></strong> <span class="muted"><%= event["actor_name"] || label(:actor_type, event["actor_type"]) %></span></li>
-      <% end %>
-    </ol>
-  <% end %>
-</section>

@@ -1,16 +1,21 @@
 <% fin = Locentra::Domain::Finance %>
+<% open_alerts = @alerts.count { |alert| alert["status"] == "open" } %>
 <section class="panel" aria-labelledby="titulo-alertas">
-  <h2 id="titulo-alertas">Alertas para decisão</h2>
+  <header class="panel-header">
+    <h2 id="titulo-alertas">Alertas para decisão<% if open_alerts.positive? %><span class="count count-danger"><%= open_alerts %></span><% end %></h2>
+  </header>
   <% if @alerts.empty? %>
     <p class="empty">Nenhum alerta financeiro em aberto.</p>
   <% else %>
     <ul class="row-list">
       <% @alerts.each do |alert| %>
         <li>
-          <%= finance_badge(alert["status"] == "open" ? "open" : "resolved", fin::ALERT_KINDS.fetch(alert["kind"], alert["kind"])) %>
-          <%= alert["message"] %>
-          <% if alert["reservation_code"] %> — <a href="/reservas/<%= alert["reservation_id"] %>">reserva <%= alert["reservation_code"] %></a><% end %>
-          <% if alert["payment_id"] %> · <a href="/financeiro/pagamentos/<%= alert["payment_id"] %>">ver pagamento</a><% end %>
+          <p class="page-meta">
+            <%= finance_badge(alert["status"] == "open" ? "open" : "resolved", fin::ALERT_KINDS.fetch(alert["kind"], alert["kind"])) %>
+            <% if alert["reservation_code"] %><a href="/reservas/<%= alert["reservation_id"] %>">Reserva <%= alert["reservation_code"] %></a><% end %>
+            <% if alert["payment_id"] %><a href="/financeiro/pagamentos/<%= alert["payment_id"] %>">Ver pagamento</a><% end %>
+          </p>
+          <p><%= alert["message"] %></p>
           <% if alert["status"] == "open" && can?("finance.write") %>
             <form method="post" action="/financeiro/alertas/<%= alert["id"] %>/resolver" class="filters">
               <%= csrf_field %>
@@ -21,10 +26,10 @@
               </select>
               <label for="observacao-<%= alert["id"] %>">Observação</label>
               <input id="observacao-<%= alert["id"] %>" name="observacao" maxlength="500">
-              <button type="submit">Registrar decisão</button>
+              <button type="submit" class="small">Registrar decisão</button>
             </form>
           <% elsif alert["resolution"] %>
-            <span class="muted">Decisão: <%= fin::ALERT_RESOLUTIONS.fetch(alert["resolution"]) %> em <%= datetime(alert["resolved_at"]) %><%= alert["resolution_notes"] ? " — #{alert["resolution_notes"]}" : "" %></span>
+            <p class="muted small">Decisão: <%= fin::ALERT_RESOLUTIONS.fetch(alert["resolution"]) %> em <%= datetime(alert["resolved_at"]) %><%= alert["resolution_notes"] ? " — #{alert["resolution_notes"]}" : "" %></p>
           <% end %>
         </li>
       <% end %>

@@ -1,14 +1,29 @@
+<%# Faltas de disponibilidade devolvidas por uma operação recusada (vem logo após o resumo de erros). Local: shortages. %>
+<%# Colunas de quantidade e de conflito só aparecem quando alguma falta as traz. %>
 <% if @shortages && !@shortages.empty? %>
-  <div class="shortages" role="alert">
-    <p><strong>Itens sem disponibilidade suficiente:</strong></p>
-    <ul>
-      <% @shortages.each do |s| %>
-        <li>
-          <%= s["name"] || s["sku"] || s["product_id"] %>
-          <% if s["requested"] %>— solicitado <%= s["requested"] %>, disponível <%= s["available"] %><% end %>
-          <% if s["conflict"] %>— conflita com <%= s["conflict"] %><% end %>
-        </li>
-      <% end %>
-    </ul>
-  </div>
+  <% with_counts = @shortages.any? { |s| s["requested"] } %>
+  <% with_conflict = @shortages.any? { |s| s["conflict"] } %>
+  <section class="panel" role="alert" aria-labelledby="faltas-titulo">
+    <h2 id="faltas-titulo">Itens sem disponibilidade suficiente <span class="count count-danger"><%= @shortages.size %></span></h2>
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <% if with_counts %><th scope="col" class="num">Solicitado</th><th scope="col" class="num">Disponível</th><% end %>
+            <% if with_conflict %><th scope="col">Conflita com</th><% end %>
+          </tr>
+        </thead>
+        <tbody>
+          <% @shortages.each do |s| %>
+            <tr>
+              <td><strong><%= s["name"] || s["sku"] || s["product_id"] %></strong><% if s["name"] && s["sku"] %><span class="cell-sub"><%= s["sku"] %></span><% end %></td>
+              <% if with_counts %><td class="num"><%= s["requested"] || "—" %></td><td class="num"><%= s["requested"] ? s["available"] : "—" %></td><% end %>
+              <% if with_conflict %><td><%= s["conflict"] || "—" %></td><% end %>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </section>
 <% end %>

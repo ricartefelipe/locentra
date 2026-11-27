@@ -2,11 +2,16 @@
   <h1>Avarias e faltas</h1>
   <p>A cobrança é lançada na reserva somente após aprovação, com ao menos uma evidência anexada.</p>
 </header>
+<%= partial("operations/tabs", current: "/operacao/avarias") %>
 <section class="panel" aria-labelledby="h-abertas">
-  <h2 id="h-abertas">Aguardando aprovação</h2>
+  <div class="panel-header">
+    <h2 id="h-abertas">Aguardando aprovação <span class="count<%= " count-warning" unless @open.empty? %>"><%= @open.size %></span></h2>
+  </div>
   <%= partial("operations/damage_table", rows: @open, empty: "Nenhum registro aguardando aprovação.") %>
 </section>
 <section class="panel" aria-labelledby="h-decididas">
-  <h2 id="h-decididas">Decididos</h2>
+  <div class="panel-header">
+    <h2 id="h-decididas">Decididos <span class="count"><%= @decided.size %></span></h2>
+  </div>
   <%= partial("operations/damage_table", rows: @decided, empty: "Nenhum registro decidido.") %>
 </section>

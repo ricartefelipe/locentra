@@ -4,18 +4,22 @@
   <h1>Inspeções</h1>
   <p>Itens em inspeção ficam indisponíveis para novas reservas até a aprovação. A reprovação abre ordem de manutenção.</p>
 </header>
+<%= partial("operations/tabs", current: "/operacao/inspecoes") %>
 <%= partial("shared/errors") %>
 <section class="panel" aria-labelledby="h-pendentes">
-  <h2 id="h-pendentes">Pendentes</h2>
+  <div class="panel-header">
+    <h2 id="h-pendentes">Pendentes <span class="count<%= " count-warning" unless @pending.empty? %>"><%= @pending.size %></span></h2>
+  </div>
   <% if @pending.empty? %>
     <p class="empty">Nenhum item aguardando inspeção.</p>
   <% else %>
     <% @pending.each do |i| %>
       <article class="panel" aria-labelledby="insp-<%= i["id"] %>">
-        <h3 id="insp-<%= i["id"] %>"><%= i["product_name"] %> <span class="muted"><%= i["tag"] || "#{i["quantity"]} un." %> · filial <%= i["branch_code"] %></span></h3>
+        <h3 id="insp-<%= i["id"] %>"><%= i["product_name"] %> <span class="muted"><%= i["tag"] || "#{i["quantity"]} un." %></span> <%= badge("Filial #{i["branch_code"]}", "neutral") %></h3>
         <p><%= i["reason"] %></p>
-        <p class="muted">Desde <%= datetime(i["created_at"]) %><% if i["reservation_code"] %> · reserva <a href="/reservas/<%= i["reservation_id"] %>"><%= i["reservation_code"] %></a><% end %></p>
+        <p class="page-meta"><span>Desde <%= datetime(i["created_at"]) %></span><% if i["reservation_code"] %><span>Reserva <a href="/reservas/<%= i["reservation_id"] %>"><%= i["reservation_code"] %></a></span><% end %></p>
         <% if can?("inspections.write") %>
+          <hr>
           <div class="grid-2">
             <form method="post" action="/operacao/inspecoes/<%= i["id"] %>/aprovar" class="stack">
               <%= csrf_field %>
@@ -52,23 +56,27 @@
   <% end %>
 </section>
 <section class="panel" aria-labelledby="h-decididas">
-  <h2 id="h-decididas">Decididas recentemente</h2>
+  <div class="panel-header">
+    <h2 id="h-decididas">Decididas recentemente <span class="count"><%= @decided.size %></span></h2>
+  </div>
   <% if @decided.empty? %>
     <p class="empty">Nenhuma inspeção decidida.</p>
   <% else %>
-    <table class="table">
-      <thead><tr><th scope="col">Item</th><th scope="col">Decisão</th><th scope="col">Em</th><th scope="col">Observações</th></tr></thead>
-      <tbody>
-        <% @decided.each do |i| %>
-          <tr>
-            <td><%= i["product_name"] %> <span class="muted"><%= i["tag"] || "#{i["quantity"]} un." %></span></td>
-            <td><%= status_badge(i["status"], statuses.fetch(i["status"])) %>
-              <% if i["maintenance_order_id"] %> · <a href="/manutencao/<%= i["maintenance_order_id"] %>"><%= i["maintenance_code"] %></a><% end %></td>
-            <td><%= datetime(i["decided_at"]) %></td>
-            <td><%= i["decision_notes"] || "—" %></td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th scope="col">Item</th><th scope="col">Decisão</th><th scope="col">Em</th><th scope="col">Observações</th></tr></thead>
+        <tbody>
+          <% @decided.each do |i| %>
+            <tr>
+              <td><%= i["product_name"] %><span class="cell-sub"><%= i["tag"] || "#{i["quantity"]} un." %></span></td>
+              <td><%= status_badge(i["status"], statuses.fetch(i["status"])) %>
+                <% if i["maintenance_order_id"] %><span class="cell-sub">Ordem <a href="/manutencao/<%= i["maintenance_order_id"] %>"><%= i["maintenance_code"] %></a></span><% end %></td>
+              <td><%= datetime(i["decided_at"]) %></td>
+              <td><%= i["decision_notes"] || "—" %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
   <% end %>
 </section>

@@ -2,49 +2,59 @@
 <% path = "/tarifas/#{fee.id}" %>
 <% current = { "nome" => fee.name, "descricao" => fee.description, "valor_padrao" => money_input(fee.default_amount), "versao" => fee.lock_version } %>
 <% editing = !@values.nil? %>
+<% writable = can?("fees.write") %>
 <header class="page-header">
-  <h1>Tarifa <%= fee.code %> <%= status_badge(fee.status, label(:fee_status, fee.status)) %></h1>
-  <p class="muted"><a href="/tarifas">Voltar para tarifas adicionais</a></p>
+  <div>
+    <a class="eyebrow" href="/tarifas">Tarifas adicionais</a>
+    <h1>Tarifa <%= fee.code %> <%= status_badge(fee.status, label(:fee_status, fee.status)) %></h1>
+  </div>
+  <% if writable %>
+    <div class="actions">
+      <% if fee.active %>
+        <form method="post" action="<%= path %>/desativar" data-confirm="Desativar a tarifa <%= fee.code %>? Reservas, orçamentos e contratos já registrados não mudam.">
+          <%= csrf_field %><button type="submit" class="danger">Desativar tarifa</button></form>
+      <% else %>
+        <form method="post" action="<%= path %>/reativar"><%= csrf_field %><button type="submit">Reativar tarifa</button></form>
+      <% end %>
+    </div>
+  <% end %>
+  <p><%= fee.name %></p>
 </header>
 <%= partial("shared/errors") %>
-<div class="grid-2">
-  <section class="panel" aria-labelledby="tarifa-dados">
-    <h2 id="tarifa-dados">Dados da tarifa</h2>
-    <dl class="details">
-      <dt>Nome</dt><dd><%= fee.name %></dd>
-      <dt>Valor padrão</dt><dd><%= money(fee.default_amount) %></dd>
-      <dt>Descrição</dt><dd class="pre"><%= fee.description || "—" %></dd>
-      <dt>Cadastrada por</dt><dd><%= @data[:created_by_name] || "—" %> em <%= datetime(fee.created_at) %></dd>
-      <dt>Atualizada em</dt><dd><%= datetime(fee.updated_at) %></dd>
-      <% if fee.deactivated_at %><dt>Desativada em</dt><dd><%= datetime(fee.deactivated_at) %></dd><% end %>
-    </dl>
-    <p class="muted">Alterar o valor padrão não muda reservas, orçamentos e contratos já registrados; uma nova versão de orçamento usa o padrão vigente, exceto nas tarifas mantidas com valor ajustado.</p>
-  </section>
-  <% if can?("fees.write") %>
-    <section class="panel" aria-labelledby="tarifa-acoes">
-      <h2 id="tarifa-acoes">Ações</h2>
-      <details<%= open_after_failure(path) %>>
-        <summary>Editar tarifa</summary>
-        <form method="post" action="<%= path %>" class="form-grid">
-          <%= csrf_field %>
-          <input type="hidden" name="versao" value="<%= (@values || current)["versao"] %>">
-          <p class="full muted">O código não muda; para outro código, cadastre uma nova tarifa.</p>
-          <%= partial("fees/fields", prefix: "e-", values: @values || current, errors: editing ? @errors : {}) %>
-          <div class="full"><button type="submit">Salvar alterações</button></div>
-        </form>
-      </details>
-      <div class="action-row">
-        <% if fee.active %>
-          <form method="post" action="<%= path %>/desativar" data-confirm="Desativar a tarifa <%= fee.code %>? Reservas, orçamentos e contratos já registrados não mudam.">
-            <%= csrf_field %><button type="submit" class="danger">Desativar tarifa</button></form>
-        <% else %>
-          <form method="post" action="<%= path %>/reativar"><%= csrf_field %><button type="submit">Reativar tarifa</button></form>
-        <% end %>
-      </div>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="tarifa-descricao">
+      <h2 id="tarifa-descricao">Descrição interna</h2>
+      <% if fee.description %><p class="pre"><%= fee.description %></p><% else %><p class="empty">Sem descrição.</p><% end %>
+      <p class="notice">Alterar o valor padrão não muda reservas, orçamentos e contratos já registrados; uma nova versão de orçamento usa o padrão vigente, exceto nas tarifas mantidas com valor ajustado.</p>
+      <% if writable %>
+        <details<%= open_after_failure(path) %>>
+          <summary>Editar tarifa</summary>
+          <form method="post" action="<%= path %>" class="form-grid">
+            <%= csrf_field %>
+            <input type="hidden" name="versao" value="<%= (@values || current)["versao"] %>">
+            <p class="full muted small">O código não muda; para outro código, cadastre uma nova tarifa.</p>
+            <%= partial("fees/fields", prefix: "e-", values: @values || current, errors: editing ? @errors : {}) %>
+            <div class="full actions"><button type="submit">Salvar alterações</button></div>
+          </form>
+        </details>
+      <% end %>
     </section>
-  <% end %>
+    <section class="panel" aria-labelledby="tarifa-historico">
+      <h2 id="tarifa-historico">Histórico</h2>
+      <%= partial("shared/history", history: @data[:history]) %>
+    </section>
+  </div>
+  <aside class="detail-aside" aria-labelledby="tarifa-dados">
+    <section class="panel">
+      <h2 id="tarifa-dados">Dados da tarifa</h2>
+      <dl class="details">
+        <dt>Nome</dt><dd><%= fee.name %></dd>
+        <dt>Valor padrão</dt><dd><%= money(fee.default_amount) %></dd>
+        <dt>Cadastrada por</dt><dd><%= @data[:created_by_name] || "—" %><span class="cell-sub"><%= datetime(fee.created_at) %></span></dd>
+        <dt>Atualizada em</dt><dd><%= datetime(fee.updated_at) %></dd>
+        <% if fee.deactivated_at %><dt>Desativada em</dt><dd><%= datetime(fee.deactivated_at) %></dd><% end %>
+      </dl>
+    </section>
+  </aside>
 </div>
-<section class="panel" aria-labelledby="tarifa-historico">
-  <h2 id="tarifa-historico">Histórico</h2>
-  <%= partial("shared/history", history: @data[:history]) %>
-</section>

@@ -1,29 +1,43 @@
-<header class="page-header"><h1>Consultar disponibilidade</h1></header>
-<section class="panel">
-  <%= partial("shared/errors") %>
-  <form method="get" action="/disponibilidade/consulta" class="filters">
-    <label for="filial">Filial</label>
-    <select id="filial" name="filial"><%= branch_options(@branches, @values["filial"], active_only: true) %></select>
-    <label for="inicio">Início</label><input id="inicio" name="inicio" type="datetime-local" required value="<%= @values["inicio"] %>">
-    <label for="fim">Fim</label><input id="fim" name="fim" type="datetime-local" required value="<%= @values["fim"] %>">
-    <button type="submit" class="primary">Consultar</button>
-  </form>
-</section>
+<header class="page-header">
+  <h1>Consultar disponibilidade</h1>
+  <a class="button" href="/disponibilidade">Ver calendário</a>
+  <p>Quantas unidades de cada produto estão livres durante todo o período informado.</p>
+</header>
+<%= partial("shared/errors") %>
+<form method="get" action="/disponibilidade/consulta" class="filters">
+  <label for="filial">Filial</label>
+  <select id="filial" name="filial"><%= branch_options(@branches, @values["filial"], active_only: true) %></select>
+  <label for="inicio">Início</label><input id="inicio" name="inicio" type="datetime-local" required value="<%= @values["inicio"] %>">
+  <label for="fim">Fim</label><input id="fim" name="fim" type="datetime-local" required value="<%= @values["fim"] %>">
+  <button type="submit" class="primary">Consultar</button>
+</form>
 <% if @result %>
-  <section class="panel">
-    <h2>Resultado</h2>
-    <p class="muted">Considera a ocupação máxima simultânea dentro do período, e não a soma de todas as reservas que o intersectam.</p>
-    <table class="table">
-      <thead><tr><th scope="col">Produto</th><th scope="col">Rastreamento</th><th scope="col" class="num">Disponíveis</th><th scope="col" class="num">Total</th></tr></thead>
-      <tbody>
-        <% @result.each do |row| %>
-          <tr><td><%= row["product"].name %></td><td><%= row["product"].tracking_label %></td>
-            <td class="num"><strong><%= row["available"] %></strong></td><td class="num"><%= row["total"] %></td></tr>
-        <% end %>
-      </tbody>
-    </table>
-    <% if can?("reservations.write") %>
-      <a class="button primary" href="<%= url("/reservas/nova", "inicio" => @values["inicio"], "fim" => @values["fim"], "filial_id" => @values["filial"]) %>">Reservar neste período</a>
+  <section class="panel" aria-labelledby="resultado-titulo">
+    <header class="panel-header">
+      <h2 id="resultado-titulo">Resultado <span class="count"><%= @result.size %></span></h2>
+      <% if can?("reservations.write") %>
+        <a class="button primary small" href="<%= url("/reservas/nova", "inicio" => @values["inicio"], "fim" => @values["fim"], "filial_id" => @values["filial"]) %>">Reservar neste período</a>
+      <% end %>
+    </header>
+    <p class="muted small">Considera a ocupação máxima simultânea dentro do período, e não a soma de todas as reservas que o intersectam.</p>
+    <% if @result.empty? %>
+      <p class="empty">Nenhum produto ativo nesta filial.</p>
+    <% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th scope="col">Produto</th><th scope="col">Situação</th><th scope="col" class="num">Disponíveis</th><th scope="col" class="num">Total</th></tr></thead>
+        <tbody>
+          <% @result.each do |row| %>
+            <% state = row["total"].zero? ? ["Sem unidades", "muted"] : (row["available"].zero? ? ["Esgotado", "danger"] : (row["available"] < row["total"] ? ["Parcial", "warning"] : ["Livre", "success"])) %>
+            <tr><td><%= row["product"].name %><span class="cell-sub"><%= row["product"].tracking_label %></span></td>
+              <td><%= badge(*state) %></td>
+              <td class="num"><strong><%= row["available"] %></strong></td><td class="num"><%= row["total"] %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
     <% end %>
   </section>
+<% elsif !@errors || @errors.empty? %>
+  <p class="empty">Informe a filial, o início e o fim para ver as unidades livres de cada produto.</p>
 <% end %>

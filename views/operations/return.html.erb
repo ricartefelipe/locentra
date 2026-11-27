@@ -1,37 +1,53 @@
 <% ret = @data[:return] %>
 <% outcomes = Locentra::Domain::Fulfillment::OUTCOMES %>
 <header class="page-header">
-  <h1>Devolução da reserva <a href="/reservas/<%= ret["reservation_id"] %>"><%= ret["reservation_code"] %></a></h1>
-  <p class="muted">Recebida em <%= datetime(ret["returned_at"]) %> por <%= ret["received_by_name"] || "—" %>
-    <% if ret["completes_reservation"] %> · <%= badge("Reserva concluída", "success") %><% else %> · <%= badge("Devolução parcial", "info") %><% end %></p>
+  <div>
+    <span class="eyebrow">Devolução</span>
+    <h1>Devolução da reserva <a href="/reservas/<%= ret["reservation_id"] %>"><%= ret["reservation_code"] %></a>
+      <% if ret["completes_reservation"] %><%= badge("Reserva concluída", "success") %><% else %><%= badge("Devolução parcial", "info") %><% end %></h1>
+    <p class="page-meta"><span>Recebida em <%= datetime(ret["returned_at"]) %></span><span>por <%= ret["received_by_name"] || "—" %></span></p>
+  </div>
+  <div class="actions">
+    <a class="button" href="/operacao">Painel da operação</a>
+    <a class="button" href="/reservas/<%= ret["reservation_id"] %>">Voltar para a reserva</a>
+  </div>
 </header>
-<section class="panel" aria-labelledby="h-itens">
-  <h2 id="h-itens">Itens</h2>
-  <table class="table">
-    <thead><tr><th scope="col">Item</th><th scope="col">Quantidade</th><th scope="col">Resultado</th><th scope="col">Inspeção</th><th scope="col">Avaria ou falta</th></tr></thead>
-    <tbody>
-      <% @data[:lines].each do |l| %>
-        <tr>
-          <td><%= l["product_name"] %> <span class="muted"><%= l["tag"] || l["sku"] %></span><% if l["notes"] %><br><span class="muted"><%= l["notes"] %></span><% end %></td>
-          <td><%= l["quantity"] %></td>
-          <td><%= badge(outcomes.fetch(l["outcome"]), l["outcome"] == "ok" ? "success" : "danger") %></td>
-          <td><%= l["requires_inspection"] ? "Sim" : "Não" %></td>
-          <td><% if l["damage_report_id"] %><a href="/operacao/avarias/<%= l["damage_report_id"] %>"><%= l["damage_report_code"] %></a><% else %>—<% end %></td>
-        </tr>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="h-itens">
+      <div class="panel-header">
+        <h2 id="h-itens">Itens <span class="count"><%= @data[:lines].size %></span></h2>
+      </div>
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th scope="col">Item</th><th scope="col" class="num">Quantidade</th><th scope="col">Resultado</th><th scope="col">Inspeção</th><th scope="col">Avaria ou falta</th></tr></thead>
+          <tbody>
+            <% @data[:lines].each do |l| %>
+              <tr>
+                <td><strong><%= l["product_name"] %></strong> <span class="muted mono"><%= l["tag"] || l["sku"] %></span><% if l["notes"] %><span class="cell-sub"><%= l["notes"] %></span><% end %></td>
+                <td class="num"><%= l["quantity"] %></td>
+                <td><%= badge(outcomes.fetch(l["outcome"]), l["outcome"] == "ok" ? "success" : "danger") %></td>
+                <td><%= l["requires_inspection"] ? badge("Exigida", "warning") : badge("Não exigida", "muted") %></td>
+                <td><% if l["damage_report_id"] %><a href="/operacao/avarias/<%= l["damage_report_id"] %>"><%= l["damage_report_code"] %></a><% else %>—<% end %></td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <% if ret["notes"] %><section class="panel"><h2>Observações</h2><p class="pre"><%= ret["notes"] %></p></section><% end %>
+  </div>
+  <aside class="detail-aside">
+    <section class="panel" aria-labelledby="h-multa">
+      <h2 id="h-multa">Multa por atraso</h2>
+      <% if @data[:late_fees].empty? %>
+        <p class="empty">Devolução sem atraso.</p>
+      <% else %>
+        <ul class="row-list">
+          <% @data[:late_fees].each do |fee| %><li><strong><%= money(fee["amount_cents"]) %></strong><span class="cell-sub"><%= fee["details"]["quantity"] %> un. · fim previsto <%= datetime(Time.iso8601(fee["details"]["scheduled_end"])) %></span></li><% end %>
+        </ul>
+        <p class="amount"><span class="amount-label">Total</span><strong><%= money(ret["late_fee_cents"]) %></strong></p>
       <% end %>
-    </tbody>
-  </table>
-</section>
-<section class="panel" aria-labelledby="h-multa">
-  <h2 id="h-multa">Multa por atraso</h2>
-  <% if @data[:late_fees].empty? %>
-    <p class="empty">Devolução sem atraso.</p>
-  <% else %>
-    <ul class="row-list">
-      <% @data[:late_fees].each do |fee| %><li><%= money(fee["amount_cents"]) %> · <%= fee["details"]["quantity"] %> un. · fim previsto <%= datetime(Time.iso8601(fee["details"]["scheduled_end"])) %></li><% end %>
-    </ul>
-    <p><strong>Total: <%= money(ret["late_fee_cents"]) %></strong></p>
-  <% end %>
-</section>
-<% if ret["notes"] %><section class="panel"><h2>Observações</h2><p class="pre"><%= ret["notes"] %></p></section><% end %>
-<p><a href="/reservas/<%= ret["reservation_id"] %>">Voltar para a reserva</a> · <a href="/operacao">Painel da operação</a></p>
+    </section>
+  </aside>
+</div>

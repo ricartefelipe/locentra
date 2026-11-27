@@ -1,50 +1,71 @@
 <% d = @data %>
+<% pending = d[:quotes].size + d[:contracts].size %>
 <header class="page-header">
-  <h1><%= d[:customer].name %></h1>
+  <div>
+    <span class="eyebrow"><%= session_user_name ? "Olá, #{session_user_name.to_s.split.first}" : "Olá" %></span>
+    <h1><%= d[:customer].name %></h1>
+    <p class="page-meta"><span>Portal do cliente de <%= request.organization.name %>: acompanhe reservas, orçamentos, contratos e cobranças.</span></p>
+  </div>
   <div class="actions">
     <a class="button primary" href="/portal/disponibilidade">Consultar disponibilidade</a>
   </div>
-  <p class="muted">Portal do cliente de <%= request.organization.name %>: acompanhe reservas, orçamentos, contratos e cobranças.</p>
 </header>
 <section class="cards" aria-label="Resumo">
-  <a class="card" href="/portal/orcamentos?situacao=sent">
+  <a class="card<%= d[:quotes_total].to_i.positive? ? " card-tone-info" : "" %>" href="/portal/orcamentos?situacao=sent">
     <span class="card-value"><%= d[:quotes_total] %></span>
     <span class="card-label">Orçamentos aguardando sua decisão</span>
   </a>
-  <a class="card" href="/portal/contratos?situacao=issued">
+  <a class="card<%= d[:contracts_total].to_i.positive? ? " card-tone-warning" : "" %>" href="/portal/contratos?situacao=issued">
     <span class="card-value"><%= d[:contracts_total] %></span>
     <span class="card-label">Contratos aguardando aceite</span>
   </a>
-  <a class="card<%= d[:totals][:open].positive? ? " card-alert" : "" %>" href="/portal/financeiro">
+  <a class="card<%= d[:totals][:open].positive? ? " card-tone-danger" : " card-tone-success" %>" href="/portal/financeiro">
     <span class="card-value"><%= money(d[:totals][:open]) %></span>
     <span class="card-label">Em aberto (<%= d[:totals][:open_count] %> cobranças)</span>
   </a>
 </section>
 <div class="grid-2">
-  <section class="panel" aria-labelledby="proximas-reservas">
-    <h2 id="proximas-reservas">Próximas reservas</h2>
-    <% if d[:reservations].empty? %>
-      <p class="empty">Nenhuma reserva em andamento ou futura. <a href="/portal/disponibilidade">Solicite uma reserva</a>.</p>
+  <section class="panel" aria-labelledby="pendencias">
+    <div class="panel-header">
+      <h2 id="pendencias">Pendências <span class="count<%= pending.positive? ? " count-warning" : "" %>"><%= pending %></span></h2>
+    </div>
+    <% if d[:quotes].empty? && d[:contracts].empty? %>
+      <p class="empty">Nenhum orçamento ou contrato aguardando você.</p>
     <% else %>
-      <ul class="row-list">
-        <% d[:reservations].each do |row| %>
-          <% r = row[:reservation] %>
-          <li><a href="/portal/reservas/<%= r.id %>"><%= r.code %></a> · <%= datetime(r.period.starts_at) %> a <%= datetime(r.period.ends_at) %> <%= status_badge(r.status, r.status_label) %></li>
+      <ul class="agenda">
+        <% d[:quotes].each do |row| %>
+          <li><a class="agenda-row" href="/portal/orcamentos/<%= row[:quote].id %>">
+            <span class="agenda-when"><strong><%= datetime(row[:valid_until], "%d/%m") %></strong><span>validade</span></span>
+            <span class="agenda-main"><strong>Orçamento <%= row[:quote].code %></strong><span class="muted">Válido até <%= datetime(row[:valid_until]) %></span></span>
+            <span class="agenda-side"><strong><%= money(row[:total]) %></strong></span>
+          </a></li>
+        <% end %>
+        <% d[:contracts].each do |row| %>
+          <li><a class="agenda-row" href="/portal/contratos/<%= row[:contract].id %>">
+            <span class="agenda-when"><strong><%= datetime(row[:contract].issued_at, "%d/%m") %></strong><span>emissão</span></span>
+            <span class="agenda-main"><strong>Contrato <%= row[:contract].code %></strong><span class="muted">Reserva <%= row[:reservation_code] %></span></span>
+            <span class="agenda-side"><%= badge("Aguardando aceite", "warning") %></span>
+          </a></li>
         <% end %>
       </ul>
     <% end %>
   </section>
-  <section class="panel" aria-labelledby="pendencias">
-    <h2 id="pendencias">Pendências</h2>
-    <% if d[:quotes].empty? && d[:contracts].empty? %>
-      <p class="empty">Nenhum orçamento ou contrato aguardando você.</p>
+  <section class="panel" aria-labelledby="proximas-reservas">
+    <div class="panel-header">
+      <h2 id="proximas-reservas">Próximas reservas <span class="count"><%= d[:reservations].size %></span></h2>
+      <a class="button small ghost" href="/portal/reservas">Ver todas</a>
+    </div>
+    <% if d[:reservations].empty? %>
+      <p class="empty">Nenhuma reserva em andamento ou futura. <a href="/portal/disponibilidade">Solicite uma reserva</a>.</p>
     <% else %>
-      <ul class="row-list">
-        <% d[:quotes].each do |row| %>
-          <li>Orçamento <a href="/portal/orcamentos/<%= row[:quote].id %>"><%= row[:quote].code %></a> · <%= money(row[:total]) %> · válido até <%= datetime(row[:valid_until]) %></li>
-        <% end %>
-        <% d[:contracts].each do |row| %>
-          <li>Contrato <a href="/portal/contratos/<%= row[:contract].id %>"><%= row[:contract].code %></a> da reserva <%= row[:reservation_code] %> aguardando aceite</li>
+      <ul class="agenda">
+        <% d[:reservations].each do |row| %>
+          <% r = row[:reservation] %>
+          <li><a class="agenda-row" href="/portal/reservas/<%= r.id %>">
+            <span class="agenda-when"><strong><%= datetime(r.period.starts_at, "%d/%m") %></strong><span><%= datetime(r.period.starts_at, "%H:%M") %></span></span>
+            <span class="agenda-main"><strong><%= r.code %></strong><span class="muted">Devolução em <%= datetime(r.period.ends_at) %></span></span>
+            <span class="agenda-side"><%= status_badge(r.status, r.status_label) %></span>
+          </a></li>
         <% end %>
       </ul>
     <% end %>

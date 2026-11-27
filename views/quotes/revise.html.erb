@@ -1,13 +1,27 @@
 <% q = @data[:quote] %>
 <header class="page-header">
   <h1>Nova versão do orçamento <%= q.code %></h1>
-  <p class="muted">Cliente: <%= @data[:customer].name %> · versão atual <%= q.current_version %> (<%= q.status_label %>). A nova versão volta o orçamento a rascunho e exige novo envio<% if q.hold_reservation_id %>; o bloqueio temporário do envio anterior será liberado<% end %>.</p>
+  <p class="page-meta"><span>Cliente <%= @data[:customer].name %></span><span>Versão atual <%= q.current_version %> <%= status_badge(q.status, q.status_label) %></span></p>
+  <p class="muted">A nova versão volta o orçamento a rascunho e exige novo envio<% if q.hold_reservation_id %>; o bloqueio temporário do envio anterior será liberado<% end %>.</p>
 </header>
-<section class="panel">
-  <%= partial("shared/errors") %>
-  <form method="post" action="/orcamentos/<%= q.id %>/versoes" class="form-grid" data-line-items>
-    <%= csrf_field %>
-    <%= partial("quotes/fields") %>
-    <div class="full actions"><button type="submit" class="primary">Criar versão <%= q.current_version + 1 %></button> <a href="/orcamentos/<%= q.id %>">Cancelar</a></div>
-  </form>
-</section>
+<%= partial("shared/errors") %>
+<form method="post" action="/orcamentos/<%= q.id %>/versoes" class="detail-layout" data-line-items>
+  <%= csrf_field %>
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="dados-titulo">
+      <h2 id="dados-titulo">Filial e período</h2>
+      <div class="form-grid">
+        <%= partial("quotes/fields", part: "dados") %>
+      </div>
+    </section>
+    <%= partial("quotes/fields", part: "itens") %>
+    <%= partial("quotes/fields", part: "termos") %>
+  </div>
+  <aside class="detail-aside">
+    <%= partial("quotes/fields", part: "comercial") %>
+    <section class="panel" aria-label="Salvar">
+      <p class="muted small">Os preços são calculados com a tabela vigente e ficam congelados nesta versão.</p>
+      <div class="actions"><button type="submit" class="primary">Criar versão <%= q.current_version + 1 %></button> <a class="button ghost" href="/orcamentos/<%= q.id %>">Cancelar</a></div>
+    </section>
+  </aside>
+</form>

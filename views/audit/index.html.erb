@@ -1,18 +1,42 @@
-<header class="page-header"><h1>Auditoria</h1></header>
-<form method="get" action="/auditoria" class="filters">
+<header class="page-header">
+  <div>
+    <h1>Auditoria</h1>
+    <p class="page-meta"><span><%= count_text(@page.total, "evento registrado", "eventos registrados") %></span><span>Horários no fuso <%= time_zone.identifier %></span></p>
+  </div>
+</header>
+<form method="get" action="/auditoria" class="filters" role="search">
   <label for="acao">Ação</label><input id="acao" name="acao" value="<%= @filters["action"] %>" placeholder="ex.: reservation.confirmed">
   <label for="recurso">Recurso</label><input id="recurso" name="recurso" value="<%= @filters["resource_type"] %>" placeholder="ex.: reservation">
   <button type="submit">Filtrar</button>
 </form>
+<% known_actions = Locentra::Interfaces::HTTP::Labels::GROUPS.fetch(:audit_action) %>
 <% if @page.items.empty? %><p class="empty">Nenhum evento.</p><% else %>
-  <table class="table">
-    <thead><tr><th scope="col">Quando</th><th scope="col">Ator</th><th scope="col">Ação</th><th scope="col">Recurso</th><th scope="col">Detalhes</th><th scope="col">Requisição</th></tr></thead>
-    <tbody>
-      <% @page.items.each do |e| %>
-        <tr><td><%= datetime(e["occurred_at"], "%d/%m/%Y %H:%M:%S") %></td><td><%= e["actor_name"] || e["actor_type"] %></td><td><code><%= e["action"] %></code></td>
-          <td><%= e["resource_type"] %></td><td><code class="small"><%= JSON.generate(e["details"] || {}) %></code></td><td><code class="small"><%= e["request_id"] %></code></td></tr>
-      <% end %>
-    </tbody>
-  </table>
+  <section class="panel" aria-labelledby="eventos-titulo">
+    <div class="panel-header">
+      <h2 id="eventos-titulo">Eventos <span class="count"><%= @page.total %></span></h2>
+    </div>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th scope="col">Quando</th><th scope="col">Ação</th><th scope="col">Autor</th><th scope="col">Recurso</th><th scope="col">Detalhes</th></tr></thead>
+        <tbody>
+          <% @page.items.each do |e| %>
+            <% details = e["details"] || {} %>
+            <% changes = details.is_a?(Hash) ? details["changes"] : nil %>
+            <tr>
+              <td><%= datetime(e["occurred_at"], "%d/%m/%Y") %><span class="cell-sub mono"><%= datetime(e["occurred_at"], "%H:%M:%S") %></span></td>
+              <td><% if known_actions.key?(e["action"].to_s) %><strong><%= label(:audit_action, e["action"]) %></strong><span class="cell-sub mono"><%= e["action"] %></span><% else %><strong class="mono"><%= e["action"] %></strong><% end %></td>
+              <td><%= e["actor_name"] || label(:actor_type, e["actor_type"]) %><span class="cell-sub"><%= label(:actor_type, e["actor_type"]) %></span></td>
+              <td><span class="mono"><%= e["resource_type"] %></span></td>
+              <td>
+                <% if changes.is_a?(Hash) && !changes.empty? %><span>Alterou <%= changes.keys.map { |field| label(:changed_field, field) }.join(", ") %></span><% end %>
+                <% unless details.empty? %><details><summary>Ver dados</summary><code class="small"><%= JSON.generate(details) %></code></details><% end %>
+                <span class="cell-sub">Requisição <span class="mono"><%= e["request_id"] || "—" %></span></span>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </section>
   <%= partial("shared/pagination", page: @page, base_path: "/auditoria", query: { "acao" => @filters["action"], "recurso" => @filters["resource_type"] }) %>
 <% end %>
