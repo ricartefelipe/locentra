@@ -1,0 +1,11 @@
+<ul class="agenda">
+  <% @returns.each do |ret| %>
+    <li>
+      <a class="agenda-row" href="/operacao/devolucoes/<%= ret["id"] %>">
+        <span class="agenda-when"><strong><time><%= datetime(ret["returned_at"], "%d/%m") %></time></strong><span><%= datetime(ret["returned_at"], "%H:%M") %></span></span>
+        <span class="agenda-main"><strong><%= count_text(ret["lines"], "item", "itens") %></strong><% if ret["late_fee_cents"].positive? %><span class="muted">Multa <%= money(ret["late_fee_cents"]) %></span><% end %></span>
+        <span class="agenda-side"><% if ret["completes_reservation"] %><%= badge("Concluiu a reserva", "success") %><% else %><%= badge("Parcial", "info") %><% end %></span>
+      </a>
+    </li>
+  <% end %>
+</ul>

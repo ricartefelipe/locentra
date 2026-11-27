@@ -1,4 +1,14 @@
-<header class="page-header"><h1>Integrações</h1><p class="muted">Webhooks assinados (HMAC-SHA256) enviados a partir de eventos de negócio. Endpoints com falhas consecutivas são pausados automaticamente e reativados aqui.</p></header>
+<% endpoints = @data[:endpoints] -%>
+<% deliveries = @data[:deliveries] -%>
+<% paused = endpoints.count { |e| e["active"] && e["paused_at"] } -%>
+<header class="page-header">
+  <div>
+    <h1>Integrações</h1>
+    <p class="page-meta"><span><%= count_text(endpoints.count { |e| e["active"] }, "endpoint ativo", "endpoints ativos") %></span><% if paused.positive? %><span><%= count_text(paused, "pausado", "pausados") %></span><% end %></p>
+  </div>
+  <div class="actions"><a class="button primary" href="#novo-endpoint">Novo endpoint</a></div>
+  <p class="muted">Webhooks assinados (HMAC-SHA256) enviados a partir de eventos de negócio. Endpoints com falhas consecutivas são pausados automaticamente e reativados aqui.</p>
+</header>
 <%= partial("shared/errors") %>
 <% if @secret %>
   <div class="notice" role="status">
@@ -7,45 +17,57 @@
     <p class="muted">Valide o cabeçalho <code>X-Locentra-Signature: t=&lt;timestamp&gt;,v1=&lt;HMAC-SHA256(segredo, "timestamp.corpo")&gt;</code> e rejeite timestamps com mais de 5 minutos.</p>
   </div>
 <% end %>
-<section class="panel">
-  <h2>Endpoints</h2>
-  <% if @data[:endpoints].empty? %><p class="empty">Nenhum endpoint configurado.</p><% else %>
-    <table class="table">
-      <thead><tr><th scope="col">URL</th><th scope="col">Eventos</th><th scope="col">Situação</th><th scope="col"></th></tr></thead>
-      <tbody>
-        <% @data[:endpoints].each do |e| %>
-          <tr><td><code><%= e["url"] %></code><br><span class="muted"><%= e["description"] %></span></td><td><%= Array(e["events"]).join(", ") %></td>
-            <td><% if !e["active"] %><%= badge("Desativado", "muted") %><% elsif e["paused_at"] %><%= badge("Pausado", "warning") %><br><span class="muted">Pausa automática após <%= e["consecutive_failures"] %> falhas consecutivas desde <%= datetime(e["failing_since"]) %>; <%= e["held_deliveries"] %> entrega(s) retida(s).</span><% else %><%= badge("Ativo", "success") %><% end %></td>
-            <td><% if e["active"] && e["paused_at"] %><form method="post" action="/integracoes/<%= e["id"] %>/reativar" class="inline"><%= csrf_field %><button type="submit" class="primary">Reativar</button></form><% end %><% if e["active"] %><form method="post" action="/integracoes/<%= e["id"] %>/desativar" class="inline"><%= csrf_field %><button type="submit" class="danger">Desativar</button></form><% end %></td></tr>
-        <% end %>
-      </tbody>
-    </table>
+<section class="panel" aria-labelledby="endpoints-titulo">
+  <div class="panel-header">
+    <h2 id="endpoints-titulo">Endpoints <span class="count"><%= endpoints.size %></span></h2>
+  </div>
+  <% if endpoints.empty? %><p class="empty">Nenhum endpoint configurado.</p><% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th scope="col">URL</th><th scope="col">Eventos</th><th scope="col">Situação</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
+        <tbody>
+          <% endpoints.each do |e| %>
+            <tr><td><code><%= e["url"] %></code><% if e["description"] && !e["description"].to_s.empty? %><span class="cell-sub"><%= e["description"] %></span><% end %></td>
+              <td><% Array(e["events"]).each do |event| %><code><%= event %></code> <% end %></td>
+              <td><% if !e["active"] %><%= badge("Desativado", "muted") %><% elsif e["paused_at"] %><%= badge("Pausado", "warning") %><span class="cell-sub">Pausa automática após <%= e["consecutive_failures"] %> falhas consecutivas desde <%= datetime(e["failing_since"]) %>; <%= e["held_deliveries"] %> entrega(s) retida(s).</span><% else %><%= badge("Ativo", "success") %><% end %></td>
+              <td class="num"><div class="actions"><% if e["active"] && e["paused_at"] %><form method="post" action="/integracoes/<%= e["id"] %>/reativar" class="inline"><%= csrf_field %><button type="submit" class="small primary">Reativar</button></form><% end %><% if e["active"] %><form method="post" action="/integracoes/<%= e["id"] %>/desativar" class="inline"><%= csrf_field %><button type="submit" class="small danger">Desativar</button></form><% end %></div></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
   <% end %>
-  <form method="post" action="/integracoes" class="stack">
+</section>
+<section class="panel" aria-labelledby="novo-endpoint">
+  <h2 id="novo-endpoint">Novo endpoint</h2>
+  <form method="post" action="/integracoes" class="form-grid" aria-labelledby="novo-endpoint">
     <%= csrf_field %>
-    <label for="url">URL (https)</label><input id="url" name="url" type="url" required placeholder="https://erp.exemplo.com/webhooks/locentra">
-    <label for="descricao">Descrição</label><input id="descricao" name="descricao">
-    <fieldset><legend>Eventos</legend>
+    <div><label for="url">URL (https)</label><input id="url" name="url" type="url" required placeholder="https://erp.exemplo.com/webhooks/locentra"></div>
+    <div><label for="descricao">Descrição</label><input id="descricao" name="descricao"></div>
+    <fieldset class="full"><legend>Eventos</legend>
       <div class="checkbox-grid">
         <% @events.each do |event| %><label class="checkbox"><input type="checkbox" name="eventos[]" value="<%= event %>"> <code><%= event %></code></label><% end %>
       </div>
     </fieldset>
-    <button type="submit" class="primary">Criar endpoint</button>
+    <div class="full actions"><button type="submit" class="primary">Criar endpoint</button></div>
   </form>
 </section>
-<section class="panel">
-  <h2>Entregas recentes</h2>
-  <% if @data[:deliveries].empty? %><p class="empty">Nenhuma entrega registrada.</p><% else %>
-    <table class="table">
-      <thead><tr><th scope="col">Evento</th><th scope="col">Destino</th><th scope="col">Situação</th><th scope="col">Tentativas</th><th scope="col">Último retorno</th><th scope="col"></th></tr></thead>
-      <tbody>
-        <% @data[:deliveries].each do |d| %>
-          <tr><td><code><%= d["event_type"] %></code><br><span class="muted"><%= datetime(d["created_at"]) %></span></td><td><code class="small"><%= d["url"] %></code></td>
-            <td><% if d["held_at"] %><%= status_badge("held", "Retida (endpoint pausado)") %><% else %><%= status_badge(d["status"] == "delivered" ? "confirmed" : (d["status"] == "failed" ? "cancelled" : "held"), label(:delivery_status, d["status"])) %><% end %></td>
-            <td><%= d["attempts"] %></td><td><%= d["last_status_code"] || d["last_error"] || "—" %></td>
-            <td><% if d["status"] == "failed" && !d["held_at"] %><form method="post" action="/integracoes/entregas/<%= d["id"] %>/reenviar" class="inline"><%= csrf_field %><button type="submit">Reenviar</button></form><% end %></td></tr>
-        <% end %>
-      </tbody>
-    </table>
+<section class="panel" aria-labelledby="entregas-titulo">
+  <div class="panel-header">
+    <h2 id="entregas-titulo">Entregas recentes <span class="count"><%= deliveries.size %></span></h2>
+  </div>
+  <% if deliveries.empty? %><p class="empty">Nenhuma entrega registrada.</p><% else %>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th scope="col">Evento</th><th scope="col">Destino</th><th scope="col">Situação</th><th scope="col" class="num">Tentativas</th><th scope="col">Último retorno</th><th scope="col"><span class="sr-only">Ações</span></th></tr></thead>
+        <tbody>
+          <% deliveries.each do |d| %>
+            <tr><td><code><%= d["event_type"] %></code><span class="cell-sub"><%= datetime(d["created_at"]) %></span></td><td><code class="small"><%= d["url"] %></code></td>
+              <td><% if d["held_at"] %><%= status_badge("held", "Retida (endpoint pausado)") %><% else %><%= badge(label(:delivery_status, d["status"]), { "delivered" => "success", "failed" => "danger" }.fetch(d["status"], "warning")) %><% end %></td>
+              <td class="num"><%= d["attempts"] %></td><td><%= d["last_status_code"] || d["last_error"] || "—" %></td>
+              <td class="num"><% if d["status"] == "failed" && !d["held_at"] %><form method="post" action="/integracoes/entregas/<%= d["id"] %>/reenviar" class="inline"><%= csrf_field %><button type="submit" class="small">Reenviar</button></form><% end %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
   <% end %>
 </section>

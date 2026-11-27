@@ -2,42 +2,43 @@
 <% reservation = @reservation %>
 <% deposit = @finance[:deposit] %>
 <section class="panel" aria-labelledby="titulo-financeiro-reserva">
-  <h2 id="titulo-financeiro-reserva">Financeiro</h2>
-  <%= partial("finance/receivables_table", rows: @finance[:receivables]) %>
-  <% if can?("finance.write") %>
-    <div class="action-row">
-      <form method="post" action="/financeiro/reservas/<%= reservation.id %>/sincronizar" class="inline"><%= csrf_field %><button type="submit">Sincronizar cobranças</button></form>
-      <% if reservation.held? %>
-        <form method="post" action="/financeiro/reservas/<%= reservation.id %>/sincronizar" class="inline"><%= csrf_field %><input type="hidden" name="antecipada" value="1"><button type="submit">Emitir cobrança antecipada</button></form>
-      <% end %>
-      <% unless @finance[:receivables].empty? %>
-        <form method="post" action="/financeiro/reservas/<%= reservation.id %>/faturas" class="inline"><%= csrf_field %><button type="submit">Emitir fatura comercial</button></form>
-      <% end %>
-    </div>
-    <% if fin::MANUAL_CHARGE_RESERVATION_STATUSES.include?(reservation.status) %>
-      <details>
-        <summary>Lançar cobrança adicional</summary>
-        <form method="post" action="/financeiro/reservas/<%= reservation.id %>/cobrancas" class="stack">
-          <%= csrf_field %>
-          <label for="tipo-cobranca">Tipo</label>
-          <select id="tipo-cobranca" name="tipo">
-            <% fin::MANUAL_KINDS.each do |kind| %><option value="<%= kind %>"><%= fin::RECEIVABLE_KINDS.fetch(kind) %></option><% end %>
-          </select>
-          <label for="descricao-cobranca">Descrição</label>
-          <input id="descricao-cobranca" name="descricao" required maxlength="300">
-          <label for="valor-cobranca">Valor (R$)</label>
-          <input id="valor-cobranca" name="valor" inputmode="decimal" required>
-          <label for="vencimento-cobranca">Vencimento (opcional)</label>
-          <input id="vencimento-cobranca" name="vencimento" type="date">
-          <button type="submit">Lançar cobrança</button>
-        </form>
-      </details>
+  <header class="panel-header">
+    <h2 id="titulo-financeiro-reserva">Financeiro</h2>
+    <% if can?("finance.write") %>
+      <div class="actions">
+        <form method="post" action="/financeiro/reservas/<%= reservation.id %>/sincronizar" class="inline"><%= csrf_field %><button type="submit" class="small">Sincronizar cobranças</button></form>
+        <% if reservation.held? %>
+          <form method="post" action="/financeiro/reservas/<%= reservation.id %>/sincronizar" class="inline"><%= csrf_field %><input type="hidden" name="antecipada" value="1"><button type="submit" class="small">Emitir cobrança antecipada</button></form>
+        <% end %>
+        <% unless @finance[:receivables].empty? %>
+          <form method="post" action="/financeiro/reservas/<%= reservation.id %>/faturas" class="inline"><%= csrf_field %><button type="submit" class="small">Emitir fatura comercial</button></form>
+        <% end %>
+      </div>
     <% end %>
+  </header>
+  <%= partial("finance/receivables_table", rows: @finance[:receivables], compact: true) %>
+  <% if can?("finance.write") && fin::MANUAL_CHARGE_RESERVATION_STATUSES.include?(reservation.status) %>
+    <details>
+      <summary>Lançar cobrança adicional</summary>
+      <form method="post" action="/financeiro/reservas/<%= reservation.id %>/cobrancas" class="stack">
+        <%= csrf_field %>
+        <label for="tipo-cobranca">Tipo</label>
+        <select id="tipo-cobranca" name="tipo">
+          <% fin::MANUAL_KINDS.each do |kind| %><option value="<%= kind %>"><%= fin::RECEIVABLE_KINDS.fetch(kind) %></option><% end %>
+        </select>
+        <label for="descricao-cobranca">Descrição</label>
+        <input id="descricao-cobranca" name="descricao" required maxlength="300">
+        <label for="valor-cobranca">Valor (R$)</label>
+        <input id="valor-cobranca" name="valor" inputmode="decimal" required>
+        <label for="vencimento-cobranca">Vencimento (opcional)</label>
+        <input id="vencimento-cobranca" name="vencimento" type="date">
+        <button type="submit">Lançar cobrança</button>
+      </form>
+    </details>
   <% end %>
   <h3>Caução</h3>
   <% if deposit %>
-    <p><a href="/financeiro/caucoes/<%= deposit.id %>"><%= deposit.kind_label %></a> prevista de <%= money(deposit.expected) %>:
-      <%= finance_badge(@finance[:deposit_ledger].status, @finance[:deposit_ledger].status_label) %> saldo retido <strong><%= money(@finance[:deposit_ledger].balance) %></strong></p>
+    <p class="page-meta"><%= finance_badge(@finance[:deposit_ledger].status, @finance[:deposit_ledger].status_label) %><a href="/financeiro/caucoes/<%= deposit.id %>"><%= deposit.kind_label %></a><span>Prevista <%= money(deposit.expected) %></span><span>Saldo retido <strong><%= money(@finance[:deposit_ledger].balance) %></strong></span></p>
   <% elsif can?("deposits.manage") && fin::DEPOSIT_RESERVATION_STATUSES.include?(reservation.status) %>
     <form method="post" action="/financeiro/reservas/<%= reservation.id %>/caucao" class="filters">
       <%= csrf_field %>
@@ -47,19 +48,25 @@
       </select>
       <label for="valor-caucao-reserva">Valor (R$)</label>
       <input id="valor-caucao-reserva" name="valor" inputmode="decimal" value="<%= reservation.deposit.to_decimal_string %>">
-      <button type="submit">Registrar caução</button>
+      <button type="submit" class="small">Registrar caução</button>
     </form>
-    <p class="muted">Pré-autorização em cartão não está disponível: exigiria tokenização no provedor, e o Locentra não armazena dados de cartão.</p>
+    <p class="muted small">Pré-autorização em cartão não está disponível: exigiria tokenização no provedor, e o Locentra não armazena dados de cartão.</p>
   <% else %>
     <p class="empty">Nenhuma caução registrada.</p>
   <% end %>
   <h3>Pagamentos</h3>
-  <%= partial("finance/payments_table", rows: @finance[:payments]) %>
-  <% unless @finance[:alerts].empty? %><%= partial("finance/alerts", alerts: @finance[:alerts]) %><% end %>
+  <%= partial("finance/payments_table", rows: @finance[:payments], compact: true) %>
   <% unless @finance[:invoices].empty? %>
     <h3>Faturas comerciais</h3>
-    <ul class="row-list">
-      <% @finance[:invoices].each do |invoice| %><li><a href="/financeiro/faturas/<%= invoice["id"] %>"><%= invoice["number"] %></a> — <%= money(invoice["total_cents"]) %> em <%= datetime(invoice["issued_at"]) %></li><% end %>
-    </ul>
+    <div class="table-scroll">
+      <table class="table">
+        <caption class="sr-only">Faturas comerciais da reserva</caption>
+        <thead><tr><th scope="col">Fatura</th><th scope="col">Emitida em</th><th scope="col" class="num">Total</th></tr></thead>
+        <tbody>
+          <% @finance[:invoices].each do |invoice| %><tr><td><a href="/financeiro/faturas/<%= invoice["id"] %>"><%= invoice["number"] %></a></td><td><%= datetime(invoice["issued_at"]) %></td><td class="num"><%= money(invoice["total_cents"]) %></td></tr><% end %>
+        </tbody>
+      </table>
+    </div>
   <% end %>
+  <% unless @finance[:alerts].empty? %><%= partial("finance/alerts", alerts: @finance[:alerts]) %><% end %>
 </section>

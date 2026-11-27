@@ -1,12 +1,16 @@
 <% statuses = Locentra::Domain::Maintenance::ORDER_STATUSES %>
 <header class="page-header">
   <h1>Manutenção</h1>
-  <nav class="actions" aria-label="Áreas relacionadas">
-    <a class="button" href="/operacao/inspecoes">Inspeções</a>
-    <a class="button" href="/transferencias">Transferências</a>
-  </nav>
+  <p>Ordens de serviço de ativos e de estoque. Os itens ficam indisponíveis para reservas até a conclusão.</p>
 </header>
+<%= partial("operations/tabs", current: "/manutencao") %>
 <%= partial("shared/errors") %>
+<section class="panel" aria-labelledby="h-ativas">
+  <div class="panel-header">
+    <h2 id="h-ativas">Ordens em aberto <span class="count<%= " count-warning" unless @active.empty? %>"><%= @active.size %></span></h2>
+  </div>
+  <%= partial("maintenance/table", rows: @active, empty: "Nenhuma ordem de manutenção em aberto.", statuses: statuses) %>
+</section>
 <% if can?("maintenance.write") %>
   <div class="grid-2">
     <section class="panel" aria-labelledby="h-ativo">
@@ -17,7 +21,7 @@
         <input id="patrimonio" name="patrimonio" required autocomplete="off" value="<%= @values["patrimonio"] || @values["ativo"] %>">
         <label for="descricao-ativo">Serviço a executar</label>
         <textarea id="descricao-ativo" name="descricao" rows="2" required minlength="3" maxlength="2000"><%= @values["patrimonio"] ? @values["descricao"] : "" %></textarea>
-        <p class="muted">O ativo deve estar disponível. Reservas futuras são transferidas para outra unidade; sem substituto, a abertura é recusada.</p>
+        <p class="muted small">O ativo deve estar disponível. Reservas futuras são transferidas para outra unidade; sem substituto, a abertura é recusada.</p>
         <button type="submit" class="primary">Abrir ordem</button>
       </form>
     </section>
@@ -37,18 +41,16 @@
           <label for="quantidade">Quantidade</label><input id="quantidade" name="quantidade" type="number" min="1" required value="<%= @values["quantidade"] %>">
           <label for="descricao-estoque">Serviço a executar</label>
           <textarea id="descricao-estoque" name="descricao" rows="2" required minlength="3" maxlength="2000"></textarea>
-          <p class="muted">As unidades ficam bloqueadas até a conclusão; a abertura é recusada se faltarem unidades para reservas futuras.</p>
+          <p class="muted small">As unidades ficam bloqueadas até a conclusão; a abertura é recusada se faltarem unidades para reservas futuras.</p>
           <button type="submit">Abrir ordem</button>
         </form>
       <% end %>
     </section>
   </div>
 <% end %>
-<section class="panel" aria-labelledby="h-ativas">
-  <h2 id="h-ativas">Ordens em aberto</h2>
-  <%= partial("maintenance/table", rows: @active, empty: "Nenhuma ordem de manutenção em aberto.", statuses: statuses) %>
-</section>
 <section class="panel" aria-labelledby="h-encerradas">
-  <h2 id="h-encerradas">Encerradas</h2>
+  <div class="panel-header">
+    <h2 id="h-encerradas">Encerradas <span class="count"><%= @closed.size %></span></h2>
+  </div>
   <%= partial("maintenance/table", rows: @closed, empty: "Nenhuma ordem encerrada.", statuses: statuses) %>
 </section>

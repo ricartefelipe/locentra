@@ -2,7 +2,7 @@
 <% if @policy -%>
   <details class="cancellation-policy">
     <summary><%= @title %></summary>
-    <ul>
+    <ul class="row-list">
       <% Locentra::Domain::Organizations::CancellationPolicy.describe(@policy).each do |line| %><li><%= line %></li><% end %>
     </ul>
   </details>

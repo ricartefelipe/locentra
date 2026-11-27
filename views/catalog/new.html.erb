@@ -1,22 +1,43 @@
-<header class="page-header"><h1>Novo produto</h1></header>
-<section class="panel">
-  <%= partial("shared/errors") %>
-  <form method="post" action="/produtos" class="form-grid">
-    <%= csrf_field %>
-    <div><label for="sku">SKU</label><input id="sku" name="sku" required value="<%= @values["sku"] %>"<%= invalid(@errors, "sku") %>><%= field_errors(@errors, "sku") %></div>
-    <div><label for="nome">Nome</label><input id="nome" name="nome" required value="<%= @values["nome"] %>"<%= invalid(@errors, "nome") %>><%= field_errors(@errors, "nome") %></div>
-    <fieldset class="full">
-      <legend>Modalidade de rastreamento</legend>
-      <label class="radio"><input type="radio" name="rastreamento" value="serialized"<%= checked(@values["rastreamento"] == "serialized") %>> Ativo individual (número de série ou patrimônio)</label>
-      <label class="radio"><input type="radio" name="rastreamento" value="bulk"<%= checked(@values["rastreamento"] == "bulk") %>> Estoque quantitativo (unidades intercambiáveis)</label>
-      <label class="radio"><input type="radio" name="rastreamento" value="kit"<%= checked(@values["rastreamento"] == "kit") %>> Kit (composição de outros produtos)</label>
-    </fieldset>
-    <div><label for="categoria">Categoria</label><input id="categoria" name="categoria" value="<%= @values["categoria"] %>"></div>
-    <div><label for="custo_reposicao">Custo de reposição (R$)</label><input id="custo_reposicao" name="custo_reposicao" inputmode="decimal" value="<%= @values["custo_reposicao"] %>"<%= invalid(@errors, "custo_reposicao") %>><%= field_errors(@errors, "custo_reposicao") %></div>
-    <div><label for="preparacao_antes">Preparação antes (minutos)</label><input id="preparacao_antes" name="preparacao_antes" type="number" min="0" value="<%= @values["preparacao_antes"] || 0 %>"></div>
-    <div><label for="preparacao_depois">Preparação depois (minutos)</label><input id="preparacao_depois" name="preparacao_depois" type="number" min="0" value="<%= @values["preparacao_depois"] || 0 %>"></div>
-    <div class="full"><label for="descricao">Descrição</label><textarea id="descricao" name="descricao" rows="2"><%= @values["descricao"] %></textarea></div>
-    <%= partial("catalog/pricing_fields", table: nil, deposit: nil) %>
-    <div class="full actions"><button type="submit" class="primary">Cadastrar</button> <a href="/produtos">Cancelar</a></div>
-  </form>
-</section>
+<header class="page-header">
+  <div>
+    <a class="eyebrow" href="/produtos">Produtos e kits</a>
+    <h1>Novo produto</h1>
+  </div>
+</header>
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel">
+      <%= partial("shared/errors") %>
+      <form method="post" action="/produtos" class="form-grid">
+        <%= csrf_field %>
+        <div><label for="sku">SKU</label><input id="sku" name="sku" required value="<%= @values["sku"] %>"<%= invalid(@errors, "sku") %>><%= field_errors(@errors, "sku") %></div>
+        <div><label for="nome">Nome</label><input id="nome" name="nome" required value="<%= @values["nome"] %>"<%= invalid(@errors, "nome") %>><%= field_errors(@errors, "nome") %></div>
+        <fieldset class="full">
+          <legend>Modalidade de rastreamento</legend>
+          <label class="radio"><input type="radio" name="rastreamento" value="serialized"<%= checked(@values["rastreamento"] == "serialized") %>> Ativo individual (número de série ou patrimônio)</label>
+          <label class="radio"><input type="radio" name="rastreamento" value="bulk"<%= checked(@values["rastreamento"] == "bulk") %>> Estoque quantitativo (unidades intercambiáveis)</label>
+          <label class="radio"><input type="radio" name="rastreamento" value="kit"<%= checked(@values["rastreamento"] == "kit") %>> Kit (composição de outros produtos)</label>
+        </fieldset>
+        <div><label for="categoria">Categoria</label><input id="categoria" name="categoria" value="<%= @values["categoria"] %>"></div>
+        <div><label for="custo_reposicao">Custo de reposição (R$)</label><input id="custo_reposicao" name="custo_reposicao" inputmode="decimal" value="<%= @values["custo_reposicao"] %>"<%= invalid(@errors, "custo_reposicao") %>><%= field_errors(@errors, "custo_reposicao") %></div>
+        <div><label for="preparacao_antes">Preparação antes (minutos)</label><input id="preparacao_antes" name="preparacao_antes" type="number" min="0" value="<%= @values["preparacao_antes"] || 0 %>"></div>
+        <div><label for="preparacao_depois">Preparação depois (minutos)</label><input id="preparacao_depois" name="preparacao_depois" type="number" min="0" value="<%= @values["preparacao_depois"] || 0 %>"></div>
+        <div class="full"><label for="descricao">Descrição</label><textarea id="descricao" name="descricao" rows="2"><%= @values["descricao"] %></textarea></div>
+        <%= partial("catalog/pricing_fields", table: nil, deposit: nil) %>
+        <div class="full actions"><button type="submit" class="primary">Cadastrar</button> <a class="button ghost" href="/produtos">Cancelar</a></div>
+      </form>
+    </section>
+  </div>
+  <aside class="detail-aside" aria-label="Depois do cadastro">
+    <section class="panel">
+      <h2>Depois do cadastro</h2>
+      <p class="muted">Na página do produto, conforme a modalidade:</p>
+      <ul class="row-list">
+        <li><strong>Ativo individual</strong><span class="cell-sub">cadastre cada unidade com patrimônio, série e filial</span></li>
+        <li><strong>Estoque quantitativo</strong><span class="cell-sub">registre entradas, baixas e perdas por filial</span></li>
+        <li><strong>Kit</strong><span class="cell-sub">monte a composição com outros produtos</span></li>
+      </ul>
+      <p class="muted small">A preparação antes e depois bloqueia o item na agenda além do período locado.</p>
+    </section>
+  </aside>
+</div>

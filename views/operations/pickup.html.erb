@@ -3,10 +3,25 @@
 <% c = @data[:customer] %>
 <% statuses = Locentra::Domain::Fulfillment::LINE_STATUSES %>
 <% open = p.picking? && r.status == "confirmed" && can?("fulfillment.write") %>
+<% lines = @data[:lines] %>
+<% checked = lines.count { |l| %w[checked delivered partial].include?(l["status"]) } %>
 <header class="page-header">
-  <h1>Retirada da reserva <a href="/reservas/<%= r.id %>"><%= r.code %></a> <%= status_badge(p.status, p.status_label) %></h1>
-  <p class="muted">Cliente: <a href="/clientes/<%= c.id %>"><%= c.name %></a> · Retirada prevista <%= datetime(r.period.starts_at) %> · Devolução prevista <%= datetime(r.period.ends_at) %></p>
+  <div>
+    <span class="eyebrow">Retirada</span>
+    <h1>Retirada da reserva <a href="/reservas/<%= r.id %>"><%= r.code %></a> <%= status_badge(p.status, p.status_label) %></h1>
+    <p class="page-meta"><span>Cliente: <a href="/clientes/<%= c.id %>"><%= c.name %></a></span><span>Retirada prevista <%= datetime(r.period.starts_at) %></span><span>Devolução prevista <%= datetime(r.period.ends_at) %></span></p>
+  </div>
+  <% if p.delivered? && can?("fulfillment.write") && r.status == "in_progress" %>
+    <a class="button primary" href="/operacao/reservas/<%= r.id %>/devolucao">Registrar devolução</a>
+  <% end %>
 </header>
+<% if p.status != "cancelled" %>
+  <ol class="steps" aria-label="Etapas da retirada">
+    <li class="done">Separação</li>
+    <li class="<%= p.delivered? || checked.positive? ? "done" : "current" %>">Conferência</li>
+    <% if p.delivered? %><li class="done">Entrega</li><% elsif checked.positive? %><li class="current">Entrega</li><% else %><li>Entrega</li><% end %>
+  </ol>
+<% end %>
 <%= partial("shared/errors") %>
 <% if p.delivered? %>
   <div class="notice" role="status">
@@ -18,78 +33,95 @@
 <% elsif r.status != "confirmed" %>
   <div class="notice notice-danger" role="status">A reserva está <%= r.status_label.downcase %>; esta separação não pode ser entregue.</div>
 <% end %>
-<section class="panel" aria-labelledby="h-conferencia">
-  <h2 id="h-conferencia">Separação e conferência</h2>
-  <% if open %>
-    <p class="muted">Informe o patrimônio lido em cada ativo. Outra unidade livre do mesmo produto pode substituir a alocada; para estoque, informe a quantidade conferida.</p>
-  <% end %>
-  <form method="post" action="/operacao/retiradas/<%= p.id %>/conferir">
-    <%= csrf_field %>
-    <table class="table">
-      <thead><tr><th scope="col">Item</th><th scope="col">Alocado</th><th scope="col">Situação</th><th scope="col">Conferência</th></tr></thead>
-      <tbody>
-        <% @data[:lines].each do |l| %>
-          <tr>
-            <td><%= l["product_name"] %> <span class="muted"><%= l["sku"] %></span></td>
-            <td><%= l["asset_id"] ? l["allocated_tag"] : "#{l["expected_quantity"]} un." %></td>
-            <td><%= status_badge(l["status"], statuses.fetch(l["status"])) %>
-              <% if l["release_reason"] %><br><span class="muted"><%= l["release_reason"] %></span><% end %></td>
-            <td>
-              <% if open && %w[pending checked].include?(l["status"]) %>
-                <% if l["asset_id"] %>
-                  <label for="pat-<%= l["id"] %>" class="sr-only">Patrimônio conferido para <%= l["product_name"] %></label>
-                  <input id="pat-<%= l["id"] %>" name="patrimonio[<%= l["id"] %>]" autocomplete="off" placeholder="Patrimônio"
-                         value="<%= keyed_value(@values, "patrimonio", l["id"]) || (l["status"] == "checked" ? l["tag"] : "") %>">
-                <% else %>
-                  <label for="qtd-<%= l["id"] %>" class="sr-only">Quantidade conferida de <%= l["product_name"] %></label>
-                  <input id="qtd-<%= l["id"] %>" name="quantidade[<%= l["id"] %>]" type="number" min="0" max="<%= l["expected_quantity"] %>"
-                         value="<%= keyed_value(@values, "quantidade", l["id"]) || (l["status"] == "checked" ? l["checked_quantity"] : "") %>">
-                <% end %>
-              <% elsif l["delivered_quantity"].positive? %>
-                <%= l["asset_id"] ? l["tag"] : "#{l["delivered_quantity"]} un. entregues" %>
-              <% else %>
-                —
-              <% end %>
-            </td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
-    <% if open %><button type="submit">Registrar conferência</button><% end %>
-  </form>
-</section>
-<% if open %>
-  <section class="panel" aria-labelledby="h-entrega">
-    <h2 id="h-entrega">Entrega</h2>
-    <form method="post" action="/operacao/retiradas/<%= p.id %>/entregar" class="stack">
-      <%= csrf_field %>
-      <fieldset>
-        <legend>Quem está retirando</legend>
-        <% if c.kind == "individual" %>
-          <label class="radio"><input type="radio" name="retirante" value="cliente" checked> <%= c.name %> (cliente, CPF <%= c.formatted_document %>)</label>
-        <% end %>
-        <% @data[:pickers].each do |contact| %>
-          <label class="radio"><input type="radio" name="retirante" value="<%= contact.id %>"> <%= contact.name %> (contato autorizado, CPF <%= Locentra::Domain::Customers::Document.format(contact.document) %>)</label>
-        <% end %>
-        <% if c.kind != "individual" && @data[:pickers].empty? %>
-          <p class="empty">Nenhum contato autorizado a retirar. <a href="/clientes/<%= c.id %>">Cadastre um contato com CPF</a> antes da entrega.</p>
-        <% end %>
-      </fieldset>
-      <label for="observacoes">Observações da entrega</label>
-      <textarea id="observacoes" name="observacoes" rows="2" maxlength="1000"></textarea>
-      <p class="muted">Somente itens conferidos são entregues. Itens não conferidos têm a alocação liberada e ficam registrados como não entregues.</p>
-      <button type="submit" class="primary">Registrar entrega</button>
-    </form>
-    <details>
-      <summary>Cancelar separação</summary>
-      <form method="post" action="/operacao/retiradas/<%= p.id %>/cancelar" class="stack" data-confirm="Cancelar a separação? A reserva continua confirmada.">
+<div class="detail-layout">
+  <div class="detail-main">
+    <section class="panel" aria-labelledby="h-conferencia">
+      <div class="panel-header">
+        <h2 id="h-conferencia">Separação e conferência <span class="count<%= " count-warning" if open && checked < lines.size %>"><%= checked %>/<%= lines.size %></span></h2>
+      </div>
+      <% if open %>
+        <p class="muted">Informe o patrimônio lido em cada ativo. Outra unidade livre do mesmo produto pode substituir a alocada; para estoque, informe a quantidade conferida.</p>
+      <% end %>
+      <form method="post" action="/operacao/retiradas/<%= p.id %>/conferir">
         <%= csrf_field %>
-        <label for="motivo">Motivo</label><input id="motivo" name="motivo" required maxlength="500">
-        <button type="submit" class="danger">Cancelar separação</button>
+        <div class="table-scroll">
+          <table class="table">
+            <thead><tr><th scope="col">Item</th><th scope="col">Alocado</th><th scope="col">Conferência</th></tr></thead>
+            <tbody>
+              <% lines.each do |l| %>
+                <tr>
+                  <td><strong><%= l["product_name"] %></strong> <span class="muted mono"><%= l["sku"] %></span>
+                    <span class="cell-sub"><%= status_badge(l["status"], statuses.fetch(l["status"])) %></span>
+                    <% if l["release_reason"] %><span class="cell-sub"><%= l["release_reason"] %></span><% end %></td>
+                  <td><% if l["asset_id"] %><span class="mono"><%= l["allocated_tag"] %></span><% else %><%= l["expected_quantity"] %> un.<% end %></td>
+                  <td>
+                    <% if open && %w[pending checked].include?(l["status"]) %>
+                      <% if l["asset_id"] %>
+                        <label for="pat-<%= l["id"] %>" class="sr-only">Patrimônio conferido para <%= l["product_name"] %></label>
+                        <input id="pat-<%= l["id"] %>" name="patrimonio[<%= l["id"] %>]" autocomplete="off" placeholder="Patrimônio"
+                               value="<%= keyed_value(@values, "patrimonio", l["id"]) || (l["status"] == "checked" ? l["tag"] : "") %>">
+                      <% else %>
+                        <label for="qtd-<%= l["id"] %>" class="sr-only">Quantidade conferida de <%= l["product_name"] %></label>
+                        <input id="qtd-<%= l["id"] %>" name="quantidade[<%= l["id"] %>]" type="number" min="0" max="<%= l["expected_quantity"] %>"
+                               value="<%= keyed_value(@values, "quantidade", l["id"]) || (l["status"] == "checked" ? l["checked_quantity"] : "") %>">
+                      <% end %>
+                    <% elsif l["delivered_quantity"].positive? %>
+                      <%= l["asset_id"] ? l["tag"] : "#{l["delivered_quantity"]} un. entregues" %>
+                    <% else %>
+                      —
+                    <% end %>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+        <% if open %><div class="action-row"><button type="submit">Registrar conferência</button></div><% end %>
       </form>
-    </details>
-  </section>
-<% end %>
-<% if p.delivered? && can?("fulfillment.write") && r.status == "in_progress" %>
-  <p><a class="button" href="/operacao/reservas/<%= r.id %>/devolucao">Registrar devolução</a></p>
-<% end %>
+    </section>
+  </div>
+  <aside class="detail-aside">
+    <% if open %>
+      <section class="panel" aria-labelledby="h-entrega">
+        <h2 id="h-entrega">Entrega</h2>
+        <form method="post" action="/operacao/retiradas/<%= p.id %>/entregar" class="stack">
+          <%= csrf_field %>
+          <fieldset>
+            <legend>Quem está retirando</legend>
+            <% if c.kind == "individual" %>
+              <label class="radio"><input type="radio" name="retirante" value="cliente" checked> <%= c.name %> (cliente, CPF <%= c.formatted_document %>)</label>
+            <% end %>
+            <% @data[:pickers].each do |contact| %>
+              <label class="radio"><input type="radio" name="retirante" value="<%= contact.id %>"> <%= contact.name %> (contato autorizado, CPF <%= Locentra::Domain::Customers::Document.format(contact.document) %>)</label>
+            <% end %>
+            <% if c.kind != "individual" && @data[:pickers].empty? %>
+              <p class="empty"><span>Nenhum contato autorizado a retirar. <a href="/clientes/<%= c.id %>">Cadastre um contato com CPF</a> antes da entrega.</span></p>
+            <% end %>
+          </fieldset>
+          <label for="observacoes">Observações da entrega</label>
+          <textarea id="observacoes" name="observacoes" rows="2" maxlength="1000"></textarea>
+          <p class="muted small">Somente itens conferidos são entregues. Itens não conferidos têm a alocação liberada e ficam registrados como não entregues.</p>
+          <button type="submit" class="primary">Registrar entrega</button>
+        </form>
+        <details>
+          <summary>Cancelar separação</summary>
+          <form method="post" action="/operacao/retiradas/<%= p.id %>/cancelar" class="stack" data-confirm="Cancelar a separação? A reserva continua confirmada.">
+            <%= csrf_field %>
+            <label for="motivo">Motivo</label><input id="motivo" name="motivo" required maxlength="500">
+            <button type="submit" class="danger">Cancelar separação</button>
+          </form>
+        </details>
+      </section>
+    <% end %>
+    <section class="panel" aria-labelledby="h-resumo">
+      <h2 id="h-resumo">Resumo</h2>
+      <dl class="details">
+        <dt>Reserva</dt><dd><a href="/reservas/<%= r.id %>"><%= r.code %></a></dd>
+        <dt>Situação da reserva</dt><dd><%= status_badge(r.status, r.status_label) %></dd>
+        <dt>Retirada prevista</dt><dd><%= datetime(r.period.starts_at) %></dd>
+        <dt>Devolução prevista</dt><dd><%= datetime(r.period.ends_at) %></dd>
+        <dt>Itens conferidos</dt><dd><%= checked %> de <%= lines.size %></dd>
+      </dl>
+    </section>
+  </aside>
+</div>

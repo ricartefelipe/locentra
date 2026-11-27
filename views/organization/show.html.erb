@@ -3,32 +3,49 @@
 <% policy = Locentra::Domain::Organizations::CancellationPolicy -%>
 <% manage = can?("organization.manage") -%>
 <% values = @values || {} -%>
-<header class="page-header"><h1><%= org.name %></h1><p class="muted">Identificador: <code><%= org.slug %></code></p></header>
+<% branches = @data[:branches] -%>
+<% active_branches = branches.count(&:active) -%>
+<header class="page-header">
+  <div>
+    <h1><%= org.name %></h1>
+    <p class="page-meta"><span>Identificador <code><%= org.slug %></code></span><span><%= count_text(active_branches, "filial ativa", "filiais ativas") %></span></p>
+  </div>
+  <% if manage -%>
+    <div class="actions"><a class="button primary" href="/organizacao/configuracoes">Editar configurações</a></div>
+  <% end -%>
+</header>
 <%= partial("shared/errors") %>
 <div class="grid-2">
   <section class="panel" aria-labelledby="organizacao-configuracoes">
     <h2 id="organizacao-configuracoes">Configurações</h2>
     <dl class="details">
       <dt>Nome</dt><dd><%= org.name %></dd>
-      <dt>Fuso horário</dt><dd><%= Locentra::Domain::Organizations::Settings.zone_label(org.timezone) %> <span class="muted">(<code><%= org.timezone %></code>)</span></dd>
-      <dt>Validade padrão do bloqueio temporário</dt><dd><%= org.hold_minutes %> minutos<%= org.default_hold_minutes? ? " (padrão)" : "" %></dd>
-      <dt>Política de cancelamento<%= org.default_cancellation_policy? ? " (padrão)" : "" %></dt>
-      <dd><ul class="row-list"><% policy.describe(org.cancellation_policy).each do |line| %><li><%= line %></li><% end %></ul></dd>
+      <dt>Fuso horário</dt><dd><%= Locentra::Domain::Organizations::Settings.zone_label(org.timezone) %><span class="cell-sub mono"><%= org.timezone %></span></dd>
+      <dt>Validade do bloqueio</dt><dd><%= org.hold_minutes %> minutos<%= org.default_hold_minutes? ? " (padrão)" : "" %></dd>
     </dl>
-    <% if manage %><p><a href="/organizacao/configuracoes">Editar configurações</a></p><% end -%>
+    <h3>Política de cancelamento<%= org.default_cancellation_policy? ? " (padrão)" : "" %></h3>
+    <ul class="row-list"><% policy.describe(org.cancellation_policy).each do |line| %><li><%= line %></li><% end %></ul>
   </section>
   <% if manage -%>
     <section class="panel" aria-labelledby="organizacao-assinatura">
-      <h2 id="organizacao-assinatura">Assinatura Locentra</h2>
+      <div class="panel-header">
+        <h2 id="organizacao-assinatura">Assinatura Locentra</h2>
+        <% if sub -%>
+          <% sub_tone = { "trialing" => "info", "active" => "success", "past_due" => "warning", "suspended" => "danger" }.fetch(sub["status"], "muted") -%>
+          <%= badge(label(:subscription_status, sub["status"]), sub_tone) %>
+        <% end -%>
+      </div>
       <% if sub -%>
         <dl class="details">
-          <dt>Plano</dt><dd><%= sub["plan_name"] %> — <%= money(sub["monthly_price_cents"]) %>/mês</dd>
-          <dt>Situação</dt><dd><%= label(:subscription_status, sub["status"]) %><%= sub["trial_ends_at"] ? " (avaliação até #{date(sub["trial_ends_at"])})" : "" %></dd>
-          <dt>Período</dt><dd><%= date(sub["current_period_start"]) %> a <%= date(sub["current_period_end"]) %></dd>
-          <dt>Limites</dt><dd><%= sub["max_assets"] || "∞" %> ativos · <%= sub["max_branches"] || "∞" %> filiais ativas · <%= sub["max_users"] || "∞" %> usuários</dd>
-          <dt>Funcionalidades</dt><dd><%= Array(sub["features"]).empty? ? "básicas" : Array(sub["features"]).join(", ") %></dd>
+          <dt>Plano</dt><dd><strong><%= sub["plan_name"] %></strong> <span class="muted">· <%= money(sub["monthly_price_cents"]) %>/mês</span></dd>
+          <% if sub["trial_ends_at"] -%><dt>Avaliação até</dt><dd><%= date(sub["trial_ends_at"]) %></dd><% end -%>
+          <dt>Período atual</dt><dd><%= date(sub["current_period_start"]) %> a <%= date(sub["current_period_end"]) %></dd>
+          <dt>Ativos</dt><dd><%= sub["max_assets"] ? "até #{sub["max_assets"]}" : "ilimitados" %></dd>
+          <dt>Filiais ativas</dt><dd><%= sub["max_branches"] ? "até #{sub["max_branches"]}" : "ilimitadas" %></dd>
+          <dt>Usuários</dt><dd><%= sub["max_users"] ? "até #{sub["max_users"]}" : "ilimitados" %></dd>
+          <dt>Funcionalidades</dt><dd><% if Array(sub["features"]).empty? %>básicas<% else %><% Array(sub["features"]).each do |feature| %><%= badge(feature, "neutral") %> <% end %><% end %></dd>
         </dl>
-        <p class="muted">A assinatura da organização na plataforma é independente dos contratos de locação com clientes.</p>
+        <p class="muted small">A assinatura da organização na plataforma é independente dos contratos de locação com clientes.</p>
       <% else -%>
         <p class="empty">Sem assinatura registrada.</p>
       <% end -%>
@@ -36,36 +53,40 @@
   <% end -%>
 </div>
 <section class="panel" aria-labelledby="organizacao-filiais">
-  <h2 id="organizacao-filiais">Filiais</h2>
+  <div class="panel-header">
+    <h2 id="organizacao-filiais">Filiais <span class="count"><%= branches.size %></span></h2>
+  </div>
   <div class="table-scroll">
     <table class="table">
       <caption class="sr-only">Filiais da organização</caption>
-      <thead><tr><th scope="col">Código</th><th scope="col">Nome</th><th scope="col">Endereço</th><th scope="col">Situação</th><th scope="col">Detalhes</th></tr></thead>
+      <thead><tr><th scope="col">Código</th><th scope="col">Nome</th><th scope="col">Endereço</th><th scope="col">Situação</th><th scope="col"><span class="sr-only">Detalhes</span></th></tr></thead>
       <tbody>
-        <% @data[:branches].each do |b| -%>
+        <% branches.each do |b| -%>
           <tr>
             <td><code><%= b.code %></code></td>
-            <td><%= b.name %></td>
-            <td><%= b.address || "—" %></td>
+            <td><a href="/organizacao/filiais/<%= b.id %>"><%= b.name %></a></td>
+            <td class="muted"><%= b.address || "—" %></td>
             <td><%= b.active ? status_badge("active", "Ativa") : status_badge("inactive", "Inativa desde #{date(b.deactivated_at)}") %></td>
-            <td><a href="/organizacao/filiais/<%= b.id %>">Detalhes<span class="sr-only"> da filial <%= b.code %></span></a></td>
+            <td class="num"><a class="button small ghost" href="/organizacao/filiais/<%= b.id %>">Detalhes<span class="sr-only"> da filial <%= b.code %></span></a></td>
           </tr>
         <% end -%>
       </tbody>
     </table>
   </div>
-  <% if manage -%>
-    <h3 id="nova-filial">Nova filial</h3>
+</section>
+<% if manage -%>
+  <section class="panel" aria-labelledby="nova-filial">
+    <h2 id="nova-filial">Nova filial</h2>
     <form method="post" action="/organizacao/filiais" class="form-grid" aria-labelledby="nova-filial">
       <%= csrf_field %>
       <div><label for="nome">Nome</label>
         <input id="nome" name="nome" required maxlength="120" value="<%= values["nome"] %>"<%= invalid(@errors, "nome") %>><%= field_errors(@errors, "nome") %></div>
       <div><label for="codigo">Código</label>
         <input id="codigo" name="codigo" required maxlength="12" autocapitalize="characters" value="<%= values["codigo"] %>"<%= invalid(@errors, "codigo", describedby: "ajuda-codigo") %>>
-        <p class="muted" id="ajuda-codigo">Até 12 letras, números ou hífen. O código não muda depois de criado.</p><%= field_errors(@errors, "codigo") %></div>
+        <p class="muted small" id="ajuda-codigo">Até 12 letras, números ou hífen. O código não muda depois de criado.</p><%= field_errors(@errors, "codigo") %></div>
       <div class="full"><label for="endereco">Endereço</label>
         <input id="endereco" name="endereco" maxlength="300" value="<%= values["endereco"] %>"<%= invalid(@errors, "endereco") %>><%= field_errors(@errors, "endereco") %></div>
-      <div class="full"><button type="submit">Criar filial</button></div>
+      <div class="full actions"><button type="submit" class="primary">Criar filial</button></div>
     </form>
-  <% end -%>
-</section>
+  </section>
+<% end -%>

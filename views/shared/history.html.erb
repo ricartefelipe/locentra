@@ -1,11 +1,12 @@
 <%# Eventos de auditoria de um cadastro. Locais: history. Alterações (`changes`) citam os campos alterados. %>
+<%# Cada evento: ação em destaque (com os campos alterados logo após o </strong>) e, abaixo, autor e horário. %>
 <% if @history.empty? %><p class="empty">Sem eventos.</p><% else %>
   <ol class="timeline">
     <% @history.each do |event| %>
       <% changes = event["details"].is_a?(Hash) ? event["details"]["changes"] : nil %>
-      <li><time><%= datetime(event["occurred_at"]) %></time> <strong><%= label(:audit_action, event["action"]) %></strong>
+      <li><strong><%= label(:audit_action, event["action"]) %></strong>
         <% if changes.is_a?(Hash) && !changes.empty? %>(<%= changes.keys.map { |field| label(:changed_field, field) }.join(", ") %>)<% end %>
-        <span class="muted"><%= event["actor_name"] || label(:actor_type, event["actor_type"]) %></span></li>
+        <span class="page-meta"><% if event["actor_name"] %><span><%= event["actor_name"] %></span><% else %><%= badge(label(:actor_type, event["actor_type"]), "muted") %><% end %><time><%= datetime(event["occurred_at"]) %></time></span></li>
     <% end %>
   </ol>
 <% end %>

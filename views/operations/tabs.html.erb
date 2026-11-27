@@ -1,0 +1,9 @@
+<% counts = @counts || {} %>
+<% tabs = [["Retiradas e devoluções", "/operacao", true], ["Inspeções", "/operacao/inspecoes", true], ["Avarias e faltas", "/operacao/avarias", true],
+           ["Transferências", "/transferencias", true], ["Manutenção", "/manutencao", can?("maintenance.write") || @current == "/manutencao"]] %>
+<nav class="tabs" aria-label="Áreas da operação">
+  <% tabs.each do |label, path, visible| %>
+    <% next unless visible %>
+    <a href="<%= path %>"<%= raw(' aria-current="page"') if path == @current %>><%= label %><% if counts[path].to_i.positive? %> <span class="count count-warning"><%= counts[path] %></span><% end %></a>
+  <% end %>
+</nav>

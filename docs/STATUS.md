@@ -78,6 +78,7 @@ restauração e `bin/setup` exercitados com 14 migrations; 7 checks de CI aprova
 | #16 | Configurações da organização, política congelada na reserva e no orçamento, fuso de referência da reserva, gestão de filiais, API, CLI e migration 0016 | Integrado e testado; versão 1.2.0 |
 | #19 | Limite de execuções simultâneas por organização na fila de webhooks, pausa automática de endpoints com entregas retidas e reativação pela tela, retenção do histórico de integrações por organização, métricas e migration 0017 (ADR-029) | Integrado e testado; versão 1.3.0 |
 | #23 | Confirmação de e-mail obrigatória: ações para fora em nome da organização bloqueadas até a confirmação, conta somente leitura depois de 7 dias, aviso com reenvio, `403` `email_unconfirmed` na API por sessão, confirmação no aceite de convites e migration 0018 (ADR-031) | Integrado e testado; versão 1.4.0 (ver acima) |
+| #27 | Nova interface: sistema visual, casca agrupada, telas redesenhadas, tema escuro e rótulos de auditoria em português (ADR-032) | Integrado e testado; versão 1.5.0 (`test:all` 1134 testes e `test:browser` 17 testes sem falhas, rubocop sem ofensas e CI completa com SonarCloud, em 27/11/2026) |
 | #20 | API v1 ampliada: orçamentos, contratos e PDF, retirada, devolução, inspeções, alertas e `PATCH /organization/settings` por sessão, com composição transacional dos casos de uso e contrato OpenAPI conferido nos testes (ADR-030) | Integrado e testado; versão 1.3.0 |
 
 ## Casos obrigatórios cobertos por testes

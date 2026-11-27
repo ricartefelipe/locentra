@@ -3,6 +3,7 @@
   <% if @memberships.empty? %>
     <p class="empty">Sua conta não possui acesso ativo a nenhuma organização. Solicite um convite ao administrador.</p>
   <% else %>
+    <p class="muted">Escolha onde deseja trabalhar agora. Você pode trocar depois pelo menu lateral.</p>
     <ul class="choice-list">
       <% @memberships.each do |m| %>
         <li>
@@ -10,7 +11,7 @@
             <%= csrf_field %>
             <input type="hidden" name="organizacao_id" value="<%= m["organization_id"] %>">
             <input type="hidden" name="tipo" value="<%= m["kind"] %>">
-            <button type="submit" class="choice">
+            <button class="choice">
               <strong><%= m["name"] %></strong>
               <span class="muted"><%= m["kind"] == "portal" ? "Portal do cliente" : Locentra::Domain::Identity.role_label(m["role"]) %></span>
             </button>
@@ -19,5 +20,5 @@
       <% end %>
     </ul>
   <% end %>
-  <form method="post" action="/sair"><%= csrf_field %><button type="submit" class="link-button">Sair</button></form>
+  <form method="post" action="/sair" class="links"><%= csrf_field %><button type="submit" class="link-button">Sair</button></form>
 </section>

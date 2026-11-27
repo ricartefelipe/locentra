@@ -1,9 +1,20 @@
+<% statuses = Locentra::Domain::Reservations::STATUSES %>
+<% today = datetime(@data[:now], "%d/%m") %>
+<% tomorrow = datetime(@data[:now] + 86_400, "%d/%m") %>
 <% if @rows.empty? %>
   <p class="empty"><%= @empty %></p>
 <% else %>
-  <ul class="row-list">
+  <ul class="agenda">
     <% @rows.each do |row| %>
-      <li><a href="/reservas/<%= row["id"] %>"><strong><%= row["code"] %></strong></a> · <%= row["customer_name"] %> · <%= datetime(row[@column.to_s]) %></li>
+      <% at = row[@column.to_s] %>
+      <% day = datetime(at, "%d/%m") %>
+      <li>
+        <a class="agenda-row" href="/reservas/<%= row["id"] %>">
+          <span class="agenda-when"><strong><time><%= datetime(at, "%H:%M") %></time></strong><span><%= day == today ? "Hoje" : (day == tomorrow ? "Amanhã" : day) %></span></span>
+          <span class="agenda-main"><strong><%= row["code"] %></strong><span class="muted"><%= row["customer_name"] %></span></span>
+          <span class="agenda-side"><% if @late %><%= badge("Em atraso", "danger") %><% else %><%= status_badge(row["status"], statuses.fetch(row["status"], row["status"])) %><% end %></span>
+        </a>
+      </li>
     <% end %>
   </ul>
 <% end %>

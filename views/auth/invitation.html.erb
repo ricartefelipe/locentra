@@ -1,18 +1,21 @@
 <section class="panel narrow" aria-labelledby="titulo-convite">
   <h1 id="titulo-convite">Aceitar convite</h1>
+  <p class="muted">Você foi convidado para a equipe de uma locadora no Locentra.</p>
   <%= partial("shared/errors") %>
   <form method="post" action="/convites" class="stack">
     <input type="hidden" name="token" value="<%= @token %>">
     <% if request.session %>
       <%= csrf_field %>
-      <p>Você está conectado. O convite será vinculado à sua conta atual se o e-mail corresponder.</p>
+      <p class="notice">Você está conectado. O convite será vinculado à sua conta atual se o e-mail corresponder.</p>
     <% else %>
       <label for="nome">Seu nome</label>
-      <input id="nome" name="nome" required maxlength="120">
+      <input id="nome" name="nome" required maxlength="120" autocomplete="name">
       <label for="senha">Senha (mínimo 12 caracteres)</label>
       <input id="senha" name="senha" type="password" autocomplete="new-password" required minlength="12">
-      <p class="muted">Já possui conta com este e-mail? <a href="/entrar?voltar=<%= u("/convites?token=#{@token}") %>">Entre primeiro</a>.</p>
     <% end %>
     <button type="submit" class="primary">Aceitar convite</button>
   </form>
+  <% unless request.session %>
+    <p class="links">Já possui conta com este e-mail? <a href="/entrar?voltar=<%= u("/convites?token=#{@token}") %>">Entre primeiro</a>.</p>
+  <% end %>
 </section>

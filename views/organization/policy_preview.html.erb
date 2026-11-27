@@ -1,13 +1,14 @@
 <%# Pré-visualização da política, da validade padrão do bloqueio e, na troca de fuso, do horário atual nos dois fusos. Locais: preview, data. %>
 <% policy = Locentra::Domain::Organizations::CancellationPolicy -%>
 <% comparison = @preview[:comparison] -%>
-<section id="previa-politica" class="notice" aria-live="polite" aria-labelledby="previa-titulo">
+<section id="previa-politica" class="panel" aria-live="polite" aria-labelledby="previa-titulo">
   <h2 id="previa-titulo">Pré-visualização</h2>
-  <ul>
+  <ul class="row-list">
     <% policy.describe(@preview[:policy]).each do |line| %><li><%= line %></li><% end %>
   </ul>
+  <p class="muted small" aria-hidden="true">Exemplo sobre um contrato de <%= money(100_000) %></p>
   <table class="table">
-    <caption>Exemplo sobre um contrato de <%= money(100_000) %></caption>
+    <caption class="sr-only">Exemplo sobre um contrato de <%= money(100_000) %></caption>
     <thead><tr><th scope="col">Antecedência</th><th scope="col" class="num">Multa</th><th scope="col" class="num">Valor</th></tr></thead>
     <tbody>
       <% policy.examples(@preview[:policy]).each do |example| -%>
@@ -16,8 +17,8 @@
     </tbody>
   </table>
   <% if comparison -%>
-    <p>Agora: <%= comparison[:from].format_local(@data[:now]) %> em <%= comparison[:from].identifier %> → <%= comparison[:to].format_local(@data[:now]) %> em <%= comparison[:to].identifier %></p>
-    <% unless comparison[:confirmed] %><p><strong>Para salvar, marque a confirmação da troca do fuso horário.</strong></p><% end -%>
+    <p class="notice">Agora: <%= comparison[:from].format_local(@data[:now]) %> em <%= comparison[:from].identifier %> → <%= comparison[:to].format_local(@data[:now]) %> em <%= comparison[:to].identifier %></p>
+    <% unless comparison[:confirmed] %><p class="notice notice-danger"><strong>Para salvar, marque a confirmação da troca do fuso horário.</strong></p><% end -%>
   <% end -%>
-  <p>Bloqueios criados sem validade informada vencem em <%= @preview[:hold_minutes] %> minutos.</p>
+  <p class="muted small">Bloqueios criados sem validade informada vencem em <%= @preview[:hold_minutes] %> minutos.</p>
 </section>

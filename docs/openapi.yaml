@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Locentra API
-  version: "1.4"
+  version: "1.5"
   description: |
     API versionada do Locentra. Autenticação por credencial de integração (`Authorization: Bearer lcn_...`)
     com escopos por permissão. O tenant é determinado pela credencial, nunca por parâmetros.
